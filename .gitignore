@@ -1,0 +1,77 @@
+# ── Node / Frontend ──────────────────────────────────────────
+node_modules/
+build/
+dist/
+dist-ssr/
+coverage/
+*.tsbuildinfo
+.vite/
+.eslintcache
+
+# ── Environment / Secrets ────────────────────────────────────
+.env*
+!.env.example
+!**/.env.example
+
+# ── Certificates & Keys ──────────────────────────────────────
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+*.cer
+
+# ── Editor & IDE ─────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# ── Visual Studio ────────────────────────────────────────────
+.vs/
+*.user
+*.suo
+*.orig
+*.aps
+
+# ── .NET build outputs ───────────────────────────────────────
+**/bin/
+**/obj/
+**/TestResults/
+**/publish/
+
+# ── NuGet ────────────────────────────────────────────────────
+.nuget/
+packages/
+*.nupkg
+*.snupkg
+
+# ── Docker ───────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ── Logs & crash reports ─────────────────────────────────────
+*.log
+crash.log
+crash.*.log
+
+# ── Temp & backup files ──────────────────────────────────────
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# ── Windows OS files ─────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ── Local configuration and secrets ──────────────────────────
+PoolSense.Api/appsettings.json
+PoolSense.Api/appsettings.Development.json
+**/appsettings.Local.json
+**/appsettings.*.local.json
+secrets.json
+PoolSense.UI/.env.local
+PoolSense.UI/.env.*.local

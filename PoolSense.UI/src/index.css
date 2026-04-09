@@ -1,0 +1,150 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --page-bg: #dfe8f3;
+  --ink: #31485f;
+  --heading-text: #14283c;
+  --muted: #64778c;
+  --border: rgba(53, 78, 106, 0.16);
+  --panel-subtle: #edf3fa;
+  --ui-font: 'Manrope', 'Aptos', 'Segoe UI Variable', 'Segoe UI', Tahoma, sans-serif;
+  --mono-font: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+
+  /* component-level tokens used for dark mode overrides */
+  --panel-bg: rgba(248, 251, 255, 0.78);
+  --bubble-bg: rgba(255, 255, 255, 0.86);
+  --banner-bg: rgba(226, 238, 250, 0.95);
+  --banner-color: #1d4f7a;
+  --user-bubble-bg: linear-gradient(180deg, #edf5ff, #dbe8f9);
+  --prompt-chip-bg: linear-gradient(180deg, rgba(249, 252, 255, 0.96), rgba(230, 239, 249, 0.96));
+  --tag-bg: #e7eff8;
+  --tag-color: #234d78;
+  --chip-border: rgba(68, 97, 130, 0.22);
+  --chip-bg: rgba(249, 252, 255, 0.92);
+  --chip-hover-bg: rgba(230, 239, 249, 0.96);
+  --track-bg: rgba(53, 78, 106, 0.12);
+  --telemetry-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(231, 239, 248, 0.55));
+  --error-bg: #e6eefb;
+  --error-color: #244d81;
+  --insight-divider: rgba(53, 78, 106, 0.08);
+  --toggle-bg: rgba(226, 238, 250, 0.95);
+  --toggle-color: #1d4f7a;
+  --toggle-hover-bg: rgba(209, 225, 246, 0.98);
+
+  font: 16px/1.5 var(--ui-font);
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(233, 244, 255, 0.95), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(206, 220, 239, 0.8), transparent 30%),
+    linear-gradient(180deg, #edf4fb 0%, #d6e1ee 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+[data-theme='dark'] {
+  --page-bg: #0e1720;
+  --ink: #c4d4e4;
+  --heading-text: #e6f0f8;
+  --muted: #7090b0;
+  --border: rgba(100, 150, 200, 0.18);
+  --panel-subtle: #18283a;
+  --panel-bg: rgba(16, 28, 44, 0.88);
+  --bubble-bg: rgba(18, 32, 50, 0.92);
+  --banner-bg: rgba(22, 42, 66, 0.95);
+  --banner-color: #7ab0e0;
+  --user-bubble-bg: linear-gradient(180deg, #1c3050, #142540);
+  --prompt-chip-bg: linear-gradient(180deg, rgba(22, 38, 58, 0.96), rgba(16, 30, 50, 0.96));
+  --tag-bg: #1a3050;
+  --tag-color: #7ab0e0;
+  --chip-border: rgba(80, 130, 180, 0.22);
+  --chip-bg: rgba(18, 34, 54, 0.92);
+  --chip-hover-bg: rgba(25, 45, 70, 0.96);
+  --track-bg: rgba(100, 150, 200, 0.15);
+  --telemetry-bg: linear-gradient(180deg, rgba(20, 35, 55, 0.55), rgba(12, 24, 40, 0.55));
+  --error-bg: #1a2f4a;
+  --error-color: #88b8ec;
+  --insight-divider: rgba(100, 150, 200, 0.1);
+  --toggle-bg: rgba(22, 42, 66, 0.95);
+  --toggle-color: #c4d4e4;
+  --toggle-hover-bg: rgba(30, 55, 85, 0.98);
+
+  background:
+    radial-gradient(circle at top left, rgba(18, 36, 58, 0.95), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(8, 18, 32, 0.8), transparent 30%),
+    linear-gradient(180deg, #111e2d 0%, #0b1520 100%);
+}
+
+[data-theme='dark'] body {
+  background: #0e1720;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--page-bg);
+  font-family: var(--ui-font);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  font-family: inherit;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--ui-font);
+  color: var(--heading-text);
+  line-height: 1.02;
+  letter-spacing: -0.04em;
+}
+
+h1 {
+  font-size: clamp(2.5rem, 4.2vw, 3.85rem);
+  font-weight: 800;
+  margin-bottom: 0.65rem;
+}
+
+h2 {
+  font-size: clamp(1.45rem, 2vw, 2rem);
+  font-weight: 750;
+}
+
+h3 {
+  font-size: 0.98rem;
+  font-weight: 700;
+  margin-bottom: 0.45rem;
+  letter-spacing: -0.02em;
+}
+
+p,
+li,
+label,
+span {
+  font-family: var(--ui-font);
+}

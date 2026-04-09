@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include=".env.example" />
+    <None Include="eslint.config.js" />
+    <None Include="index.html" />
+    <None Include="package-lock.json" />
+    <None Include="package.json" />
+    <None Include="README.md" />
+    <None Include="tsconfig.app.json" />
+    <None Include="tsconfig.json" />
+    <None Include="tsconfig.node.json" />
+    <None Include="vite.config.ts" />
+    <None Include="public\**\*" />
+    <None Include="src\**\*" />
+  </ItemGroup>
+
+  <Target Name="RestoreFrontendDependencies"
+          BeforeTargets="Build"
+          Condition="'$(DesignTimeBuild)' != 'true' and !Exists('$(MSBuildProjectDirectory)\node_modules')">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="npm ci" />
+  </Target>
+
+  <Target Name="BuildFrontend"
+          BeforeTargets="Build"
+          DependsOnTargets="RestoreFrontendDependencies"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="npm run build" />
+  </Target>
+
+</Project>

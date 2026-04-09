@@ -1,0 +1,6 @@
+@PoolSense.Api_HostAddress = http://localhost:5217
+
+GET {{PoolSense.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

@@ -1,0 +1,11 @@
+Analyze the following support ticket and extract structured information.
+
+Ticket Title: {{$title}}
+Ticket Description: {{$description}}
+
+Return the analysis strictly in the following JSON format:
+{
+  "problemSummary": "A concise summary of the problem",
+  "suspectedComponent": "The part of the pool system likely causing the issue (e.g., Pump, Filter, Heater, Chemistry)",
+  "keywords": ["keyword1", "keyword2", "..."]
+}
