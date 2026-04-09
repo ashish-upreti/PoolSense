@@ -53,7 +53,7 @@ export default function ChatPanel({ messages, isLoading, error, onSend, groupSel
       <header className="workspace-header">
         <div>
           <p className="panel-kicker">FSMS</p>
-          <h1>Incident workspace</h1>
+          <h1>PoolSense</h1>
           <p className="workspace-copy">
             Detect. Diagnose. Resolve.
           </p>

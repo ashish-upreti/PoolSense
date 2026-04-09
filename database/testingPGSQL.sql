@@ -1,6 +1,6 @@
 docker exec -it pgvector-db psql -U postgres
 
-\c poolsense
+\c poolassist
 
 -- Confirm existing knowledge records are already in scope
 SELECT application, COUNT(*) 
