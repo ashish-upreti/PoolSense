@@ -53,7 +53,8 @@ export default function ChatPanel({ messages, isLoading, error, onSend, groupSel
       <header className="workspace-header">
         <div>
           <p className="panel-kicker">FSMS</p>
-          <h1>PoolSense</h1>
+          {/* <h1>PoolSense</h1> */}
+          <h1><span style={{ color: isDark ? '#ffffff' : '#0068B5' }}>Pool</span><span style={{ color: '#00C7FD' }}>Sense</span></h1>
           <p className="workspace-copy">
             Detect. Diagnose. Resolve.
           </p>
