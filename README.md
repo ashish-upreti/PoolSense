@@ -44,6 +44,9 @@ PoolSense/
 - Automated background polling of a SQL Server ticket source for closed-ticket knowledge ingestion.
 - Email recommendation delivery for newly detected tickets.
 - Multi-project support scoped by application name and knowledge year.
+- User feedback capture from the React UI with helpful / not-helpful actions and optional comments.
+- Feedback-weighted retrieval ranking using helpfulness and outcome-usage signals.
+- Interaction logging for query text, retrieved incident metadata, confidence, and processing time.
 - Insight endpoints for failure trends, repeated systems, components, and incident timelines.
 - A React operator workspace for asking PoolSense and reviewing returned evidence.
 
@@ -89,8 +92,7 @@ Important sections:
 - `ConnectionStrings.TicketSourceSqlServer` — SQL Server connection string to the ticket source database (read-only; used by the background polling service).
 
 - `TicketAutomation`
-    - `Enabled` — set to `true` to activate the background polling service. Disabled by default in `appsettings.json`.
-    - `PollingEnabled` — secondary switch to pause polling without fully disabling the service.
+    - `PollingEnabled` — switch that controls the background polling service.
     - `SendEmail` — whether to send email recommendations for new tickets.
     - `ApplicationName` — default application scope for knowledge storage and queries.
     - `KnowledgeLookbackYears` — rolling-year window used for ingestion filtering and knowledge base queries. Set to `0` for no limit (ingest all historical tickets).
@@ -207,7 +209,7 @@ Get-Content .\database\postgres-bootstrap.sql -Raw | docker exec -i pgvector-db 
 
 ### 3. What the Script Creates
 
-The API writes to four tables:
+The API writes to six tables:
 
 - `ticket_knowledge`
     Stores enriched incident text, extracted root cause and resolution, keywords, and the embedding used for similarity search. Scoped by `application` and `knowledge_year`.
@@ -220,6 +222,12 @@ The API writes to four tables:
 
 - `project_configs`
     Stores ticket-source registration metadata for `/api/projects`.
+
+- `feedback_logs`
+    Stores UI feedback submitted for AI responses, including the original query, suggested resolution, helpful / not-helpful rating, whether the suggestion was used, optional comment text, and retrieved ticket ids.
+
+- `interaction_logs`
+    Stores AI pipeline interaction metadata such as query text, embedding length, retrieved ticket ids and summarized content, suggested resolution, confidence, and processing time.
 
 Key columns in `ticket_knowledge`:
 
@@ -273,6 +281,37 @@ CREATE TABLE IF NOT EXISTS processed_source_events (
     email_recipient text NOT NULL DEFAULT '',
     workflow_result text NOT NULL DEFAULT '',
     PRIMARY KEY (source_event_id, processing_kind)
+);
+```
+
+`feedback_logs` schema:
+
+```sql
+CREATE TABLE IF NOT EXISTS feedback_logs (
+    id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ticket_query text NOT NULL,
+    suggested_resolution text NOT NULL,
+    feedback_type integer NOT NULL,
+    was_used boolean NOT NULL DEFAULT FALSE,
+    comment text NOT NULL DEFAULT '',
+    retrieved_ticket_ids text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+`interaction_logs` schema:
+
+```sql
+CREATE TABLE IF NOT EXISTS interaction_logs (
+    id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    query text NOT NULL,
+    generated_embedding_length integer NOT NULL DEFAULT 0,
+    retrieved_ticket_ids text NOT NULL DEFAULT '',
+    retrieved_contents text NOT NULL DEFAULT '',
+    suggested_resolution text NOT NULL DEFAULT '',
+    confidence real NOT NULL DEFAULT 0,
+    processing_time_ms integer NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now()
 );
 ```
 
@@ -424,11 +463,10 @@ The React UI lets operators enter a problem statement and receive suggestions fr
 
 ### Enabling Polling
 
-Polling is **disabled by default** in `appsettings.json` (`Enabled: false`). To enable it for local testing:
+Polling is controlled by `TicketAutomation:PollingEnabled`. To enable it for local testing:
 
 ```json
 "TicketAutomation": {
-    "Enabled": true,
     "PollingEnabled": true,
     "SendEmail": false
 }

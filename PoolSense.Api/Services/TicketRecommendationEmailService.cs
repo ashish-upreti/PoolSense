@@ -10,8 +10,8 @@ namespace PoolSense.Api.Services;
 
 public interface ITicketRecommendationEmailService
 {
-    Task<bool> SendRecommendationAsync(TicketRequest ticket, TicketWorkflowResult workflowResult, CancellationToken cancellationToken = default);
-    string GetConfiguredRecipient();
+    Task<bool> SendRecommendationAsync(ProjectConfig project, TicketRequest ticket, TicketWorkflowResult workflowResult, CancellationToken cancellationToken = default);
+    string GetConfiguredRecipients(ProjectConfig project);
 }
 
 public class TicketRecommendationEmailService : ITicketRecommendationEmailService
@@ -25,17 +25,21 @@ public class TicketRecommendationEmailService : ITicketRecommendationEmailServic
         _logger = logger;
     }
 
-    public string GetConfiguredRecipient()
+    public string GetConfiguredRecipients(ProjectConfig project)
     {
-        return _settings.Email.Recipient;
+        ArgumentNullException.ThrowIfNull(project);
+        return RecommendationEmailRecipientResolver.ResolveRecipients(project, _settings.Email);
     }
 
-    public async Task<bool> SendRecommendationAsync(TicketRequest ticket, TicketWorkflowResult workflowResult, CancellationToken cancellationToken = default)
+    public async Task<bool> SendRecommendationAsync(ProjectConfig project, TicketRequest ticket, TicketWorkflowResult workflowResult, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(ticket);
         ArgumentNullException.ThrowIfNull(workflowResult);
 
-        if (string.IsNullOrWhiteSpace(_settings.Email.Recipient)
+        var recipients = RecommendationEmailRecipientResolver.ResolveRecipients(project, _settings.Email);
+
+        if (string.IsNullOrWhiteSpace(recipients)
             || string.IsNullOrWhiteSpace(_settings.Email.FromAddress)
             || string.IsNullOrWhiteSpace(_settings.Email.SmtpHost))
         {
@@ -43,12 +47,18 @@ public class TicketRecommendationEmailService : ITicketRecommendationEmailServic
             return false;
         }
 
-        using var message = new MailMessage(_settings.Email.FromAddress, _settings.Email.Recipient)
+        using var message = new MailMessage
         {
+            From = new MailAddress(_settings.Email.FromAddress),
             Subject = BuildSubject(ticket),
             Body = BuildBody(ticket, workflowResult),
             IsBodyHtml = true
         };
+
+        foreach (var recipient in RecommendationEmailRecipientResolver.SplitRecipients(recipients))
+        {
+            message.To.Add(recipient);
+        }
 
         using var client = new SmtpClient(_settings.Email.SmtpHost, _settings.Email.Port)
         {
@@ -59,7 +69,7 @@ public class TicketRecommendationEmailService : ITicketRecommendationEmailServic
 
         cancellationToken.ThrowIfCancellationRequested();
         await client.SendMailAsync(message, cancellationToken);
-        _logger.LogInformation("Sent recommendation email for source event {SourceEventId} to {Recipient}.", ticket.SourceEventId, _settings.Email.Recipient);
+        _logger.LogInformation("Sent recommendation email for source event {SourceEventId} to {Recipients}.", ticket.SourceEventId, recipients);
         return true;
     }
 
@@ -67,6 +77,35 @@ public class TicketRecommendationEmailService : ITicketRecommendationEmailServic
 
     private static string BuildBody(TicketRequest ticket, TicketWorkflowResult workflowResult) =>
         RecommendationEmailContent.BuildBody(ticket, workflowResult);
+}
+
+internal static class RecommendationEmailRecipientResolver
+{
+    internal static string ResolveRecipients(ProjectConfig project, EmailDeliverySettings emailSettings)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(emailSettings);
+
+        return string.Join(
+            ", ",
+            SplitRecipients(project.EmailRecipients)
+                .Concat(SplitRecipients(emailSettings.Recipient))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    internal static IReadOnlyList<string> SplitRecipients(string? recipients)
+    {
+        if (string.IsNullOrWhiteSpace(recipients))
+        {
+            return [];
+        }
+
+        return recipients
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(recipient => !string.IsNullOrWhiteSpace(recipient))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 }
 
 /// <summary>Shared email content builders used by both SMTP and Database Mail delivery services.</summary>

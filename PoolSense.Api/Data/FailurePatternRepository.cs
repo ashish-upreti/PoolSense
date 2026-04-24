@@ -1,7 +1,5 @@
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Options;
 using Npgsql;
-using PoolSense.Api.Configuration;
 using PoolSense.Api.Models;
 
 namespace PoolSense.Api.Data;
@@ -37,12 +35,12 @@ public sealed class SystemIncidentFrequency
 public class FailurePatternRepository : IFailurePatternRepository
 {
     private readonly IConfiguration _configuration;
-    private readonly TicketAutomationSettings _settings;
+    private readonly IProjectRepository _projectRepository;
 
-    public FailurePatternRepository(IConfiguration configuration, IOptions<TicketAutomationSettings> settings)
+    public FailurePatternRepository(IConfiguration configuration, IProjectRepository projectRepository)
     {
         _configuration = configuration;
-        _settings = settings.Value;
+        _projectRepository = projectRepository;
     }
 
     public async Task InsertFailurePattern(FailurePattern failurePattern, CancellationToken cancellationToken = default)
@@ -64,7 +62,7 @@ public class FailurePatternRepository : IFailurePatternRepository
         command.Parameters.AddWithValue("resolutionCategory", failurePattern.ResolutionCategory);
         command.Parameters.AddWithValue("ticketId", failurePattern.TicketId);
         command.Parameters.AddWithValue("sourceEventId", failurePattern.SourceEventId ?? string.Empty);
-        command.Parameters.AddWithValue("application", string.IsNullOrWhiteSpace(failurePattern.Application) ? _settings.ApplicationName : failurePattern.Application);
+        command.Parameters.AddWithValue("application", failurePattern.Application ?? string.Empty);
         command.Parameters.AddWithValue("knowledgeYear", failurePattern.KnowledgeYear > 0 ? failurePattern.KnowledgeYear : DateTime.UtcNow.Year);
         command.Parameters.AddWithValue("createdAt", failurePattern.CreatedAt == default ? DateTime.UtcNow : failurePattern.CreatedAt);
 
@@ -80,6 +78,8 @@ public class FailurePatternRepository : IFailurePatternRepository
 
         await using var connection = new NpgsqlConnection(GetConnectionString());
         await connection.OpenAsync(cancellationToken);
+
+        var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
 
         var sql = """
             SELECT id,
@@ -97,11 +97,11 @@ public class FailurePatternRepository : IFailurePatternRepository
             ORDER BY created_at DESC;
             """;
 
-        sql = ApplyScopeToWhereClause(sql, "WHERE system = @system");
+        sql = ApplyScopeToWhereClause(sql, "WHERE system = @system", scopedProjects);
 
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("system", system);
-        ApplyScopeParameters(command);
+        ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<FailurePattern>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -136,6 +136,8 @@ public class FailurePatternRepository : IFailurePatternRepository
         await using var connection = new NpgsqlConnection(GetConnectionString());
         await connection.OpenAsync(cancellationToken);
 
+        var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
+
         var sql = """
             SELECT COUNT(*)
             FROM failure_patterns
@@ -143,12 +145,12 @@ public class FailurePatternRepository : IFailurePatternRepository
               AND failure_type = @failureType
             """;
 
-        sql = ApplyScopeToWhereClause(sql, "WHERE system = @system\n              AND failure_type = @failureType");
+                sql = ApplyScopeToWhereClause(sql, "WHERE system = @system\n              AND failure_type = @failureType", scopedProjects);
 
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("system", system);
         command.Parameters.AddWithValue("failureType", failureType);
-        ApplyScopeParameters(command);
+                ApplyScopeParameters(command, scopedProjects);
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is long count ? (int)count : 0;
@@ -164,6 +166,8 @@ public class FailurePatternRepository : IFailurePatternRepository
         await using var connection = new NpgsqlConnection(GetConnectionString());
         await connection.OpenAsync(cancellationToken);
 
+        var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
+
         var sql = """
             SELECT failure_type,
                    COUNT(*) AS occurrence_count
@@ -173,11 +177,11 @@ public class FailurePatternRepository : IFailurePatternRepository
             LIMIT @limit;
             """;
 
-        sql = ApplyScopeToGroupByClause(sql);
+        sql = ApplyScopeToGroupByClause(sql, scopedProjects);
 
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("limit", limit);
-        ApplyScopeParameters(command);
+        ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<FailureTypeFrequency>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -204,6 +208,8 @@ public class FailurePatternRepository : IFailurePatternRepository
         await using var connection = new NpgsqlConnection(GetConnectionString());
         await connection.OpenAsync(cancellationToken);
 
+        var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
+
         var sql = """
             SELECT component,
                    COUNT(*) AS occurrence_count
@@ -213,11 +219,11 @@ public class FailurePatternRepository : IFailurePatternRepository
             LIMIT @limit;
             """;
 
-        sql = ApplyScopeToGroupByClause(sql);
+        sql = ApplyScopeToGroupByClause(sql, scopedProjects);
 
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("limit", limit);
-        ApplyScopeParameters(command);
+        ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<ComponentFrequency>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -244,6 +250,8 @@ public class FailurePatternRepository : IFailurePatternRepository
         await using var connection = new NpgsqlConnection(GetConnectionString());
         await connection.OpenAsync(cancellationToken);
 
+        var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
+
         var sql = """
             SELECT system,
                    COUNT(*) AS occurrence_count
@@ -254,12 +262,12 @@ public class FailurePatternRepository : IFailurePatternRepository
             LIMIT @limit;
             """;
 
-        sql = ApplyScopeToGroupByClause(sql);
+        sql = ApplyScopeToGroupByClause(sql, scopedProjects);
 
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("minimumIncidentCount", minimumIncidentCount);
         command.Parameters.AddWithValue("limit", limit);
-        ApplyScopeParameters(command);
+        ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<SystemIncidentFrequency>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -289,9 +297,9 @@ public class FailurePatternRepository : IFailurePatternRepository
         return connectionString;
     }
 
-    private string ApplyScopeToWhereClause(string sql, string whereClause)
+    private string ApplyScopeToWhereClause(string sql, string whereClause, IReadOnlyList<ProjectConfig> scopedProjects)
     {
-        var scopedConditions = BuildScopeConditions();
+        var scopedConditions = BuildScopeConditions(scopedProjects);
         if (scopedConditions.Count == 0)
         {
             return sql;
@@ -300,9 +308,9 @@ public class FailurePatternRepository : IFailurePatternRepository
         return sql.Replace(whereClause, $"{whereClause} AND {string.Join(" AND ", scopedConditions)}");
     }
 
-    private string ApplyScopeToGroupByClause(string sql)
+    private string ApplyScopeToGroupByClause(string sql, IReadOnlyList<ProjectConfig> scopedProjects)
     {
-        var scopedConditions = BuildScopeConditions();
+        var scopedConditions = BuildScopeConditions(scopedProjects);
         if (scopedConditions.Count == 0)
         {
             return sql;
@@ -311,39 +319,74 @@ public class FailurePatternRepository : IFailurePatternRepository
         return sql.Replace("GROUP BY", $"WHERE {string.Join(" AND ", scopedConditions)} GROUP BY");
     }
 
-    private List<string> BuildScopeConditions()
+    private List<string> BuildScopeConditions(IReadOnlyList<ProjectConfig> scopedProjects)
     {
         var conditions = new List<string>();
 
-        if (!string.IsNullOrWhiteSpace(_settings.ApplicationName))
+        for (var index = 0; index < scopedProjects.Count; index++)
         {
-            conditions.Add("application = @application");
-        }
+            var project = scopedProjects[index];
+            if (string.IsNullOrWhiteSpace(project.ApplicationFilter))
+            {
+                continue;
+            }
 
-        if (_settings.KnowledgeLookbackYears > 0)
-        {
-            conditions.Add("knowledge_year >= @minimumKnowledgeYear");
+            var appOperator = project.ApplicationFilter.Contains('%') ? "ILIKE" : "=";
+            var projectConditions = new List<string>
+            {
+                $"application {appOperator} @appFilter{index}"
+            };
+
+            if (project.KnowledgeLookbackYears > 0)
+            {
+                projectConditions.Add($"knowledge_year >= @minimumKnowledgeYear{index}");
+            }
+
+            conditions.Add(projectConditions.Count == 1
+                ? projectConditions[0]
+                : $"({string.Join(" AND ", projectConditions)})");
         }
 
         return conditions;
     }
 
-    private void ApplyScopeParameters(NpgsqlCommand command)
+    private void ApplyScopeParameters(NpgsqlCommand command, IReadOnlyList<ProjectConfig> scopedProjects)
     {
-        if (!string.IsNullOrWhiteSpace(_settings.ApplicationName) && !command.Parameters.Contains("application"))
+        for (var index = 0; index < scopedProjects.Count; index++)
         {
-            command.Parameters.AddWithValue("application", _settings.ApplicationName);
-        }
+            var project = scopedProjects[index];
+            if (string.IsNullOrWhiteSpace(project.ApplicationFilter))
+            {
+                continue;
+            }
 
-        if (_settings.KnowledgeLookbackYears > 0 && !command.Parameters.Contains("minimumKnowledgeYear"))
-        {
-            command.Parameters.AddWithValue("minimumKnowledgeYear", GetMinimumKnowledgeYear());
+            var appFilterParameter = $"appFilter{index}";
+            if (!command.Parameters.Contains(appFilterParameter))
+            {
+                command.Parameters.AddWithValue(appFilterParameter, project.ApplicationFilter);
+            }
+
+            if (project.KnowledgeLookbackYears > 0)
+            {
+                var minimumYearParameter = $"minimumKnowledgeYear{index}";
+                if (!command.Parameters.Contains(minimumYearParameter))
+                {
+                    command.Parameters.AddWithValue(minimumYearParameter, GetMinimumKnowledgeYear(project.KnowledgeLookbackYears));
+                }
+            }
         }
     }
 
-    private int GetMinimumKnowledgeYear()
+    private async Task<IReadOnlyList<ProjectConfig>> GetScopedProjectsAsync(CancellationToken cancellationToken)
     {
-        var lookbackYears = Math.Max(1, _settings.KnowledgeLookbackYears);
-        return DateTime.UtcNow.Year - (lookbackYears - 1);
+        return (await _projectRepository.GetAllProjectsAsync(cancellationToken))
+            .Where(project => !string.IsNullOrWhiteSpace(project.ApplicationFilter))
+            .ToList();
+    }
+
+    private static int GetMinimumKnowledgeYear(int lookbackYears)
+    {
+        var normalizedLookbackYears = Math.Max(1, lookbackYears);
+        return DateTime.UtcNow.Year - (normalizedLookbackYears - 1);
     }
 }

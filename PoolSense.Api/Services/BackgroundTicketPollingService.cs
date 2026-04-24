@@ -61,37 +61,60 @@ public class BackgroundTicketPollingService : BackgroundService
     {
         using var scope = _serviceScopeFactory.CreateScope();
         var settings = _settingsMonitor.CurrentValue;
+        var projectRepository = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
         var connector = scope.ServiceProvider.GetRequiredService<SqlTicketConnector>();
         var processedSourceEventRepository = scope.ServiceProvider.GetRequiredService<IProcessedSourceEventRepository>();
         var orchestrator = scope.ServiceProvider.GetRequiredService<ITicketWorkflowOrchestrator>();
         var emailService = scope.ServiceProvider.GetRequiredService<ITicketRecommendationEmailService>();
 
-        // Determine which groups to poll: use configured ProjectGroups when available,
-        // otherwise fall back to the legacy single ApplicationName.
-        var groups = settings.ProjectGroups.Count > 0
-            ? settings.ProjectGroups
-            : [new ProjectGroupSettings { GroupId = "default", DisplayName = settings.ApplicationName, ApplicationFilter = settings.ApplicationName }];
+        var projects = (await projectRepository.GetAllProjectsAsync(cancellationToken))
+            .Where(project => project.PoolingEnabled
+                && project.TicketSourceType.Equals("sql", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
-        _logger.LogInformation("Polling iteration started. Groups: {GroupCount} ({GroupNames}).",
-            groups.Count, string.Join(", ", groups.Select(g => g.DisplayName)));
+        _logger.LogInformation("Polling iteration started. Projects: {ProjectCount} ({ProjectNames}).",
+            projects.Count, string.Join(", ", projects.Select(project => project.ProjectName)));
 
-        foreach (var group in groups)
+        foreach (var project in projects)
         {
-            _logger.LogInformation("Polling group '{GroupName}' (filter: {ApplicationFilter}).", group.DisplayName, group.ApplicationFilter);
+            var currentProject = await projectRepository.GetProjectByIdAsync(project.ProjectId, cancellationToken);
+            if (currentProject is null)
+            {
+                _logger.LogInformation("Skipping polling for project '{ProjectId}' because it no longer exists.", project.ProjectId);
+                continue;
+            }
 
-            var closedTickets = await connector.GetTicketsByGroupAsync(group, settings.ClosedStatusName, cancellationToken);
-            _logger.LogInformation("Group '{GroupName}': fetched {ClosedCount} '{ClosedStatus}' tickets.", group.DisplayName, closedTickets.Count, settings.ClosedStatusName);
-            await ProcessClosedTicketsAsync(closedTickets, processedSourceEventRepository, orchestrator, cancellationToken);
+            if (!currentProject.PoolingEnabled)
+            {
+                _logger.LogInformation("Skipping polling for project '{ProjectName}' (projectId: {ProjectId}) because pooling is disabled.",
+                    currentProject.ProjectName, currentProject.ProjectId);
+                continue;
+            }
 
-            var newTickets = await connector.GetTicketsByGroupAsync(group, settings.NewStatusName, cancellationToken);
-            _logger.LogInformation("Group '{GroupName}': fetched {NewCount} '{NewStatus}' tickets.", group.DisplayName, newTickets.Count, settings.NewStatusName);
-            await ProcessNewTicketsAsync(newTickets, processedSourceEventRepository, orchestrator, emailService, settings.SendEmail, cancellationToken);
+            _logger.LogInformation("Polling project '{ProjectName}' (projectId: {ProjectId}, filter: {ApplicationFilter}).",
+                currentProject.ProjectName, currentProject.ProjectId, currentProject.ApplicationFilter);
+
+            var closedTickets = await connector.GetTicketsByStatusAsync(currentProject, settings.ClosedStatusName, cancellationToken);
+            _logger.LogInformation("Project '{ProjectName}': fetched {ClosedCount} '{ClosedStatus}' tickets.", currentProject.ProjectName, closedTickets.Count, settings.ClosedStatusName);
+            await ProcessClosedTicketsAsync(currentProject, closedTickets, processedSourceEventRepository, orchestrator, cancellationToken);
+
+            currentProject = await projectRepository.GetProjectByIdAsync(project.ProjectId, cancellationToken);
+            if (currentProject is null || !currentProject.PoolingEnabled)
+            {
+                _logger.LogInformation("Skipping new-ticket polling for project '{ProjectId}' because pooling is disabled or the project was removed.", project.ProjectId);
+                continue;
+            }
+
+            var newTickets = await connector.GetTicketsByStatusAsync(currentProject, settings.NewStatusName, cancellationToken);
+            _logger.LogInformation("Project '{ProjectName}': fetched {NewCount} '{NewStatus}' tickets.", currentProject.ProjectName, newTickets.Count, settings.NewStatusName);
+            await ProcessNewTicketsAsync(currentProject, newTickets, processedSourceEventRepository, orchestrator, emailService, cancellationToken);
         }
 
         _logger.LogInformation("Polling iteration completed.");
     }
 
     private async Task ProcessClosedTicketsAsync(
+        Models.ProjectConfig project,
         IReadOnlyList<TicketRequest> tickets,
         IProcessedSourceEventRepository processedSourceEventRepository,
         ITicketWorkflowOrchestrator orchestrator,
@@ -102,6 +125,8 @@ public class BackgroundTicketPollingService : BackgroundService
 
         foreach (var ticket in tickets)
         {
+            ApplyProjectScope(ticket, project);
+
             if (string.IsNullOrWhiteSpace(ticket.SourceEventId)
                 || await processedSourceEventRepository.HasBeenProcessedAsync(ticket.SourceEventId, ClosedKnowledgeKind, cancellationToken))
             {
@@ -135,11 +160,11 @@ public class BackgroundTicketPollingService : BackgroundService
     }
 
     private async Task ProcessNewTicketsAsync(
+        Models.ProjectConfig project,
         IReadOnlyList<TicketRequest> tickets,
         IProcessedSourceEventRepository processedSourceEventRepository,
         ITicketWorkflowOrchestrator orchestrator,
         ITicketRecommendationEmailService emailService,
-        bool sendEmail,
         CancellationToken cancellationToken)
     {
         var processedCount = 0;
@@ -147,6 +172,8 @@ public class BackgroundTicketPollingService : BackgroundService
 
         foreach (var ticket in tickets)
         {
+            ApplyProjectScope(ticket, project);
+
             if (string.IsNullOrWhiteSpace(ticket.SourceEventId)
                 || await processedSourceEventRepository.HasBeenProcessedAsync(ticket.SourceEventId, NewRecommendationKind, cancellationToken))
             {
@@ -168,9 +195,9 @@ public class BackgroundTicketPollingService : BackgroundService
             var emailSent = false;
             try
             {
-                if (sendEmail)
+                if (project.SendEmail)
                 {
-                    emailSent = await emailService.SendRecommendationAsync(ticket, workflowResult, cancellationToken);
+                    emailSent = await emailService.SendRecommendationAsync(project, ticket, workflowResult, cancellationToken);
                 }
                 else
                 {
@@ -191,7 +218,7 @@ public class BackgroundTicketPollingService : BackgroundService
                 WorkflowResult = workflowResult,
                 ProcessedAt = DateTime.UtcNow,
                 EmailSent = emailSent,
-                EmailRecipient = emailService.GetConfiguredRecipient()
+                EmailRecipient = emailService.GetConfiguredRecipients(project)
             }, cancellationToken);
 
             processedCount++;
@@ -199,5 +226,21 @@ public class BackgroundTicketPollingService : BackgroundService
         }
 
         _logger.LogInformation("New ticket processing complete. Processed: {ProcessedCount}, Skipped: {SkippedCount}.", processedCount, skippedCount);
+    }
+
+    private static void ApplyProjectScope(TicketRequest ticket, Models.ProjectConfig project)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+        ArgumentNullException.ThrowIfNull(project);
+
+        if (ticket.SelectedGroupIds is not { Count: > 0 } && !string.IsNullOrWhiteSpace(project.ProjectId))
+        {
+            ticket.SelectedGroupIds = [project.ProjectId];
+        }
+
+        if (project.SimilaritySearchLimit > 0)
+        {
+            ticket.SimilaritySearchLimitOverride = project.SimilaritySearchLimit;
+        }
     }
 }

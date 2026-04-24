@@ -19,47 +19,44 @@ public class SqlTicketConnector : ITicketSourceConnector
 
     public Task<IReadOnlyList<TicketRequest>> GetNewTickets(CancellationToken cancellationToken = default)
     {
-        return GetTicketsByStatusAsync(_settings.NewStatusName, cancellationToken);
+        throw new NotSupportedException("Unscoped ticket queries are no longer supported. Use the project-backed overload.");
     }
 
     public Task<TicketRequest?> GetTicketDetails(string ticketId, CancellationToken cancellationToken = default)
     {
-        return GetTicketDetails(GetConnectionString(), ticketId, cancellationToken);
+        throw new NotSupportedException("Unscoped ticket queries are no longer supported. Use the project-backed overload.");
     }
 
     public Task<IReadOnlyList<TicketRequest>> GetNewTickets(ProjectConfig projectConfig, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(projectConfig);
-        return GetTicketsByStatusAsync(GetConnectionString(projectConfig), _settings.NewStatusName, cancellationToken);
+        return GetTicketsByProjectAsync(projectConfig, _settings.NewStatusName, cancellationToken);
     }
 
     public Task<TicketRequest?> GetTicketDetails(ProjectConfig projectConfig, string ticketId, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(projectConfig);
-        return GetTicketDetails(GetConnectionString(projectConfig), ticketId, cancellationToken);
+        return GetProjectTicketDetailsAsync(projectConfig, ticketId, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<TicketRequest>> GetTicketsByStatusAsync(ProjectConfig projectConfig, string status, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(projectConfig);
+        return GetTicketsByProjectAsync(projectConfig, status, cancellationToken);
     }
 
     public Task<IReadOnlyList<TicketRequest>> GetTicketsByStatusAsync(string status, CancellationToken cancellationToken = default)
     {
-        return GetTicketsByStatusAsync(GetConnectionString(), status, cancellationToken);
+        throw new NotSupportedException("Unscoped ticket queries are no longer supported. Use the project-backed overload.");
     }
 
-    /// <summary>
-    /// Fetches tickets for a specific project group, applying the group's ApplicationFilter
-    /// as LIKE (when it contains %) or exact match.
-    /// </summary>
-    public Task<IReadOnlyList<TicketRequest>> GetTicketsByGroupAsync(ProjectGroupSettings group, string status, CancellationToken cancellationToken = default)
+    private async Task<IReadOnlyList<TicketRequest>> GetTicketsByProjectAsync(ProjectConfig projectConfig, string status, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(group);
-        return GetTicketsByGroupAsync(GetConnectionString(), group, status, cancellationToken);
-    }
-
-    private async Task<IReadOnlyList<TicketRequest>> GetTicketsByGroupAsync(string connectionString, ProjectGroupSettings group, string status, CancellationToken cancellationToken)
-    {
-        await using var connection = new SqlConnection(connectionString);
+        await using var connection = new SqlConnection(GetConnectionString(projectConfig));
         await connection.OpenAsync(cancellationToken);
 
-        var isPattern = group.ApplicationFilter.Contains('%');
+        var applicationFilter = GetApplicationFilter(projectConfig);
+        var isPattern = applicationFilter.Contains('%');
         var appOperator = isPattern ? "LIKE" : "=";
 
         var sql = BuildBaseSql() + Environment.NewLine + $"""
@@ -67,7 +64,8 @@ public class SqlTicketConnector : ITicketSourceConnector
               AND s.EventStatusName = @status
             """;
 
-        if (_settings.KnowledgeLookbackYears > 0)
+        var minimumKnowledgeYear = GetMinimumKnowledgeYear(projectConfig.KnowledgeLookbackYears);
+        if (minimumKnowledgeYear is not null)
         {
             sql += Environment.NewLine + """
                             AND COALESCE(e.DateTime_Closed, e.DateTime_Submitted) >= @minimumDate
@@ -79,55 +77,15 @@ public class SqlTicketConnector : ITicketSourceConnector
             """;
 
         await using var command = new SqlCommand(sql, connection);
-        command.Parameters.AddWithValue("@application", group.ApplicationFilter);
+        command.Parameters.AddWithValue("@application", applicationFilter);
         command.Parameters.AddWithValue("@status", status);
 
-        if (_settings.KnowledgeLookbackYears > 0)
+        if (minimumKnowledgeYear is not null)
         {
-            command.Parameters.AddWithValue("@minimumDate", new DateTime(GetMinimumKnowledgeYear(), 1, 1));
+            command.Parameters.AddWithValue("@minimumDate", new DateTime(minimumKnowledgeYear.Value, 1, 1));
         }
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var tickets = new List<TicketRequest>();
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            tickets.Add(MapTicket(reader));
-        }
-        return tickets;
-    }
-
-    private async Task<IReadOnlyList<TicketRequest>> GetTicketsByStatusAsync(string connectionString, string status, CancellationToken cancellationToken)
-    {
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken);
-
-        var sql = BuildBaseSql() + Environment.NewLine + """
-            WHERE a.Application = @application
-              AND s.EventStatusName = @status
-            """;
-
-        if (_settings.KnowledgeLookbackYears > 0)
-        {
-            sql += Environment.NewLine + """
-                            AND COALESCE(e.DateTime_Closed, e.DateTime_Submitted) >= @minimumDate
-            """;
-        }
-
-        sql += Environment.NewLine + """
-            ORDER BY COALESCE(e.DateTime_Closed, e.DateTime_Submitted) DESC, e.LogID DESC;
-            """;
-
-        await using var command = new SqlCommand(sql, connection);
-        command.Parameters.AddWithValue("@application", _settings.ApplicationName);
-        command.Parameters.AddWithValue("@status", status);
-
-        if (_settings.KnowledgeLookbackYears > 0)
-        {
-            command.Parameters.AddWithValue("@minimumDate", new DateTime(GetMinimumKnowledgeYear(), 1, 1));
-        }
-
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
         var tickets = new List<TicketRequest>();
         while (await reader.ReadAsync(cancellationToken))
         {
@@ -137,22 +95,27 @@ public class SqlTicketConnector : ITicketSourceConnector
         return tickets;
     }
 
-    private async Task<TicketRequest?> GetTicketDetails(string connectionString, string ticketId, CancellationToken cancellationToken)
+    private async Task<TicketRequest?> GetProjectTicketDetailsAsync(ProjectConfig projectConfig, string ticketId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(ticketId))
         {
             return null;
         }
 
-        await using var connection = new SqlConnection(connectionString);
+        await using var connection = new SqlConnection(GetConnectionString(projectConfig));
         await connection.OpenAsync(cancellationToken);
 
-        var sql = BuildBaseSql() + Environment.NewLine + """
+        var applicationFilter = GetApplicationFilter(projectConfig);
+        var isPattern = applicationFilter.Contains('%');
+        var appOperator = isPattern ? "LIKE" : "=";
+
+        var sql = BuildBaseSql() + Environment.NewLine + $"""
             WHERE e.LogID = @ticketId
-              AND a.Application = @application
+              AND a.Application {appOperator} @application
             """;
 
-        if (_settings.KnowledgeLookbackYears > 0)
+        var minimumKnowledgeYear = GetMinimumKnowledgeYear(projectConfig.KnowledgeLookbackYears);
+        if (minimumKnowledgeYear is not null)
         {
             sql += Environment.NewLine + """
                             AND COALESCE(e.DateTime_Closed, e.DateTime_Submitted) >= @minimumDate
@@ -165,11 +128,11 @@ public class SqlTicketConnector : ITicketSourceConnector
 
         await using var command = new SqlCommand(sql, connection);
         command.Parameters.AddWithValue("@ticketId", ticketId);
-        command.Parameters.AddWithValue("@application", _settings.ApplicationName);
+        command.Parameters.AddWithValue("@application", applicationFilter);
 
-        if (_settings.KnowledgeLookbackYears > 0)
+        if (minimumKnowledgeYear is not null)
         {
-            command.Parameters.AddWithValue("@minimumDate", new DateTime(GetMinimumKnowledgeYear(), 1, 1));
+            command.Parameters.AddWithValue("@minimumDate", new DateTime(minimumKnowledgeYear.Value, 1, 1));
         }
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -195,14 +158,11 @@ public class SqlTicketConnector : ITicketSourceConnector
         return connectionString;
     }
 
-    private static string GetConnectionString(ProjectConfig projectConfig)
+    private string GetConnectionString(ProjectConfig projectConfig)
     {
-        if (string.IsNullOrWhiteSpace(projectConfig.ConnectionString))
-        {
-            throw new InvalidOperationException($"Project '{projectConfig.ProjectId}' is missing a ticket source connection string.");
-        }
-
-        return projectConfig.ConnectionString;
+        return string.IsNullOrWhiteSpace(projectConfig.ConnectionString)
+            ? GetConnectionString()
+            : projectConfig.ConnectionString;
     }
 
     private string BuildBaseSql()
@@ -235,10 +195,34 @@ public class SqlTicketConnector : ITicketSourceConnector
             """;
     }
 
-    private int GetMinimumKnowledgeYear()
+    private int? GetMinimumKnowledgeYear(int? lookbackYearsOverride = null)
     {
-        var lookbackYears = Math.Max(1, _settings.KnowledgeLookbackYears);
+        var configuredLookbackYears = lookbackYearsOverride is > 0
+            ? lookbackYearsOverride.Value
+            : 0;
+
+        if (configuredLookbackYears <= 0)
+        {
+            return null;
+        }
+
+        var lookbackYears = Math.Max(1, configuredLookbackYears);
         return DateTime.UtcNow.Year - (lookbackYears - 1);
+    }
+
+    private string GetApplicationFilter(ProjectConfig projectConfig)
+    {
+        if (!string.IsNullOrWhiteSpace(projectConfig.ApplicationFilter))
+        {
+            return projectConfig.ApplicationFilter;
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectConfig.ProjectName))
+        {
+            return projectConfig.ProjectName;
+        }
+
+        throw new InvalidOperationException($"Project '{projectConfig.ProjectId}' is missing an application filter.");
     }
 
     private static TicketRequest MapTicket(SqlDataReader reader)

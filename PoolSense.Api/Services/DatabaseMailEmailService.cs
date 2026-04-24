@@ -26,19 +26,26 @@ public class DatabaseMailEmailService : ITicketRecommendationEmailService
         _logger = logger;
     }
 
-    public string GetConfiguredRecipient() => _settings.Email.Recipient;
+    public string GetConfiguredRecipients(ProjectConfig project)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        return RecommendationEmailRecipientResolver.ResolveRecipients(project, _settings.Email);
+    }
 
     public async Task<bool> SendRecommendationAsync(
+        ProjectConfig project,
         TicketRequest ticket,
         TicketWorkflowResult workflowResult,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(ticket);
         ArgumentNullException.ThrowIfNull(workflowResult);
 
         var email = _settings.Email;
+        var recipients = RecommendationEmailRecipientResolver.ResolveRecipients(project, email);
 
-        if (string.IsNullOrWhiteSpace(email.Recipient)
+        if (string.IsNullOrWhiteSpace(recipients)
             || string.IsNullOrWhiteSpace(email.DatabaseMailProfile))
         {
             _logger.LogWarning(
@@ -62,7 +69,7 @@ public class DatabaseMailEmailService : ITicketRecommendationEmailService
         };
 
         cmd.Parameters.AddWithValue("@profile_name", email.DatabaseMailProfile);
-        cmd.Parameters.AddWithValue("@recipients", email.Recipient);
+    cmd.Parameters.AddWithValue("@recipients", recipients);
         cmd.Parameters.AddWithValue("@subject", subject);
         cmd.Parameters.AddWithValue("@body", body);
         cmd.Parameters.AddWithValue("@body_format", "HTML");
@@ -76,8 +83,8 @@ public class DatabaseMailEmailService : ITicketRecommendationEmailService
         await cmd.ExecuteNonQueryAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Sent recommendation email via Database Mail for source event {SourceEventId} to {Recipient} using profile '{Profile}'.",
-            ticket.SourceEventId, email.Recipient, email.DatabaseMailProfile);
+            "Sent recommendation email via Database Mail for source event {SourceEventId} to {Recipients} using profile '{Profile}'.",
+            ticket.SourceEventId, recipients, email.DatabaseMailProfile);
 
         return true;
     }

@@ -7,6 +7,7 @@ namespace PoolSense.Api.Data;
 public interface IProcessedSourceEventRepository
 {
     Task<bool> HasBeenProcessedAsync(string sourceEventId, string processingKind, CancellationToken cancellationToken = default);
+    Task<int> CountProcessedAsync(IReadOnlyCollection<string> sourceEventIds, string processingKind, CancellationToken cancellationToken = default);
     Task MarkProcessedAsync(ProcessedSourceEventRecord record, CancellationToken cancellationToken = default);
 }
 
@@ -53,6 +54,31 @@ public class ProcessedSourceEventRepository : IProcessedSourceEventRepository
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result != null;
+    }
+
+    public async Task<int> CountProcessedAsync(IReadOnlyCollection<string> sourceEventIds, string processingKind, CancellationToken cancellationToken = default)
+    {
+        if (sourceEventIds.Count == 0 || string.IsNullOrWhiteSpace(processingKind))
+        {
+            return 0;
+        }
+
+        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = """
+            SELECT COUNT(*)
+            FROM processed_source_events
+            WHERE processing_kind = @processingKind
+              AND source_event_id = ANY(@sourceEventIds);
+            """;
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("processingKind", processingKind);
+        command.Parameters.AddWithValue("sourceEventIds", sourceEventIds.ToArray());
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is int count ? count : Convert.ToInt32(result ?? 0);
     }
 
     public async Task MarkProcessedAsync(ProcessedSourceEventRecord record, CancellationToken cancellationToken = default)

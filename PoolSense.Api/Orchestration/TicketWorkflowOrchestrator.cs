@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
+using PoolSense.Api.Logging;
 using PoolSense.Api.Agents;
 using PoolSense.Api.Configuration;
 using PoolSense.Api.Data;
@@ -31,6 +33,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
     private readonly IKnowledgeEnrichmentService _knowledgeEnrichmentService;
     private readonly IFailurePatternAgent _failurePatternAgent;
     private readonly IFailurePatternRepository _failurePatternRepository;
+    private readonly InteractionLogger _interactionLogger;
     private readonly ILogger<TicketWorkflowOrchestrator> _logger;
     private readonly TicketAutomationSettings _settings;
 
@@ -43,6 +46,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         IKnowledgeEnrichmentService knowledgeEnrichmentService,
         IFailurePatternAgent failurePatternAgent,
         IFailurePatternRepository failurePatternRepository,
+        InteractionLogger interactionLogger,
         IOptions<TicketAutomationSettings> settings,
         ILogger<TicketWorkflowOrchestrator> logger)
     {
@@ -54,6 +58,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         _knowledgeEnrichmentService = knowledgeEnrichmentService;
         _failurePatternAgent = failurePatternAgent;
         _failurePatternRepository = failurePatternRepository;
+        _interactionLogger = interactionLogger;
         _settings = settings.Value;
         _logger = logger;
     }
@@ -82,6 +87,8 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var processingStopwatch = Stopwatch.StartNew();
+
         var workflowMode = persistKnowledge ? "Persist" : "Recommend";
         _logger.LogInformation(
             "Starting workflow mode {WorkflowMode} for ticket {TicketId} (sourceEventId: {SourceEventId}).",
@@ -102,7 +109,10 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             : analysis.Problem;
         _logger.LogInformation("Generating search embedding for ticket {TicketId}.", request.TicketId);
         var searchEmbedding = await _embeddingService.GenerateEmbedding(searchText);
-        var similarTickets = await _pgVectorRepository.SearchSimilarTickets(searchEmbedding, _settings.SimilaritySearchLimit, request.SelectedGroupIds, cancellationToken);
+        var similaritySearchLimit = request.SimilaritySearchLimitOverride is > 0
+            ? request.SimilaritySearchLimitOverride.Value
+            : _settings.SimilaritySearchLimit;
+        var similarTickets = await _pgVectorRepository.SearchSimilarTickets(searchEmbedding, similaritySearchLimit, request.SelectedGroupIds, cancellationToken);
         _logger.LogInformation("Found {SimilarTicketCount} similar tickets for ticket {TicketId}.", similarTickets.Count, request.TicketId);
 
         var resolutionIncidents = similarTickets
@@ -119,6 +129,15 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, description, resolutionIncidents);
         var resolution = JsonSerializer.Deserialize<ResolutionResult>(AiJsonResponseSanitizer.Normalize(resolutionJson), JsonOptions)
             ?? throw new InvalidOperationException("The resolution agent returned an empty result.");
+
+        await _interactionLogger.LogInteractionAsync(
+            searchText,
+            similarTickets,
+            resolution.SuggestedResolution,
+            resolution.Confidence,
+            processingStopwatch.Elapsed,
+            searchEmbedding.Length,
+            cancellationToken);
 
         var resolvedTicketId = string.IsNullOrWhiteSpace(request.TicketId)
             ? $"Issue-{Random.Shared.Next(10000, 99999)}"

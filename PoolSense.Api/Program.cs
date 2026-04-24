@@ -7,6 +7,7 @@ using PoolSense.Api.Connectors;
 using PoolSense.Api.Data;
 using PoolSense.Api.Orchestration;
 using PoolSense.Api.Services;
+using PoolSense.Api.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 const string PoolSenseUiCorsPolicy = "PoolSenseUi";
@@ -50,6 +51,7 @@ builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 builder.Services.AddScoped<IKnowledgeEnrichmentService, KnowledgeEnrichmentService>();
 builder.Services.AddScoped<IFailurePatternService, FailurePatternService>();
 builder.Services.AddScoped<ITicketIngestionService, TicketIngestionService>();
+builder.Services.AddScoped<InteractionLogger>();
 
 var emailDeliveryMode = builder.Configuration
     .GetSection("TicketAutomation:Email:DeliveryMode")
@@ -66,8 +68,10 @@ else
 builder.Services.AddScoped<IncidentContextBuilder>();
 
 builder.Services.AddScoped<IPgVectorRepository, PgVectorRepository>();
+builder.Services.AddScoped<IFeedbackRepository, FeedbackRepository>();
 builder.Services.AddScoped<IFailurePatternRepository, FailurePatternRepository>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
+builder.Services.AddScoped<IIngestionStatusRepository, IngestionStatusRepository>();
 builder.Services.AddScoped<IProcessedSourceEventRepository, ProcessedSourceEventRepository>();
 
 builder.Services.AddScoped<SqlTicketConnector>();

@@ -19,9 +19,10 @@ public class TicketRequest
     public string LifeguardId { get; set; } = string.Empty;
     public DateTime? SubmittedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
+    public int? SimilaritySearchLimitOverride { get; set; }
     /// <summary>
-    /// Optional group IDs (from configured ProjectGroups) to scope the similarity search.
-    /// null = use default ApplicationName scope; empty list = search all groups; non-empty = search only those groups.
+    /// Optional project IDs (from project_configs) used to scope similarity search.
+    /// null or empty = search across all configured projects; non-empty = search only the selected projects.
     /// </summary>
     public List<string>? SelectedGroupIds { get; set; } = null;
 

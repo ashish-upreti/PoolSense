@@ -3,30 +3,12 @@ namespace PoolSense.Api.Configuration;
 public sealed class TicketAutomationSettings
 {
     public bool PollingEnabled { get; set; } = true;
-    public bool SendEmail { get; set; } = true;
-    public string ApplicationName { get; set; } = "AT MPS Capacity Response";
-    public int KnowledgeLookbackYears { get; set; } = 1;
     public int PollIntervalSeconds { get; set; } = 60;
     public string ClosedStatusName { get; set; } = "Closed";
     public string NewStatusName { get; set; } = "New";
     public string SourceDatabaseName { get; set; } = string.Empty;
     public int SimilaritySearchLimit { get; set; } = 5;
-    public List<ProjectGroupSettings> ProjectGroups { get; set; } = [];
     public EmailDeliverySettings Email { get; set; } = new();
-}
-
-/// <summary>
-/// Defines a named application group used to scope similarity searches in the UI.
-/// An ApplicationFilter containing '%' is applied as case-insensitive ILIKE; otherwise it is an exact match.
-/// </summary>
-public sealed class ProjectGroupSettings
-{
-    public string GroupId { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
-    /// <summary>
-    /// Filter value for the application column. Use SQL LIKE wildcards (%) for pattern matching.
-    /// </summary>
-    public string ApplicationFilter { get; set; } = string.Empty;
 }
 
 public enum EmailDeliveryMode

@@ -1,6 +1,6 @@
 # PoolSense Presentation Prompts
 
-Use the following prompts to generate a focused 12-slide presentation for the `PoolSense` proof of concept. These prompts are aligned to the actual implemented POC scope:
+Use the following prompts to generate a focused 1 of 12-slide presentation for the `PoolSense` proof of concept. These prompts are aligned to the actual implemented POC scope:
 
 1. Historical closed tickets are polled directly from a SQL source and converted into a reusable, vector-searchable knowledge base.
 2. New tickets trigger AI-based recommendations and email notifications (SMTP or SQL Server Database Mail).
@@ -8,7 +8,7 @@ Use the following prompts to generate a focused 12-slide presentation for the `P
 
 Each prompt can be pasted into a presentation-capable AI model to generate one slide at a time.
 
-Note: Attached document is for pool assist icon consistency. Create 1 slide at a time
+Note: Attached document is for pool assist icon consistency. Create 1 slide at a time based on below slide context:
 
 ## Slide 1 - Title and POC Objective
 
@@ -399,6 +399,46 @@ Style:
 - confident and direct
 - executive-friendly
 - action-oriented — make it easy for leadership to say yes
+
+## Slide 12 (Alternative) - What Would Be Needed to Take This Further
+
+**Prompt**
+
+Create a closing slide called `What Would Be Needed to Take This Further` for `PoolSense`.
+
+Frame this as a collaborative, forward-looking conversation with leadership — not a formal demand. The tone should be exploratory and opportunity-focused.
+
+Include these sections:
+
+### `Where We Are Today`
+- PoolSense has completed a working proof of concept with 3 validated workflows
+- the system is functional but not yet production-hardened or team-deployed
+- we have a clear picture of what the next phase would require
+
+### `What the Next Phase Would Look Like`
+- a small, focused team (2–3 engineers) working for 2–3 months
+- scope limited to production-hardening, one additional knowledge source (SharePoint or DBAS), and a pilot with 1–2 teams
+- measurable outcomes defined upfront so we can evaluate ROI objectively
+
+### `What We Would Need to Move Forward`
+- alignment on priority: is this the right time to invest in this direction?
+- a conversation about resourcing: even part-time support from existing team members could accelerate progress
+- agreement on a pilot team to validate against real workflows
+- a low-risk, time-boxed commitment — 2–3 months with a defined evaluation checkpoint
+
+### `What Success Looks Like`
+- engineers spend less time manually triaging repeat incidents
+- recommendations from PoolSense are reliable enough to be trusted in daily operations
+- organizational knowledge is captured and reused rather than lost between tickets
+- a clear signal on whether to scale or stop — no open-ended commitment
+
+End with an open, collaborative closing statement:
+- `We are not asking for a large commitment — just enough runway to find out if this is worth scaling. We believe the POC has already answered the hardest question: yes, this is technically feasible.`
+
+Style:
+- calm, confident, and collaborative
+- leadership-friendly without pressure
+- invite a conversation rather than demand a decision
 
 ## Optional Prompt - Generate the Full 12-Slide Deck
 

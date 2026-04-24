@@ -25,11 +25,14 @@ This document covers the most anticipated questions from senior management, tech
 
 ### Q: What is PoolSense?
 
-**A:** PoolSense is an AI-powered incident assistance system that automatically builds a knowledge base from historical closed tickets and uses it to recommend root causes and resolutions for new incidents. It combines Azure OpenAI language models, vector-based similarity search (pgvector), and automated email recommendations to accelerate support triage and reduce dependence on individual expert knowledge.
+**A:** PoolSense is an AI-powered incident assistance system that automatically builds a knowledge base from historical closed tickets and uses it to recommend root causes and resolutions for 
+new incidents. It combines Azure OpenAI language models, vector-based similarity search (pgvector), and automated email recommendations to accelerate support triage and reduce dependence on 
+individual expert knowledge.
 
 ### Q: What problem does PoolSense solve?
 
-**A:** Support and operations teams spend significant time understanding incident context, repeatedly solving the same class of problems, and manually searching through historical tickets. PoolSense automates this by:
+**A:** Support and operations teams spend significant time understanding incident context, repeatedly solving the same class of problems, and manually searching through historical tickets. 
+PoolSense automates this by:
 
 - Converting closed ticket history into a searchable, AI-enriched knowledge base.
 - Proactively recommending resolutions for new tickets via email before a human even starts investigating.
@@ -37,11 +40,13 @@ This document covers the most anticipated questions from senior management, tech
 
 ### Q: Who is the intended audience for PoolSense?
 
-**A:** Operations engineers, support lifeguards, incident responders, and any team that handles recurring incident tickets. The system is designed to be application-agnostic and multi-tenant, meaning multiple project teams can use it simultaneously with scoped knowledge bases.
+**A:** Operations engineers, support lifeguards, incident responders, and any team that handles recurring incident tickets. The system is designed to be application-agnostic and multi-tenant, meaning
+multiple project teams can use it simultaneously with scoped knowledge bases.
 
 ### Q: Is this a finished product or a proof of concept?
 
-**A:** PoolSense is currently a **proof of concept (POC)**. It has successfully demonstrated all three intended workflows end-to-end. It is not yet production-hardened and requires additional investment in infrastructure, security, observability, and governance before enterprise-wide rollout.
+**A:** PoolSense is currently a **proof of concept (POC)**. It has successfully demonstrated all three intended workflows end-to-end. It is not yet production-hardened and requires additional 
+investment in infrastructure, security, observability, and governance before enterprise-wide rollout.
 
 ---
 
@@ -220,7 +225,7 @@ Teams see only their own knowledge base while sharing the same platform infrastr
 
 | Database | Role | Access |
 |----------|------|--------|
-| **PostgreSQL** (PoolSense) | Knowledge base, failure patterns, deduplication tracking, project configs | Read/Write |
+| **PostgreSQL** (PoolSense) | Knowledge base, failure patterns, deduplication tracking, project configs, feedback logs, and interaction logs | Read/Write |
 | **SQL Server** (PoolProd) | Source ticket data (tbl_EventLog, tbl_Application, tbl_EventStatus, tbl_EventLifeguard) | Read-Only |
 
 ### Q: What are the REST API endpoints?
@@ -233,6 +238,7 @@ Teams see only their own knowledge base while sharing the same platform infrastr
 | `/api/ticket/analyze` | POST | Analyze a ticket without storing |
 | `/api/ticket/store` | POST | Analyze, enrich, embed, and store ticket knowledge |
 | `/api/ticket/similar` | POST | Find similar tickets via vector search |
+| `/api/feedback` | POST | Capture user feedback for an AI response |
 | `/api/insights` | GET | Combined failure insights dashboard data |
 | `/api/insights/failures` | GET | Top failure types |
 | `/api/insights/components` | GET | Most problematic components |
@@ -305,6 +311,8 @@ The HNSW index on the embedding column enables fast approximate nearest-neighbor
 | `failure_patterns` | Structured failure classifications (system, component, failure type, resolution category) |
 | `processed_source_events` | Deduplication records with processing timestamps and email status |
 | `project_configs` | Project registration metadata (source type, connection info, knowledge sources) |
+| `feedback_logs` | User feedback for AI responses, including helpful / not-helpful rating, whether the suggestion was used, optional comment, and retrieved ticket ids |
+| `interaction_logs` | AI pipeline interaction metadata including query text, embedding length, retrieved ticket ids and summaries, suggested resolution, confidence, and processing time |
 
 ### Q: Does PoolSense modify the source ticket system?
 
@@ -333,9 +341,9 @@ The HNSW index on the embedding column enables fast approximate nearest-neighbor
 | Category | Features |
 |----------|----------|
 | **Knowledge Flow** | SQL ticket polling, AI analysis, knowledge enrichment, embedding generation, pgvector storage, failure pattern extraction |
-| **Recommendation Flow** | New ticket detection, similarity search, AI-generated resolution, email delivery via SMTP |
-| **User Experience** | React UI for incident queries, confidence scoring, similar incident display, failure pattern visualization, project group filtering |
-| **Platform** | .NET 9 API, Semantic Kernel orchestration, PostgreSQL bootstrap, integrated frontend build |
+| **Recommendation Flow** | New ticket detection, similarity search, AI-generated resolution, email delivery via SMTP, feedback-weighted ranking |
+| **User Experience** | React UI for incident queries, confidence scoring, similar incident display, failure pattern visualization, project group filtering, thumbs up/down feedback, and optional comments |
+| **Platform** | .NET 9 API, Semantic Kernel orchestration, PostgreSQL bootstrap, integrated frontend build, interaction logging, and feedback persistence |
 
 ### Q: What are the known limitations?
 
@@ -345,10 +353,10 @@ The HNSW index on the embedding column enables fast approximate nearest-neighbor
 |-----|-------------|
 | **No production infrastructure** | Runs locally or in development environments only |
 | **No database migrations** | Schema is managed via a bootstrap SQL script, not EF Core migrations |
-| **No observability** | No structured logging, distributed tracing, or health monitoring |
+| **Limited observability** | Interaction and feedback data are persisted, but there is still no centralized structured logging, distributed tracing, dashboards, or alerting |
 | **No authentication/authorization** | API endpoints are unauthenticated |
 | **No PII handling** | Sensitive content is passed through without scrubbing |
-| **No feedback loop** | Users cannot rate or correct AI suggestions to improve future results |
+| **No closed-loop learning automation** | Users can now rate suggestions and mark whether they were used, but there is no automated retraining, prompt tuning pipeline, or feedback analytics dashboard yet |
 | **No CI/CD pipeline** | No automated build, test, or deployment pipeline |
 | **No automated testing** | No unit tests, integration tests, or end-to-end tests |
 | **No rate limiting** | API has no throttling or abuse protection |
@@ -534,19 +542,29 @@ CREATE INDEX IF NOT EXISTS wiki_knowledge_embedding_cosine_idx
 #### User Experience
 | Item | Description | Priority |
 |------|-------------|----------|
-| **Feedback mechanism** | Thumbs up/down on AI suggestions to improve quality | High |
+| **Feedback analytics and governance** | Build dashboards, review workflows, and policy around collected thumbs up/down, usage, and comment data | High |
 | **Conversation history** | Persist and search past interactions | Medium |
 | **Mobile responsiveness** | Ensure UI works on tablets and mobile | Low |
 | **Accessibility** | WCAG 2.1 AA compliance | Medium |
 
 ### Q: What about the feedback loop?
 
-**A:** A critical production feature is allowing users to rate AI suggestions. This enables:
+**A:** A basic feedback loop is already implemented in the POC:
+
+- Users can submit `Helpful` or `Not Helpful` feedback directly from the React UI.
+- Users can add an optional comment.
+- Users can indicate whether the suggested resolution was actually used.
+- Feedback is persisted in `feedback_logs`.
+- Retrieval ranking uses this signal to boost or penalize future matches.
+
+This enables:
 
 - **Reinforcement** — Highly-rated resolutions are prioritized in future similarity matches.
 - **Correction** — Incorrect suggestions can be flagged and excluded from training.
 - **Quality metrics** — Track recommendation accuracy over time.
 - **Fine-tuning data** — Curated feedback can inform prompt improvements or model fine-tuning.
+
+What is still missing for production is feedback governance: dashboards, reviewer workflows, abuse protection, and automated evaluation or retraining pipelines.
 
 ---
 
@@ -660,12 +678,14 @@ Month 8–10:  Autonomous knowledge retrieval, advanced features, optimization
 │              │ ✅ React operator UI                                 │
 │              │ ✅ Multi-tenant project groups                       │
 │              │ ✅ Failure pattern insights                          │
+│              │ ✅ User feedback mechanism                           │
+│              │ ✅ Interaction logging                               │
 ├──────────────┼──────────────────────────────────────────────────────┤
 │ Pilot        │ 🔲 Authentication & authorization                   │
 │ (Phase 1)    │ 🔲 CI/CD pipeline                                   │
 │              │ 🔲 Database migrations                               │
 │              │ 🔲 Observability (logging, tracing, monitoring)      │
-│              │ 🔲 User feedback mechanism                           │
+│              │ 🔲 Feedback analytics and governance                 │
 │              │ 🔲 Automated tests                                   │
 │              │ 🔲 PII scrubbing                                     │
 │              │ 🔲 Containerized deployment                          │

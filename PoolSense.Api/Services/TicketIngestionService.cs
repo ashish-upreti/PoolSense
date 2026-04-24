@@ -66,6 +66,7 @@ public sealed class IngestedTicketResult
 public class TicketIngestionService : ITicketIngestionService
 {
     private readonly IProjectRepository _projectRepository;
+    private readonly IIngestionStatusRepository _ingestionStatusRepository;
     private readonly SqlTicketConnector _sqlTicketConnector;
     private readonly ApiTicketConnector _apiTicketConnector;
     private readonly ITicketWorkflowOrchestrator _ticketWorkflowOrchestrator;
@@ -80,12 +81,14 @@ public class TicketIngestionService : ITicketIngestionService
     /// <param name="ticketWorkflowOrchestrator">The orchestrator that processes ingested tickets.</param>
     public TicketIngestionService(
         IProjectRepository projectRepository,
+        IIngestionStatusRepository ingestionStatusRepository,
         SqlTicketConnector sqlTicketConnector,
         ApiTicketConnector apiTicketConnector,
         ITicketWorkflowOrchestrator ticketWorkflowOrchestrator,
         ILogger<TicketIngestionService> logger)
     {
         _projectRepository = projectRepository;
+        _ingestionStatusRepository = ingestionStatusRepository;
         _sqlTicketConnector = sqlTicketConnector;
         _apiTicketConnector = apiTicketConnector;
         _ticketWorkflowOrchestrator = ticketWorkflowOrchestrator;
@@ -100,58 +103,73 @@ public class TicketIngestionService : ITicketIngestionService
     public async Task<IReadOnlyList<ProjectTicketIngestionResult>> IngestAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Starting ingestion run.");
-        var activeProjects = await _projectRepository.ListActiveProjects(cancellationToken);
+        var activeProjects = (await _projectRepository.GetAllProjectsAsync(cancellationToken))
+            .Where(project => project.PoolingEnabled)
+            .ToList();
         var results = new List<ProjectTicketIngestionResult>();
 
         _logger.LogInformation("Found {ActiveProjectCount} active projects for ingestion.", activeProjects.Count);
 
         foreach (var project in activeProjects)
         {
-            _logger.LogInformation("Pulling new tickets for project {ProjectId} ({ProjectName}).", project.ProjectId, project.ProjectName);
-            var connector = ResolveConnector(project);
-            var newTickets = await connector.GetNewTickets(project, cancellationToken);
-            var processedTickets = new List<IngestedTicketResult>();
-
-            _logger.LogInformation("Project {ProjectId} returned {TicketCount} ticket(s).", project.ProjectId, newTickets.Count);
-
-            foreach (var ticket in newTickets)
+            try
             {
-                var detailedTicket = string.IsNullOrWhiteSpace(ticket.TicketId)
-                    ? ticket
-                    : await connector.GetTicketDetails(project, ticket.TicketId, cancellationToken) ?? ticket;
+                _logger.LogInformation("Pulling new tickets for project {ProjectId} ({ProjectName}).", project.ProjectId, project.ProjectName);
+                var connector = ResolveConnector(project);
+                var newTickets = await connector.GetNewTickets(project, cancellationToken);
+                var processedTickets = new List<IngestedTicketResult>();
 
-                if (string.IsNullOrWhiteSpace(detailedTicket.Title) || string.IsNullOrWhiteSpace(detailedTicket.Description))
+                await _ingestionStatusRepository.InitializeStatusAsync(project.ProjectId, newTickets.Count, cancellationToken);
+                _logger.LogInformation("Project {ProjectId} returned {TicketCount} ticket(s).", project.ProjectId, newTickets.Count);
+
+                foreach (var ticket in newTickets)
                 {
-                    _logger.LogWarning("Skipping ticket {TicketId} in project {ProjectId} because title/description is missing.", detailedTicket.TicketId, project.ProjectId);
-                    continue;
+                    var detailedTicket = string.IsNullOrWhiteSpace(ticket.TicketId)
+                        ? ticket
+                        : await connector.GetTicketDetails(project, ticket.TicketId, cancellationToken) ?? ticket;
+
+                    if (string.IsNullOrWhiteSpace(detailedTicket.Title) || string.IsNullOrWhiteSpace(detailedTicket.Description))
+                    {
+                        _logger.LogWarning("Skipping ticket {TicketId} in project {ProjectId} because title/description is missing.", detailedTicket.TicketId, project.ProjectId);
+                        continue;
+                    }
+
+                    detailedTicket.SimilaritySearchLimitOverride = project.SimilaritySearchLimit;
+
+                    _logger.LogInformation("Processing ticket {TicketId} for project {ProjectId}.", detailedTicket.TicketId, project.ProjectId);
+
+                    var workflowResult = await _ticketWorkflowOrchestrator.ProcessAsync(
+                        detailedTicket,
+                        cancellationToken);
+
+                    processedTickets.Add(new IngestedTicketResult
+                    {
+                        TicketId = detailedTicket.TicketId,
+                        Result = workflowResult
+                    });
+
+                    await _ingestionStatusRepository.UpdateProgressAsync(project.ProjectId, processedTickets.Count, cancellationToken);
                 }
 
-                _logger.LogInformation("Processing ticket {TicketId} for project {ProjectId}.", detailedTicket.TicketId, project.ProjectId);
+                _logger.LogInformation(
+                    "Completed project {ProjectId}: pulled {PulledCount}, processed {ProcessedCount}.",
+                    project.ProjectId,
+                    newTickets.Count,
+                    processedTickets.Count);
 
-                var workflowResult = await _ticketWorkflowOrchestrator.ProcessAsync(
-                    detailedTicket,
-                    cancellationToken);
-
-                processedTickets.Add(new IngestedTicketResult
+                results.Add(new ProjectTicketIngestionResult
                 {
-                    TicketId = detailedTicket.TicketId,
-                    Result = workflowResult
+                    ProjectId = project.ProjectId,
+                    ProjectName = project.ProjectName,
+                    TicketsPulled = newTickets.Count,
+                    ProcessedTickets = processedTickets
                 });
             }
-
-            _logger.LogInformation(
-                "Completed project {ProjectId}: pulled {PulledCount}, processed {ProcessedCount}.",
-                project.ProjectId,
-                newTickets.Count,
-                processedTickets.Count);
-
-            results.Add(new ProjectTicketIngestionResult
+            catch (Exception ex)
             {
-                ProjectId = project.ProjectId,
-                ProjectName = project.ProjectName,
-                TicketsPulled = newTickets.Count,
-                ProcessedTickets = processedTickets
-            });
+                await _ingestionStatusRepository.InitializeStatusAsync(project.ProjectId, 0, cancellationToken);
+                _logger.LogError(ex, "Ingestion failed for project {ProjectId}.", project.ProjectId);
+            }
         }
 
         _logger.LogInformation("Ingestion run completed for {ProjectCount} project(s).", results.Count);
@@ -161,6 +179,12 @@ public class TicketIngestionService : ITicketIngestionService
 
     private ITicketSourceConnector ResolveConnector(ProjectConfig project)
     {
+        if (string.IsNullOrWhiteSpace(project.TicketSourceType)
+            || project.TicketSourceType.Equals("sql", StringComparison.OrdinalIgnoreCase))
+        {
+            return _sqlTicketConnector;
+        }
+
         if (project.TicketSourceType.Equals("sql", StringComparison.OrdinalIgnoreCase))
         {
             return _sqlTicketConnector;

@@ -1,6 +1,4 @@
 using Npgsql;
-using Microsoft.Extensions.Options;
-using PoolSense.Api.Configuration;
 using PoolSense.Api.Models;
 using System.Globalization;
 
@@ -17,9 +15,14 @@ public interface IPgVectorRepository
     /// Searches for tickets with embeddings most similar to the supplied vector.
     /// </summary>
     /// <param name="selectedGroupIds">
-    /// null = default ApplicationName scope; empty = all groups; non-empty = filter to those group IDs.
+    /// null or empty = search across all configured projects; non-empty = filter to those project IDs.
     /// </param>
     Task<IReadOnlyList<TicketKnowledge>> SearchSimilarTickets(float[] embedding, int limit = 5, IReadOnlyList<string>? selectedGroupIds = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the accumulated feedback score for a retrieved ticket.
+    /// </summary>
+    Task<double> GetFeedbackScore(string ticketId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Returns monthly incident totals for the requested number of months.
@@ -29,13 +32,20 @@ public interface IPgVectorRepository
 
 public class PgVectorRepository : IPgVectorRepository
 {
-    private readonly IConfiguration _configuration;
-    private readonly TicketAutomationSettings _settings;
+    private const int FeedbackRerankMultiplier = 5;
+    private const double StrongHelpfulWeight = 0.10d;
+    private const double WeakHelpfulWeight = 0.05d;
+    private const double NotHelpfulPenalty = -0.05d;
 
-    public PgVectorRepository(IConfiguration configuration, IOptions<TicketAutomationSettings> settings)
+    private readonly IConfiguration _configuration;
+    private readonly IProjectRepository _projectRepository;
+    private readonly IFeedbackRepository _feedbackRepository;
+
+    public PgVectorRepository(IConfiguration configuration, IProjectRepository projectRepository, IFeedbackRepository feedbackRepository)
     {
         _configuration = configuration;
-        _settings = settings.Value;
+        _projectRepository = projectRepository;
+        _feedbackRepository = feedbackRepository;
     }
 
     /// <summary>
@@ -113,41 +123,93 @@ public class PgVectorRepository : IPgVectorRepository
     {
         ArgumentNullException.ThrowIfNull(embedding);
 
+        if (limit <= 0)
+        {
+            return [];
+        }
+
         await using var connection = new NpgsqlConnection(GetConnectionString());
         await connection.OpenAsync(cancellationToken);
+        await EnsureFeedbackTableAsync(connection, cancellationToken);
+
+        var scopedProjects = await GetScopedProjectsAsync(selectedGroupIds, cancellationToken);
+        var requireProjectMatch = selectedGroupIds is { Count: > 0 };
+
+        var candidateLimit = Math.Max(limit, limit * FeedbackRerankMultiplier);
 
         var sql = """
-            SELECT id,
-                   ticket_id,
-                   source_event_id,
-                   problem,
-                   root_cause,
-                   resolution,
-                   keywords,
-                   embedding::text AS embedding_text,
-                   application,
-                   knowledge_year,
-                   source_status,
-                   source_submitted_at,
-                   source_closed_at,
-                   submitter_id,
-                   lifeguard_id,
-                   source_project,
-                   created_at,
-                   1 - (embedding <=> CAST(@embedding AS vector)) AS similarity_score
-            FROM ticket_knowledge
+            WITH ranked_candidates AS (
+                SELECT id,
+                       ticket_id,
+                       source_event_id,
+                       problem,
+                       root_cause,
+                       resolution,
+                       keywords,
+                       embedding::text AS embedding_text,
+                       application,
+                       knowledge_year,
+                       source_status,
+                       source_submitted_at,
+                       source_closed_at,
+                       submitter_id,
+                       lifeguard_id,
+                       source_project,
+                       created_at,
+                       1 - (embedding <=> CAST(@embedding AS vector)) AS vector_similarity
+                FROM ticket_knowledge
             """ + Environment.NewLine;
 
-        sql += BuildScopedWhereClause(selectedGroupIds);
+            sql += BuildScopedWhereClause(scopedProjects, requireProjectMatch);
         sql += Environment.NewLine + """
-            ORDER BY embedding <=> CAST(@embedding AS vector)
+                ORDER BY embedding <=> CAST(@embedding AS vector)
+                LIMIT @candidateLimit
+            ),
+            feedback_scores AS (
+                SELECT TRIM(ticket_id) AS ticket_id,
+                       SUM(
+                           CASE
+                               WHEN feedback_type = 1 AND was_used THEN @strongHelpfulWeight
+                               WHEN feedback_type = 1 THEN @weakHelpfulWeight
+                               ELSE @notHelpfulPenalty
+                           END) AS feedback_weight
+                FROM feedback_logs
+                CROSS JOIN LATERAL UNNEST(string_to_array(retrieved_ticket_ids, ',')) AS ticket_id
+                GROUP BY TRIM(ticket_id)
+            )
+            SELECT candidate.id,
+                   candidate.ticket_id,
+                   candidate.source_event_id,
+                   candidate.problem,
+                   candidate.root_cause,
+                   candidate.resolution,
+                   candidate.keywords,
+                   candidate.embedding_text,
+                   candidate.application,
+                   candidate.knowledge_year,
+                   candidate.source_status,
+                   candidate.source_submitted_at,
+                   candidate.source_closed_at,
+                   candidate.submitter_id,
+                   candidate.lifeguard_id,
+                   candidate.source_project,
+                   candidate.created_at,
+                   candidate.vector_similarity + COALESCE(feedback_scores.feedback_weight, 0) AS similarity_score
+            FROM ranked_candidates candidate
+            LEFT JOIN feedback_scores
+                ON feedback_scores.ticket_id = candidate.ticket_id
+            ORDER BY similarity_score DESC, candidate.ticket_id ASC
             LIMIT @limit;
             """;
 
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("embedding", ToPgVectorLiteral(embedding));
         command.Parameters.AddWithValue("limit", limit);
-        ApplyScopeParameters(command, selectedGroupIds);
+        command.Parameters.AddWithValue("candidateLimit", candidateLimit);
+        command.Parameters.AddWithValue("strongHelpfulWeight", StrongHelpfulWeight);
+        command.Parameters.AddWithValue("weakHelpfulWeight", WeakHelpfulWeight);
+        command.Parameters.AddWithValue("notHelpfulPenalty", NotHelpfulPenalty);
+        ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<TicketKnowledge>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -181,6 +243,14 @@ public class PgVectorRepository : IPgVectorRepository
     }
 
     /// <summary>
+    /// Returns the accumulated feedback score for a retrieved ticket.
+    /// </summary>
+    public Task<double> GetFeedbackScore(string ticketId, CancellationToken cancellationToken = default)
+    {
+        return _feedbackRepository.GetFeedbackScore(ticketId, cancellationToken);
+    }
+
+    /// <summary>
     /// Returns monthly incident totals for the requested number of months.
     /// </summary>
     public async Task<IReadOnlyList<IncidentTimelinePoint>> GetIncidentTimeline(int monthCount = 6, CancellationToken cancellationToken = default)
@@ -193,6 +263,9 @@ public class PgVectorRepository : IPgVectorRepository
         await using var connection = new NpgsqlConnection(GetConnectionString());
         await connection.OpenAsync(cancellationToken);
 
+        var scopedProjects = await GetScopedProjectsAsync([], cancellationToken);
+        var projectScopeCondition = BuildProjectScopeCondition(scopedProjects);
+
         var sql = """
             SELECT DATE_TRUNC('month', created_at) AS month_start,
                    COUNT(*)::int AS incidents
@@ -202,23 +275,16 @@ public class PgVectorRepository : IPgVectorRepository
             ORDER BY month_start ASC;
             """;
 
-        if (!string.IsNullOrWhiteSpace(_settings.ApplicationName))
+        if (!string.IsNullOrWhiteSpace(projectScopeCondition))
         {
             sql = sql.Replace(
                 "WHERE created_at >=",
-                "WHERE application = @application AND created_at >=");
-        }
-
-        if (_settings.KnowledgeLookbackYears > 0)
-        {
-            sql = sql.Replace(
-                "GROUP BY",
-                "AND knowledge_year >= @minimumKnowledgeYear GROUP BY");
+                $"WHERE {projectScopeCondition} AND created_at >=");
         }
 
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("monthCount", monthCount);
-        ApplyScopeParameters(command);
+        ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<IncidentTimelinePoint>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -250,6 +316,28 @@ public class PgVectorRepository : IPgVectorRepository
         return $"[{string.Join(',', embedding.Select(value => value.ToString(CultureInfo.InvariantCulture)))}]";
     }
 
+    private static async Task EnsureFeedbackTableAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            CREATE TABLE IF NOT EXISTS feedback_logs (
+                id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                ticket_query text NOT NULL,
+                suggested_resolution text NOT NULL,
+                feedback_type integer NOT NULL,
+                was_used boolean NOT NULL DEFAULT FALSE,
+                comment text NOT NULL DEFAULT '',
+                retrieved_ticket_ids text NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT now()
+            );
+
+            ALTER TABLE IF EXISTS feedback_logs
+                ADD COLUMN IF NOT EXISTS was_used boolean NOT NULL DEFAULT FALSE;
+            """;
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static float[] ParsePgVector(string value)
     {
         var trimmed = value.Trim('[', ']');
@@ -264,108 +352,119 @@ public class PgVectorRepository : IPgVectorRepository
             .ToArray();
     }
 
-    private string BuildScopedWhereClause(IReadOnlyList<string>? selectedGroupIds = null)
+    private string BuildScopedWhereClause(IReadOnlyList<ProjectConfig> scopedProjects, bool requireProjectMatch)
     {
-        var clauses = new List<string>();
-
-        var appClause = BuildApplicationClause(selectedGroupIds);
-        if (!string.IsNullOrEmpty(appClause))
+        if (scopedProjects.Count == 0)
         {
-            clauses.Add(appClause);
+            return requireProjectMatch
+                ? $"WHERE 1 = 0{Environment.NewLine}"
+                : string.Empty;
         }
 
-        if (_settings.KnowledgeLookbackYears > 0)
-        {
-            clauses.Add("knowledge_year >= @minimumKnowledgeYear");
-        }
-
-        return clauses.Count == 0
+        var scopeCondition = BuildProjectScopeCondition(scopedProjects);
+        return string.IsNullOrWhiteSpace(scopeCondition)
             ? string.Empty
-            : $"WHERE {string.Join(" AND ", clauses)}{Environment.NewLine}";
+            : $"WHERE {scopeCondition}{Environment.NewLine}";
     }
 
-    /// <summary>
-    /// Builds the application part of the WHERE clause.
-    /// null selectedGroupIds = use configured ApplicationName (default scope).
-    /// empty list = no application filter (All).
-    /// non-empty list = OR-combine each matching group's ApplicationFilter.
-    /// </summary>
-    private string BuildApplicationClause(IReadOnlyList<string>? selectedGroupIds)
+    private string BuildProjectScopeCondition(IReadOnlyList<ProjectConfig> scopedProjects)
     {
-        if (selectedGroupIds == null)
+        if (scopedProjects.Count == 0)
         {
-            // Default: use single ApplicationName from settings
-            return string.IsNullOrWhiteSpace(_settings.ApplicationName)
-                ? string.Empty
-                : "application = @application";
-        }
-
-        if (selectedGroupIds.Count == 0)
-        {
-            // All groups selected — no application scope
             return string.Empty;
         }
 
-        var subClauses = new List<string>();
-        int i = 0;
-        foreach (var groupId in selectedGroupIds)
+        var projectClauses = new List<string>();
+
+        for (var index = 0; index < scopedProjects.Count; index++)
         {
-            var group = _settings.ProjectGroups.FirstOrDefault(g => string.Equals(g.GroupId, groupId, StringComparison.OrdinalIgnoreCase));
-            if (group == null || string.IsNullOrWhiteSpace(group.ApplicationFilter)) continue;
-            var op = group.ApplicationFilter.Contains('%') ? "ILIKE" : "=";
-            subClauses.Add($"application {op} @appFilter{i++}");
+            var project = scopedProjects[index];
+            if (string.IsNullOrWhiteSpace(project.ApplicationFilter))
+            {
+                continue;
+            }
+
+            var appOperator = project.ApplicationFilter.Contains('%') ? "ILIKE" : "=";
+            var conditions = new List<string>
+            {
+                $"application {appOperator} @appFilter{index}"
+            };
+
+            if (project.KnowledgeLookbackYears > 0)
+            {
+                conditions.Add($"knowledge_year >= @minimumKnowledgeYear{index}");
+            }
+
+            projectClauses.Add(conditions.Count == 1
+                ? conditions[0]
+                : $"({string.Join(" AND ", conditions)})");
         }
 
-        return subClauses.Count == 0
+        return projectClauses.Count == 0
             ? string.Empty
-            : subClauses.Count == 1
-                ? subClauses[0]
-                : $"({string.Join(" OR ", subClauses)})";
+            : projectClauses.Count == 1
+                ? projectClauses[0]
+                : $"({string.Join(" OR ", projectClauses)})";
     }
 
-    private void ApplyScopeParameters(NpgsqlCommand command, IReadOnlyList<string>? selectedGroupIds = null)
+    private void ApplyScopeParameters(NpgsqlCommand command, IReadOnlyList<ProjectConfig> scopedProjects)
     {
-        if (selectedGroupIds == null)
+        for (var index = 0; index < scopedProjects.Count; index++)
         {
-            // Default: use ApplicationName
-            if (!string.IsNullOrWhiteSpace(_settings.ApplicationName) && !command.Parameters.Contains("application"))
+            var project = scopedProjects[index];
+            if (string.IsNullOrWhiteSpace(project.ApplicationFilter))
             {
-                command.Parameters.AddWithValue("application", _settings.ApplicationName);
+                continue;
             }
-        }
-        else if (selectedGroupIds.Count > 0)
-        {
-            int i = 0;
-            foreach (var groupId in selectedGroupIds)
+
+            var appFilterParameter = $"appFilter{index}";
+            if (!command.Parameters.Contains(appFilterParameter))
             {
-                var group = _settings.ProjectGroups.FirstOrDefault(g => string.Equals(g.GroupId, groupId, StringComparison.OrdinalIgnoreCase));
-                if (group == null || string.IsNullOrWhiteSpace(group.ApplicationFilter)) continue;
-                var paramName = $"appFilter{i++}";
-                if (!command.Parameters.Contains(paramName))
+                command.Parameters.AddWithValue(appFilterParameter, project.ApplicationFilter);
+            }
+
+            if (project.KnowledgeLookbackYears > 0)
+            {
+                var minimumYearParameter = $"minimumKnowledgeYear{index}";
+                if (!command.Parameters.Contains(minimumYearParameter))
                 {
-                    command.Parameters.AddWithValue(paramName, group.ApplicationFilter);
+                    command.Parameters.AddWithValue(minimumYearParameter, GetMinimumKnowledgeYear(project.KnowledgeLookbackYears));
                 }
             }
         }
-        // else empty = All = no app params needed
-
-        if (_settings.KnowledgeLookbackYears > 0 && !command.Parameters.Contains("minimumKnowledgeYear"))
-        {
-            command.Parameters.AddWithValue("minimumKnowledgeYear", GetMinimumKnowledgeYear());
-        }
     }
 
-    private int GetMinimumKnowledgeYear()
+    private async Task<IReadOnlyList<ProjectConfig>> GetScopedProjectsAsync(IReadOnlyList<string>? selectedProjectIds, CancellationToken cancellationToken)
     {
-        var lookbackYears = Math.Max(1, _settings.KnowledgeLookbackYears);
-        return DateTime.UtcNow.Year - (lookbackYears - 1);
+        var projects = (await _projectRepository.GetAllProjectsAsync(cancellationToken))
+            .Where(project => !string.IsNullOrWhiteSpace(project.ApplicationFilter))
+            .ToList();
+
+        if (selectedProjectIds is not { Count: > 0 })
+        {
+            return projects;
+        }
+
+        var selectedProjectIdSet = selectedProjectIds
+            .Where(projectId => !string.IsNullOrWhiteSpace(projectId))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return projects
+            .Where(project => selectedProjectIdSet.Contains(project.ProjectId))
+            .ToList();
     }
 
     private string ResolveApplication(string application)
     {
         return string.IsNullOrWhiteSpace(application)
-            ? _settings.ApplicationName
+            ? string.Empty
             : application;
+    }
+
+    private static int GetMinimumKnowledgeYear(int lookbackYears)
+    {
+        var normalizedLookbackYears = Math.Max(1, lookbackYears);
+        return DateTime.UtcNow.Year - (normalizedLookbackYears - 1);
     }
 
     private int ResolveKnowledgeYear(int knowledgeYear)

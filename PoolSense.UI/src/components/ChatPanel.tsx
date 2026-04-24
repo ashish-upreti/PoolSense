@@ -13,6 +13,7 @@ export interface AssistantMessage {
   id: number
   role: 'assistant'
   text: string
+  query: string
   result: TicketWorkflowResult
 }
 
