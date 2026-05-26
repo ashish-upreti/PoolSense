@@ -71,6 +71,7 @@ export interface FeedbackRequest {
   feedbackType: number
   wasUsed?: boolean
   comment?: string
+  selectedTicketId: string
   retrievedTicketIds: string[]
 }
 

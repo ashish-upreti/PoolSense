@@ -49,9 +49,21 @@ public class FeedbackController : ControllerBase
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        var selectedTicketId = request.SelectedTicketId?.Trim() ?? string.Empty;
+
         if (retrievedTicketIds.Length == 0)
         {
             return BadRequest("At least one retrieved ticket id is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(selectedTicketId))
+        {
+            return BadRequest("A selected ticket id is required.");
+        }
+
+        if (!retrievedTicketIds.Contains(selectedTicketId, StringComparer.OrdinalIgnoreCase))
+        {
+            return BadRequest("Selected ticket id must be one of the retrieved ticket ids.");
         }
 
         try
@@ -63,6 +75,7 @@ public class FeedbackController : ControllerBase
                 FeedbackType = request.FeedbackType,
                 WasUsed = request.WasUsed,
                 Comment = string.IsNullOrWhiteSpace(request.Comment) ? string.Empty : request.Comment.Trim(),
+                TargetTicketId = selectedTicketId,
                 RetrievedTicketIds = string.Join(',', retrievedTicketIds),
                 CreatedAt = DateTime.UtcNow
             };

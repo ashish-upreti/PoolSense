@@ -146,14 +146,33 @@
             </div>
 
             <div class="feedback-panel">
+              <div *ngIf="message.result.similarIncidents.length > 0" class="feedback-ticket-selector">
+                <p class="feedback-label">Primary incident for this feedback</p>
+                <div class="feedback-ticket-options">
+                  <label *ngFor="let incident of message.result.similarIncidents" class="feedback-ticket-option" [class.feedback-ticket-option-active]="getFeedbackState(message.id).selectedTicketId === incident.ticketId">
+                    <input type="radio" [name]="'feedback-target-' + message.id" [value]="incident.ticketId" [(ngModel)]="getFeedbackState(message.id).selectedTicketId" [disabled]="isFeedbackDisabled(message)" />
+                    <span class="feedback-ticket-copy">
+                      <strong>{{ incident.ticketId }}</strong>
+                      <small>{{ incident.similarity > 0 ? (incident.similarity * 100 | number: '1.0-0') + '% match' : 'Historical incident' }}</small>
+                    </span>
+                  </label>
+                </div>
+              </div>
               <label class="feedback-label" [for]="'feedback-comment-' + message.id">Optional comment</label>
               <textarea [id]="'feedback-comment-' + message.id" class="feedback-comment-input" [(ngModel)]="getFeedbackState(message.id).comment" [name]="'feedback-comment-' + message.id" placeholder="Add context about this response" rows="2" [disabled]="isFeedbackDisabled(message)"></textarea>
+              <label class="feedback-usage-option" [for]="'feedback-used-' + message.id">
+                <input [id]="'feedback-used-' + message.id" type="checkbox" [(ngModel)]="getFeedbackState(message.id).wasUsed" [name]="'feedback-used-' + message.id" [disabled]="isFeedbackDisabled(message)" />
+                <span class="feedback-usage-copy">
+                  <strong>I used this resolution</strong>
+                  <small>Marks helpful feedback as a stronger signal for future incident ranking.</small>
+                </span>
+              </label>
               <div class="feedback-actions">
-                <button type="button" class="feedback-button" (click)="submitMessageFeedback(message, 1)" [disabled]="isFeedbackDisabled(message)">Helpful</button>
-                <button type="button" class="feedback-button feedback-button-secondary" (click)="submitMessageFeedback(message, -1)" [disabled]="isFeedbackDisabled(message)">Not Helpful</button>
+                <button type="button" class="feedback-button" (click)="submitMessageFeedback(message, 1)" [disabled]="isFeedbackSubmitDisabled(message)">Helpful</button>
+                <button type="button" class="feedback-button feedback-button-secondary" (click)="submitMessageFeedback(message, -1)" [disabled]="isFeedbackSubmitDisabled(message)">Not Helpful</button>
               </div>
               <p *ngIf="!getFeedbackState(message.id).submitted && getRetrievedTicketIds(message).length === 0" class="feedback-status">Feedback is unavailable because no similar incident ids were returned.</p>
-              <p *ngIf="getFeedbackState(message.id).submitted" class="feedback-status">Feedback submitted{{ getFeedbackState(message.id).selectedFeedbackType === 1 ? ': marked helpful.' : ': marked not helpful.' }}</p>
+              <p *ngIf="getFeedbackState(message.id).submitted" class="feedback-status">{{ getFeedbackSubmittedLabel(message.id) }}</p>
               <p *ngIf="getFeedbackState(message.id).error" class="error-banner">{{ getFeedbackState(message.id).error }}</p>
             </div>
           </article>

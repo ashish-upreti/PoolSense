@@ -34,6 +34,8 @@ type FeedbackState = {
   submitted: boolean
   error: string
   selectedFeedbackType: number | null
+  wasUsed: boolean
+  selectedTicketId: string
 }
 
 type TelemetryDatum = {
@@ -59,6 +61,22 @@ const defaultProjectForm: ProjectConfigInput = {
 
 function createDefaultProjectForm(): ProjectConfigInput {
   return { ...defaultProjectForm }
+}
+
+function createFeedbackState(selectedTicketId = ''): FeedbackState {
+  return {
+    comment: '',
+    isSubmitting: false,
+    submitted: false,
+    error: '',
+    selectedFeedbackType: null,
+    wasUsed: false,
+    selectedTicketId,
+  }
+}
+
+function getDefaultFeedbackTicketId(similarIncidents: SimilarIncident[]) {
+  return similarIncidents.find((incident) => incident.ticketId.trim().length > 0)?.ticketId ?? ''
 }
 
 function buildProjectIdPreview(projectName: string) {
@@ -180,6 +198,10 @@ export class AppComponent implements OnInit {
         query: message,
         result,
       }
+
+      this.feedbackStateByMessageId[assistantMessage.id] = createFeedbackState(
+        getDefaultFeedbackTicketId(result.similarIncidents),
+      )
 
       this.messages = [...this.messages, assistantMessage]
       this.insights = result
@@ -326,13 +348,7 @@ export class AppComponent implements OnInit {
   }
 
   getFeedbackState(messageId: number) {
-    this.feedbackStateByMessageId[messageId] ??= {
-      comment: '',
-      isSubmitting: false,
-      submitted: false,
-      error: '',
-      selectedFeedbackType: null,
-    }
+    this.feedbackStateByMessageId[messageId] ??= createFeedbackState()
 
     return this.feedbackStateByMessageId[messageId]
   }
@@ -342,8 +358,33 @@ export class AppComponent implements OnInit {
     return state.submitted || state.isSubmitting || this.getRetrievedTicketIds(message).length === 0
   }
 
+  isFeedbackSubmitDisabled(message: AssistantMessage) {
+    return this.isFeedbackDisabled(message) || this.getFeedbackState(message.id).selectedTicketId.trim().length === 0
+  }
+
+  getFeedbackSubmittedLabel(messageId: number) {
+    const state = this.getFeedbackState(messageId)
+    const targetLabel = state.selectedTicketId ? ` for ${state.selectedTicketId}` : ''
+
+    if (!state.submitted) {
+      return ''
+    }
+
+    if (state.selectedFeedbackType === 1) {
+      return state.wasUsed
+        ? `Feedback submitted${targetLabel}: marked helpful and used in resolution.`
+        : `Feedback submitted${targetLabel}: marked helpful.`
+    }
+
+    return `Feedback submitted${targetLabel}: marked not helpful.`
+  }
+
   async submitMessageFeedback(message: AssistantMessage, feedbackType: number) {
-    if (this.isFeedbackDisabled(message)) {
+    if (this.isFeedbackSubmitDisabled(message)) {
+      if (!this.isFeedbackDisabled(message)) {
+        this.getFeedbackState(message.id).error = 'Select the primary incident for this feedback.'
+      }
+
       return
     }
 
@@ -352,14 +393,19 @@ export class AppComponent implements OnInit {
     state.error = ''
 
     try {
+      const wasUsed = feedbackType === 1 && state.wasUsed
+
       await this.api.submitFeedback({
         query: message.query,
         suggestedResolution: message.result.suggestedResolution,
         feedbackType,
+        wasUsed,
         comment: state.comment.trim() || undefined,
+        selectedTicketId: state.selectedTicketId,
         retrievedTicketIds: this.getRetrievedTicketIds(message),
       })
 
+      state.wasUsed = wasUsed
       state.selectedFeedbackType = feedbackType
       state.submitted = true
     } catch (requestError) {

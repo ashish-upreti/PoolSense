@@ -36,6 +36,9 @@ public class PgVectorRepository : IPgVectorRepository
     private const double StrongHelpfulWeight = 0.10d;
     private const double WeakHelpfulWeight = 0.05d;
     private const double NotHelpfulPenalty = -0.05d;
+    private const double MaxFeedbackWeight = 0.20d;
+    private const double MinFeedbackWeight = -0.20d;
+    private const double FeedbackHalfLifeSeconds = 45d * 24d * 60d * 60d;
 
     private readonly IConfiguration _configuration;
     private readonly IProjectRepository _projectRepository;
@@ -165,17 +168,42 @@ public class PgVectorRepository : IPgVectorRepository
                 ORDER BY embedding <=> CAST(@embedding AS vector)
                 LIMIT @candidateLimit
             ),
-            feedback_scores AS (
+            feedback_events AS (
+                SELECT TRIM(target_ticket_id) AS ticket_id,
+                       feedback_type,
+                       was_used,
+                       created_at
+                FROM feedback_logs
+                WHERE NULLIF(TRIM(target_ticket_id), '') IS NOT NULL
+
+                UNION ALL
+
                 SELECT TRIM(ticket_id) AS ticket_id,
-                       SUM(
-                           CASE
-                               WHEN feedback_type = 1 AND was_used THEN @strongHelpfulWeight
-                               WHEN feedback_type = 1 THEN @weakHelpfulWeight
-                               ELSE @notHelpfulPenalty
-                           END) AS feedback_weight
+                       feedback_type,
+                       was_used,
+                       created_at
                 FROM feedback_logs
                 CROSS JOIN LATERAL UNNEST(string_to_array(retrieved_ticket_ids, ',')) AS ticket_id
-                GROUP BY TRIM(ticket_id)
+                WHERE NULLIF(TRIM(target_ticket_id), '') IS NULL
+            ),
+            feedback_scores AS (
+                SELECT ticket_id,
+                       GREATEST(
+                           @minFeedbackWeight,
+                           LEAST(
+                               @maxFeedbackWeight,
+                               SUM(
+                                   CASE
+                                       WHEN feedback_type = 1 AND was_used THEN @strongHelpfulWeight
+                                       WHEN feedback_type = 1 THEN @weakHelpfulWeight
+                                       ELSE @notHelpfulPenalty
+                                   END * POWER(0.5, EXTRACT(EPOCH FROM (NOW() - created_at)) / @feedbackHalfLifeSeconds)
+                               )
+                           )
+                       ) AS feedback_weight
+                FROM feedback_events
+                WHERE ticket_id <> ''
+                GROUP BY ticket_id
             )
             SELECT candidate.id,
                    candidate.ticket_id,
@@ -209,6 +237,9 @@ public class PgVectorRepository : IPgVectorRepository
         command.Parameters.AddWithValue("strongHelpfulWeight", StrongHelpfulWeight);
         command.Parameters.AddWithValue("weakHelpfulWeight", WeakHelpfulWeight);
         command.Parameters.AddWithValue("notHelpfulPenalty", NotHelpfulPenalty);
+        command.Parameters.AddWithValue("maxFeedbackWeight", MaxFeedbackWeight);
+        command.Parameters.AddWithValue("minFeedbackWeight", MinFeedbackWeight);
+        command.Parameters.AddWithValue("feedbackHalfLifeSeconds", FeedbackHalfLifeSeconds);
         ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<TicketKnowledge>();
@@ -326,12 +357,16 @@ public class PgVectorRepository : IPgVectorRepository
                 feedback_type integer NOT NULL,
                 was_used boolean NOT NULL DEFAULT FALSE,
                 comment text NOT NULL DEFAULT '',
+                target_ticket_id text NOT NULL DEFAULT '',
                 retrieved_ticket_ids text NOT NULL,
                 created_at timestamptz NOT NULL DEFAULT now()
             );
 
             ALTER TABLE IF EXISTS feedback_logs
                 ADD COLUMN IF NOT EXISTS was_used boolean NOT NULL DEFAULT FALSE;
+
+            ALTER TABLE IF EXISTS feedback_logs
+                ADD COLUMN IF NOT EXISTS target_ticket_id text NOT NULL DEFAULT '';
             """;
 
         await using var command = new NpgsqlCommand(sql, connection);

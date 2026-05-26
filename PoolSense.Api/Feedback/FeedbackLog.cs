@@ -8,6 +8,7 @@ public sealed class FeedbackLog
     public int FeedbackType { get; set; }
     public bool WasUsed { get; set; }
     public string Comment { get; set; } = string.Empty;
+    public string TargetTicketId { get; set; } = string.Empty;
     public string RetrievedTicketIds { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
