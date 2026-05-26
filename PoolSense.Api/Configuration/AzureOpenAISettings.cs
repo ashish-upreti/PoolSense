@@ -5,6 +5,7 @@ public class AiSettings
     public string BaseUrl { get; set; } = string.Empty;
     public string ApiKey { get; set; } = string.Empty;
     public string ApiVersion { get; set; } = string.Empty;
+    public string ImageApiVersion { get; set; } = string.Empty;
     public AiModelSettings Models { get; set; } = new();
 }
 

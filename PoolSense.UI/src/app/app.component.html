@@ -1,0 +1,347 @@
+<div class="workspace-layout">
+  <div class="app-shell" [class.app-shell-project-collapsed]="isProjectPanelCollapsed">
+    <aside class="project-panel" [class.project-panel-collapsed]="isProjectPanelCollapsed" [attr.aria-label]="isProjectPanelCollapsed ? 'Project configuration panel collapsed' : 'Project configuration panel'">
+      <div class="project-panel-header">
+        <div *ngIf="!isProjectPanelCollapsed">
+          <p class="panel-kicker">Configuration</p>
+          <h2>Project Configuration Studio</h2>
+          <p class="workspace-copy">Persist project defaults in PostgreSQL and monitor ingestion progress per project.</p>
+        </div>
+
+        <button
+          type="button"
+          class="panel-collapse-button"
+          (click)="toggleProjectPanel()"
+          [attr.aria-expanded]="!isProjectPanelCollapsed"
+          [attr.aria-label]="isProjectPanelCollapsed ? 'Expand project configuration panel' : 'Collapse project configuration panel'"
+          [attr.title]="isProjectPanelCollapsed ? 'Expand project configuration panel' : 'Collapse project configuration panel'">
+          {{ isProjectPanelCollapsed ? '>' : '<' }}
+        </button>
+      </div>
+
+      <div *ngIf="isProjectPanelCollapsed" class="project-panel-collapsed-copy">
+        <span>Project Config</span>
+      </div>
+
+      <section *ngIf="!isProjectPanelCollapsed" class="project-studio">
+        <div class="settings-banner-group settings-banner-group-left">
+          <div class="workspace-banner">
+            <span class="workspace-dot"></span>
+            <span>{{ projects.length }} configured project{{ projects.length === 1 ? '' : 's' }}</span>
+          </div>
+          <div class="workspace-banner">
+            <span class="workspace-dot"></span>
+            <span>{{ appSettings.ticketAutomation.email.deliveryMode }} · {{ appSettings.ticketAutomation.pollIntervalSeconds }}s polling · {{ appSettings.ticketAutomation.sourceDatabaseName }}</span>
+          </div>
+        </div>
+
+        <p *ngIf="projectError" class="project-feedback-banner">{{ projectError }}</p>
+        <p *ngIf="projectNotice" class="project-feedback-banner project-feedback-banner-success">{{ projectNotice }}</p>
+
+        <div class="project-studio-grid">
+          <form class="project-form-card" (ngSubmit)="handleProjectSubmit()">
+            <div class="card-heading-row project-toolbar">
+              <div>
+                <p class="panel-kicker">Form</p>
+                <h3>{{ editingProjectId ? 'Edit project configuration' : 'Add project configuration' }}</h3>
+              </div>
+              <button *ngIf="editingProjectId" type="button" class="feedback-button feedback-button-secondary" (click)="cancelProjectEdit()">Cancel edit</button>
+            </div>
+
+            <div class="project-form-grid">
+              <label class="field-group">
+                <span class="field-label">Project Name</span>
+                <input class="field-input" type="text" name="projectName" [(ngModel)]="projectForm.projectName" placeholder="FSCO-Fab" [disabled]="isProjectSaving" />
+              </label>
+
+              <label class="field-group field-group-full">
+                <span class="field-label">Application Filter(Pool Application)</span>
+                <input class="field-input" type="text" name="applicationFilter" [(ngModel)]="projectForm.applicationFilter" placeholder="%FSCO-FAB%" [disabled]="isProjectSaving" />
+                <span class="field-note">Optional. Use an exact application name for one app, or use `%` wildcards to group multiple apps together.</span>
+              </label>
+
+              <label class="field-group">
+                <span class="field-label">Project Id</span>
+                <input class="field-input" type="text" [value]="editingProjectId ? projectForm.projectId : generatedProjectId" placeholder="Auto-generated" readonly [disabled]="isProjectSaving" />
+                <span class="field-note">{{ editingProjectId ? 'Stable identifier used for scoping, ingestion status, and updates.' : generatedProjectId ? 'Generated automatically from Project Name when you create the project.' : 'Will be auto-generated from Project Name when you create the project.' }}</span>
+              </label>
+
+              <label class="field-group">
+                <span class="field-label">Knowledge Lookback Years</span>
+                <input class="field-input" type="number" name="knowledgeLookbackYears" min="0" [(ngModel)]="projectForm.knowledgeLookbackYears" [disabled]="isProjectSaving" />
+              </label>
+
+              <label class="field-group">
+                <span class="field-label">Similarity Search Limit</span>
+                <input class="field-input" type="number" name="similaritySearchLimit" min="1" max="20" [(ngModel)]="projectForm.similaritySearchLimit" [disabled]="isProjectSaving" />
+                <span class="field-note">Allowed range: 1 to 20</span>
+              </label>
+
+              <label class="field-group field-group-full">
+                <span class="field-label">Email Recipients</span>
+                <input class="field-input" type="text" name="emailRecipients" [(ngModel)]="projectForm.emailRecipients" placeholder="ashish.upreti@intel.com;" [disabled]="isProjectSaving" />
+                <span class="field-note">Optional, comma-separated email addresses.</span>
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <label class="toggle-card">
+                <input type="checkbox" name="sendEmail" [(ngModel)]="projectForm.sendEmail" [disabled]="isProjectSaving" />
+                <span><strong>Send Email</strong><small>Keep notification delivery enabled for this project.</small></span>
+              </label>
+
+              <label class="toggle-card">
+                <input type="checkbox" name="poolingEnabled" [(ngModel)]="projectForm.poolingEnabled" [disabled]="isProjectSaving" />
+                <span><strong>Pooling Enabled</strong><small>Allow ingestion to process this project during scheduled runs.</small></span>
+              </label>
+            </div>
+
+            <div class="composer-footer">
+              <p class="helper-text">Project ID is auto-generated on create and remains immutable to keep project scoping and ingestion status stable.</p>
+              <button type="submit" class="send-button" [disabled]="isProjectSaving">{{ isProjectSaving ? 'Saving...' : editingProjectId ? 'Update Project' : 'Create Project' }}</button>
+            </div>
+          </form>
+
+          <div class="project-list-card">
+            <div class="card-heading-row project-toolbar">
+              <div>
+                <p class="panel-kicker">Status</p>
+                <h3>Configured projects</h3>
+              </div>
+              <button type="button" class="feedback-button feedback-button-secondary" (click)="loadProjectWorkspace(true)" [disabled]="isProjectLoading">Refresh</button>
+            </div>
+
+            <div *ngIf="isProjectLoading" class="project-empty"><p class="empty-copy">Loading project configuration and ingestion status...</p></div>
+            <div *ngIf="!isProjectLoading && projects.length === 0" class="project-empty"><p class="empty-copy">No projects are configured yet. Create the first project from the form.</p></div>
+
+            <div *ngIf="!isProjectLoading && projects.length > 0" class="project-list">
+              <article *ngFor="let project of projects" class="project-card">
+                <div class="project-card-header">
+                  <div>
+                    <p class="project-card-title">{{ project.projectName }}</p>
+                    <p class="project-card-meta">{{ project.projectId }}</p>
+                  </div>
+                  <button type="button" class="feedback-button feedback-button-secondary project-edit-button" (click)="handleEditProject(project)">Edit</button>
+                </div>
+
+                <div class="project-status-row">
+                  <span class="project-chip">Ingestion Status</span>
+                  <span class="data-mono">{{ getProjectStatus(project).ingested }} / {{ getProjectStatus(project).total }}</span>
+                </div>
+
+                <div class="project-progress-track" aria-hidden="true"><span class="project-progress-fill" [style.width.%]="clampPercentage(getProjectStatus(project).progressPercentage)"></span></div>
+
+                <div class="project-status-row">
+                  <span class="helper-text">Progress</span>
+                  <span class="confidence-value">{{ getProjectStatus(project).progressPercentage }}%</span>
+                </div>
+
+                <p class="project-card-copy">Lookback: {{ project.knowledgeLookbackYears }} year{{ project.knowledgeLookbackYears === 1 ? '' : 's' }} &bull; Similarity limit: {{ project.similaritySearchLimit }} &bull; Email: {{ project.sendEmail ? 'On' : 'Off' }} &bull; Pooling: {{ project.poolingEnabled ? 'On' : 'Off' }}</p>
+                <p class="project-card-meta">Filter: {{ project.applicationFilter || project.projectName }}</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <section class="workspace-panel workspace-chat">
+      <header class="workspace-header">
+        <div>
+          <p class="panel-kicker">FSMS</p>
+          <h1><span [style.color]="isDark ? '#ffffff' : '#0068B5'">Pool</span><span style="color: #00C7FD">Sense</span></h1>
+          <p class="workspace-copy">Detect. Diagnose. Resolve.</p>
+        </div>
+        <div class="workspace-actions">
+          <div class="workspace-banner">
+            <span class="workspace-dot"></span>
+            <span>{{ isLoading ? 'Analyzing live incident context' : 'Ready for triage' }}</span>
+          </div>
+          <button type="button" class="dark-toggle" (click)="toggleTheme()" [attr.aria-label]="isDark ? 'Switch to light mode' : 'Switch to dark mode'" [attr.title]="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
+            {{ isDark ? 'L' : 'D' }}
+          </button>
+        </div>
+      </header>
+
+      <div class="prompt-strip" aria-label="Suggested prompts">
+        <button *ngFor="let prompt of quickPrompts" type="button" class="prompt-chip" (click)="handleSend(prompt)" [disabled]="isLoading">{{ prompt }}</button>
+      </div>
+
+      <div *ngIf="groups.length > 0" class="group-selector" role="group" aria-label="Project group filter">
+        <p class="group-selector-label">Search scope</p>
+        <div class="group-selector-options">
+          <label class="group-chip" [class.group-chip-active]="isAllGroupsSelected">
+            <input type="checkbox" [value]="allGroupValue" [checked]="isAllGroupsSelected" [disabled]="isLoading" (change)="handleAllGroupChange($any($event.target).checked)" />
+            All
+          </label>
+          <label *ngFor="let group of groups" class="group-chip" [class.group-chip-active]="isGroupChecked(group.groupId)">
+            <input type="checkbox" [value]="group.groupId" [checked]="isGroupChecked(group.groupId)" [disabled]="isLoading" (change)="handleGroupChange(group.groupId, $any($event.target).checked)" />
+            {{ group.displayName }}
+          </label>
+        </div>
+      </div>
+
+      <div class="conversation-panel" role="log" aria-live="polite">
+        <div *ngIf="messages.length === 0" class="empty-state">
+          <p class="panel-kicker">Conversation</p>
+          <h3>Describe an issue to start the investigation</h3>
+          <p>Engineers should be able to see the conversation, suggested fix, similar incidents, and system insights together on one screen.</p>
+        </div>
+
+        <ng-container *ngFor="let message of messages; trackBy: trackMessage">
+          <article *ngIf="message.role === 'user'" class="message-bubble message-bubble-user">
+            <p class="message-label">You</p>
+            <p class="message-body">{{ message.text }}</p>
+          </article>
+
+          <article *ngIf="message.role === 'assistant'" class="message-bubble message-bubble-assistant">
+            <p class="message-label">PoolSense</p>
+            <div class="assistant-summary">
+              <section>
+                <h3>Root Cause</h3>
+                <p>{{ message.result.suggestedRootCause || 'Not provided' }}</p>
+              </section>
+              <section>
+                <h3>Resolution</h3>
+                <p>{{ message.result.suggestedResolution || 'Not provided' }}</p>
+              </section>
+            </div>
+
+            <div class="feedback-panel">
+              <label class="feedback-label" [for]="'feedback-comment-' + message.id">Optional comment</label>
+              <textarea [id]="'feedback-comment-' + message.id" class="feedback-comment-input" [(ngModel)]="getFeedbackState(message.id).comment" [name]="'feedback-comment-' + message.id" placeholder="Add context about this response" rows="2" [disabled]="isFeedbackDisabled(message)"></textarea>
+              <div class="feedback-actions">
+                <button type="button" class="feedback-button" (click)="submitMessageFeedback(message, 1)" [disabled]="isFeedbackDisabled(message)">Helpful</button>
+                <button type="button" class="feedback-button feedback-button-secondary" (click)="submitMessageFeedback(message, -1)" [disabled]="isFeedbackDisabled(message)">Not Helpful</button>
+              </div>
+              <p *ngIf="!getFeedbackState(message.id).submitted && getRetrievedTicketIds(message).length === 0" class="feedback-status">Feedback is unavailable because no similar incident ids were returned.</p>
+              <p *ngIf="getFeedbackState(message.id).submitted" class="feedback-status">Feedback submitted{{ getFeedbackState(message.id).selectedFeedbackType === 1 ? ': marked helpful.' : ': marked not helpful.' }}</p>
+              <p *ngIf="getFeedbackState(message.id).error" class="error-banner">{{ getFeedbackState(message.id).error }}</p>
+            </div>
+          </article>
+        </ng-container>
+
+        <article *ngIf="isLoading" class="message-bubble message-bubble-loading">
+          <p class="message-label">PoolSense</p>
+          <p class="message-body">PoolSense is analyzing incidents...</p>
+        </article>
+      </div>
+
+      <form class="composer" (ngSubmit)="handleSend()">
+        <label class="sr-only" for="incident-input">Describe your issue</label>
+        <textarea id="incident-input" class="composer-input" name="incident-input" [(ngModel)]="input" (keydown)="handleComposerKeydown($event)" placeholder="Describe your issue... (Enter to send, Shift+Enter for new line)" rows="3" [disabled]="isLoading"></textarea>
+        <div class="composer-footer">
+          <p class="helper-text">Add the service, symptom, and any recent deployment or dependency change.</p>
+          <button type="submit" class="send-button" [disabled]="isLoading || !input.trim()">Ask PoolSense</button>
+        </div>
+        <p *ngIf="error" class="error-banner">{{ error }}</p>
+      </form>
+
+    </section>
+
+    <aside class="insight-panel">
+      <div class="insight-panel-header">
+        <div>
+          <p class="panel-kicker">Incident Insights</p>
+          <h2>Operational context</h2>
+        </div>
+        <span class="panel-status" [class.panel-status-busy]="isLoading">{{ isLoading ? 'PoolSense is analyzing incidents...' : 'Workspace synced' }}</span>
+      </div>
+
+      <section *ngIf="!insights" class="insight-card insight-empty">
+        <h3>No insights yet</h3>
+        <p>Ask PoolSense about an incident to populate similar cases, failure patterns, and system-level analysis in this workspace.</p>
+      </section>
+
+      <ng-container *ngIf="insights">
+        <section class="insight-card">
+          <div class="card-heading-row">
+            <div>
+              <p class="panel-kicker">System Insights</p>
+              <h3>Confidence and routing</h3>
+            </div>
+            <strong class="confidence-value data-mono">{{ confidence }}%</strong>
+          </div>
+
+          <div class="confidence-track" aria-hidden="true"><span class="confidence-fill" [style.width.%]="confidence"></span></div>
+
+          <div class="system-grid">
+            <div>
+              <p class="system-label">System</p>
+              <p class="data-mono">{{ insights.failurePattern.system || 'Unknown system' }}</p>
+            </div>
+            <div>
+              <p class="system-label">Component</p>
+              <p class="data-mono">{{ insights.failurePattern.component || 'Unknown component' }}</p>
+            </div>
+            <div>
+              <p class="system-label">Resolution Category</p>
+              <p>{{ insights.failurePattern.resolutionCategory || 'Unclassified' }}</p>
+            </div>
+            <div>
+              <p class="system-label">Pattern Ticket</p>
+              <p class="data-mono">{{ insights.failurePattern.ticketId || 'Not linked' }}</p>
+            </div>
+          </div>
+
+          <div class="reasoning-block">
+            <p class="system-label">Reasoning</p>
+            <p>{{ insights.reasoning || 'No reasoning details available.' }}</p>
+          </div>
+
+          <div class="telemetry-block">
+            <div class="card-heading-row">
+              <div>
+                <p class="panel-kicker">System Insights</p>
+                <h3>Telemetry snapshot</h3>
+              </div>
+              <span class="section-count data-mono">LIVE</span>
+            </div>
+
+            <div class="telemetry-chart telemetry-bars" aria-label="Telemetry snapshot">
+              <div *ngFor="let datum of telemetry" class="telemetry-bar-item">
+                <div class="telemetry-bar-track"><span class="telemetry-bar-fill" [style.height.%]="datum.value" [style.background]="datum.color"></span></div>
+                <p class="telemetry-bar-label">{{ datum.name }}</p>
+                <p class="data-mono telemetry-bar-value">{{ datum.value }}%</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="insight-card">
+          <div class="card-heading-row">
+            <div>
+              <p class="panel-kicker">Similar Incidents</p>
+              <h3>Historical matches</h3>
+            </div>
+            <span class="section-count data-mono">{{ insights.similarIncidents.length }}</span>
+          </div>
+
+          <p *ngIf="insights.similarIncidents.length === 0" class="empty-copy">No related incidents were returned.</p>
+          <ul *ngIf="insights.similarIncidents.length > 0" class="insight-list">
+            <li *ngFor="let incident of insights.similarIncidents; trackBy: trackIncident" class="insight-list-item">
+              <div>
+                <p class="insight-item-title data-mono">{{ incident.ticketId }} <span *ngIf="incident.similarity > 0" class="similarity-badge">{{ incident.similarity * 100 | number: '1.0-0' }}% match</span></p>
+                <p class="insight-item-copy">{{ incident.problem }}</p>
+              </div>
+              <div class="incident-meta">
+                <span class="incident-tag" [title]="incident.resolution">{{ truncateResolution(incident.resolution) }}</span>
+                <a class="incident-link data-mono" [href]="'https://pool.intel.com/Edit/' + incident.ticketId" target="_blank" rel="noopener noreferrer">View ticket {{ incident.ticketId }}</a>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section class="insight-card">
+          <p class="panel-kicker">Failure Patterns</p>
+          <h3>Recurring signals</h3>
+          <p *ngIf="patterns.length === 0" class="empty-copy">No failure patterns detected yet.</p>
+          <ul *ngIf="patterns.length > 0" class="pattern-list">
+            <li *ngFor="let pattern of patterns" class="pattern-pill">{{ pattern }}</li>
+          </ul>
+        </section>
+      </ng-container>
+    </aside>
+  </div>
+
+</div>

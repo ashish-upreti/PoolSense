@@ -14,15 +14,18 @@ public class BackgroundTicketPollingService : BackgroundService
 
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly IOptionsMonitor<TicketAutomationSettings> _settingsMonitor;
+    private readonly IOptionsMonitor<AiSettings> _aiSettingsMonitor;
     private readonly ILogger<BackgroundTicketPollingService> _logger;
 
     public BackgroundTicketPollingService(
         IServiceScopeFactory serviceScopeFactory,
         IOptionsMonitor<TicketAutomationSettings> settingsMonitor,
+        IOptionsMonitor<AiSettings> aiSettingsMonitor,
         ILogger<BackgroundTicketPollingService> logger)
     {
         _serviceScopeFactory = serviceScopeFactory;
         _settingsMonitor = settingsMonitor;
+        _aiSettingsMonitor = aiSettingsMonitor;
         _logger = logger;
     }
 
@@ -36,6 +39,13 @@ public class BackgroundTicketPollingService : BackgroundService
             if (!settings.PollingEnabled)
             {
                 _logger.LogInformation("Polling is paused (PollingEnabled=false). Waiting {DelaySeconds} seconds before the next check.", delay.TotalSeconds);
+                await Task.Delay(delay, stoppingToken);
+                continue;
+            }
+
+            if (!HasRequiredAiSettings(_aiSettingsMonitor.CurrentValue))
+            {
+                _logger.LogWarning("Polling is skipped because Azure OpenAI settings are incomplete. Configure AiSettings:BaseUrl, AiSettings:ApiKey, AiSettings:Models:Chat, and AiSettings:Models:Embeddings.");
                 await Task.Delay(delay, stoppingToken);
                 continue;
             }
@@ -55,6 +65,14 @@ public class BackgroundTicketPollingService : BackgroundService
 
             await Task.Delay(delay, stoppingToken);
         }
+    }
+
+    private static bool HasRequiredAiSettings(AiSettings aiSettings)
+    {
+        return !string.IsNullOrWhiteSpace(aiSettings.BaseUrl)
+            && !string.IsNullOrWhiteSpace(aiSettings.ApiKey)
+            && !string.IsNullOrWhiteSpace(aiSettings.Models.Chat)
+            && !string.IsNullOrWhiteSpace(aiSettings.Models.Embeddings);
     }
 
     private async Task PollOnceAsync(CancellationToken cancellationToken)

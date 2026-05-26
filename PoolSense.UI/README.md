@@ -1,6 +1,6 @@
 # PoolSense.UI
 
-PoolSense.UI is the React and Vite frontend for PoolSense, wrapped in an SDK-style .NET project so it can live in the solution as a first-class project.
+PoolSense.UI is the Angular 18 frontend for PoolSense, wrapped in an SDK-style .NET project so it can live in the solution as a first-class project.
 
 ## What the UI Does
 
@@ -9,16 +9,16 @@ The current workspace is a two-panel operator surface:
 - The left panel is the incident conversation workspace with a project group scope selector.
 - The right panel shows structured operational context returned by the API.
 - Quick prompts seed common incident descriptions for faster smoke testing.
-- A `GroupSelector` above the chat input lets operators narrow the similarity search to one or more configured project groups (e.g., ATCR, FSCO-FAB, DxCR). Leaving all groups unchecked searches across all available knowledge.
+- The search scope selector above the chat input lets operators narrow the similarity search to one or more configured project groups (e.g., ATCR, FSCO-FAB, DxCR). Leaving all groups unchecked searches across all available knowledge.
 - The UI calls the main workflow endpoint and renders root cause, resolution, confidence, similar incidents, and failure-pattern metadata from the response.
 
-The main interaction starts in [src/App.tsx](src/App.tsx), which fetches available project groups on mount, sends incident text and selected group IDs to the API, and stores the returned `TicketWorkflowResult` for both the chat transcript and the insights panel.
+The main interaction starts in [src/app/app.component.ts](src/app/app.component.ts), which fetches available project groups on mount, sends incident text and selected group IDs to the API, and stores the returned `TicketWorkflowResult` for both the chat transcript and the insights panel.
 
 ## Development
 
-- `npm run dev` starts the Vite development server on `http://localhost:5173`.
+- `npm run dev` starts the Angular development server with the local API proxy.
 - `dotnet build PoolSense.UI.csproj` runs the frontend production build through MSBuild.
-- `npm run build` performs the standalone TypeScript and Vite production build.
+- `npm run build` performs the Angular production build.
 - `npm run lint` runs ESLint against the UI codebase.
 
 ## Runtime Flow
@@ -32,31 +32,24 @@ The main interaction starts in [src/App.tsx](src/App.tsx), which fetches availab
 
 Key UI modules:
 
-- [src/components/ChatPanel.tsx](src/components/ChatPanel.tsx)
-	Conversation area, prompt chips, composer, and loading/error states.
+- [src/app/app.component.ts](src/app/app.component.ts)
+	Standalone Angular component for the chat workspace, insights sidebar, project configuration studio, and UI state.
 
-- [src/components/GroupSelector.tsx](src/components/GroupSelector.tsx)
-	Project group scope selector. Fetched groups are rendered as toggle chips. An empty selection means "All groups".
+- [src/app/app.component.html](src/app/app.component.html)
+	Angular template for the workspace layout, scope selector, assistant feedback, insights, and project forms.
 
-- [src/components/InsightPanel.tsx](src/components/InsightPanel.tsx)
-	Summary cards for confidence, routing metadata, reasoning, telemetry, and historical matches.
+- [src/app/api.service.ts](src/app/api.service.ts)
+	Typed API contract and fetch wrappers for workflow, feedback, project configuration, groups, and ingestion status.
 
-- [src/components/IncidentList.tsx](src/components/IncidentList.tsx)
-	Renders the list of similar historical incidents returned by the workflow.
-
-- [src/components/PatternList.tsx](src/components/PatternList.tsx)
-	Renders failure pattern details.
-
-- [src/components/TelemetryChart.tsx](src/components/TelemetryChart.tsx)
-	Lightweight incident-count chart using Recharts.
-
-- [src/services/api.ts](src/services/api.ts)
-	Typed API contract and fetch wrappers for the workflow request and group listing.
+- [src/App.css](src/App.css)
+	Shared workspace styling used by the Angular template.
 
 ## API Integration
 
-- `VITE_API_PROXY_TARGET` defaults to `http://localhost:5217` for local proxying.
-- `VITE_API_BASE_URL` can be used when the frontend needs to call an external API base URL directly.
+- [proxy.conf.json](proxy.conf.json) forwards `/api` requests to `http://localhost:5217` during local Angular development.
+- In production, the UI uses same-origin `/api` paths.
+- [src/environments/environment.ts](src/environments/environment.ts) contains frontend-safe defaults derived from backend appsettings, including API base path, polling labels, similarity limit defaults, and email delivery mode.
+- Backend-only values such as Azure OpenAI API keys and database connection strings must stay in API configuration, user secrets, environment variables, or a deployment secret store.
 
 Endpoints called by the UI:
 
@@ -96,6 +89,6 @@ In local frontend work, prefer `npm run dev`. In integrated validation or CI, pr
 
 ## Troubleshooting
 
-- If the browser cannot reach the API during local development, confirm the backend is listening on `http://localhost:5217` or adjust `VITE_API_PROXY_TARGET`.
+- If the browser cannot reach the API during local development, confirm the backend is listening on `http://localhost:5217` or adjust [proxy.conf.json](proxy.conf.json).
 - If the UI loads but workflow requests fail with `500`, check the API configuration for Azure OpenAI and PostgreSQL.
 - If `dotnet build` fails inside `PoolSense.UI`, run `npm ci` manually once in this folder to confirm Node and npm are available on the machine.

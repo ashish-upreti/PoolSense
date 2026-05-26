@@ -1,8 +1,8 @@
--- Run from a shell first:
--- docker exec -it pgvector-db psql -U postgres -d poolsense
+-- Run this full smoke-test script from PowerShell:
+-- Get-Content -Raw .\database\testingPGSQL.sql | docker exec -i pgvector-db psql -U postgres -d poolsense -v ON_ERROR_STOP=1
 
--- Then connect inside psql:
--- \c poolsense
+-- Or connect interactively first:
+-- docker exec -it pgvector-db psql -U postgres -d poolsense
 
 -- PoolSense PostgreSQL testing script
 -- Notes:
@@ -29,6 +29,30 @@ WHERE table_schema = 'public'
 		'feedback_logs',
 		'interaction_logs')
 ORDER BY table_name;
+
+SELECT extname AS extension_name,
+		 extversion AS extension_version
+FROM pg_extension
+WHERE extname = 'vector';
+
+SELECT column_name,
+		 udt_name,
+		 is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'ticket_knowledge'
+  AND column_name = 'embedding';
+
+SELECT indexname,
+		 indexdef
+FROM pg_indexes
+WHERE schemaname = 'public'
+  AND indexname IN (
+		'ticket_knowledge_embedding_cosine_idx',
+		'ticket_knowledge_application_year_idx',
+		'failure_patterns_application_year_idx',
+		'processed_source_events_processed_at_idx')
+ORDER BY indexname;
 
 -- -----------------------------------------------------------------------------
 -- 1. Quick row counts for every PoolSense table

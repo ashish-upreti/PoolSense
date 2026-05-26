@@ -9,13 +9,12 @@ lerna-debug.log*
 
 node_modules
 dist
-dist-ssr
 *.local
 .env
 .env.*
 !.env.example
 .eslintcache
-.vite
+.angular
 coverage
 
 # Editor directories and files

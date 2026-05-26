@@ -1,4 +1,6 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using Microsoft.SemanticKernel;
 using PoolSense.Api.Agents;
@@ -29,15 +31,32 @@ static bool HasHttpsBinding(IConfiguration configuration)
         .Any(value => value.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
 }
 
+static bool HasRequiredAiSettings(AiSettings aiSettings)
+{
+    return !string.IsNullOrWhiteSpace(aiSettings.BaseUrl)
+        && !string.IsNullOrWhiteSpace(aiSettings.ApiKey)
+        && !string.IsNullOrWhiteSpace(aiSettings.Models.Chat)
+        && !string.IsNullOrWhiteSpace(aiSettings.Models.Embeddings);
+}
+
+static void ValidateAiSettings(AiSettings aiSettings)
+{
+    if (!HasRequiredAiSettings(aiSettings))
+    {
+        throw new InvalidOperationException("Azure OpenAI configuration is incomplete. Configure AiSettings:BaseUrl, AiSettings:ApiKey, AiSettings:Models:Chat, and AiSettings:Models:Embeddings.");
+    }
+}
+
 // Add services to the container.
 builder.Services.AddControllers();
+builder.Services.Configure<AiSettings>(builder.Configuration.GetSection("AiSettings"));
 builder.Services.Configure<TicketAutomationSettings>(builder.Configuration.GetSection("TicketAutomation"));
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(PoolSenseUiCorsPolicy, policy =>
     {
         policy
-            .WithOrigins("http://localhost:5173")
+            .WithOrigins("http://localhost:4200", "http://localhost:5173")
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -91,11 +110,11 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-var aiSettings = builder.Configuration.GetSection("AiSettings").Get<AiSettings>()
-    ?? throw new InvalidOperationException("AiSettings configuration is missing.");
-
-builder.Services.AddScoped<Kernel>(_ =>
+builder.Services.AddScoped<Kernel>(sp =>
 {
+    var aiSettings = sp.GetRequiredService<IOptionsMonitor<AiSettings>>().CurrentValue;
+    ValidateAiSettings(aiSettings);
+
     var kernelBuilder = Kernel.CreateBuilder();
 
     kernelBuilder.AddAzureOpenAIChatCompletion(

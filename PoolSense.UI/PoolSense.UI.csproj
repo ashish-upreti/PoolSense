@@ -11,15 +11,15 @@
 
   <ItemGroup>
     <None Include=".env.example" />
+    <None Include="angular.json" />
     <None Include="eslint.config.js" />
     <None Include="index.html" />
     <None Include="package-lock.json" />
     <None Include="package.json" />
+    <None Include="proxy.conf.json" />
     <None Include="README.md" />
     <None Include="tsconfig.app.json" />
     <None Include="tsconfig.json" />
-    <None Include="tsconfig.node.json" />
-    <None Include="vite.config.ts" />
     <None Include="public\**\*" />
     <None Include="src\**\*" />
   </ItemGroup>

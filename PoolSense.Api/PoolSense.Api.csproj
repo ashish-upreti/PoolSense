@@ -6,8 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>PoolSense.Api-5f0a17e8-5a24-4c77-a7f0-8c925bdb0cc5</UserSecretsId>
     <SpaRoot>..\PoolSense.UI\</SpaRoot>
-    <SpaProxyServerUrl>http://localhost:5173</SpaProxyServerUrl>
-    <SpaProxyLaunchCommand>npm run dev</SpaProxyLaunchCommand>
+    <SpaProxyServerUrl>http://localhost:4200</SpaProxyServerUrl>
+    <SpaProxyLaunchCommand>npm run dev -- --host localhost</SpaProxyLaunchCommand>
   </PropertyGroup>
 
   <ItemGroup>

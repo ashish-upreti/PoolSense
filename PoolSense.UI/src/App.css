@@ -7,10 +7,15 @@
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.95fr);
+  grid-template-columns: minmax(280px, 0.78fr) minmax(0, 1.65fr) minmax(320px, 0.95fr);
   gap: 1rem;
 }
 
+.app-shell-project-collapsed {
+  grid-template-columns: 72px minmax(0, 1.65fr) minmax(320px, 0.95fr);
+}
+
+.project-panel,
 .workspace-panel,
 .insight-panel {
   min-height: calc(100vh - 2.5rem);
@@ -19,6 +24,19 @@
   background: var(--panel-bg);
   box-shadow: 0 24px 70px rgba(30, 55, 86, 0.1);
   backdrop-filter: blur(18px);
+}
+
+.project-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.project-panel-collapsed {
+  align-items: center;
+  padding: 0.85rem 0.55rem;
 }
 
 .workspace-chat {
@@ -58,6 +76,31 @@
   color: var(--banner-color);
   font-size: 0.92rem;
   white-space: nowrap;
+}
+
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.project-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.settings-banner-group {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.settings-banner-group-left {
+  justify-content: flex-start;
 }
 
 .panel-status-busy {
@@ -480,6 +523,44 @@
   font-size: 0.9rem;
 }
 
+.telemetry-bars {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 0.65rem;
+  padding: 0.75rem;
+}
+
+.telemetry-bar-item {
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  gap: 0.35rem;
+  height: 100%;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.telemetry-bar-track {
+  position: relative;
+  min-height: 92px;
+  border-radius: 0.8rem;
+  background: var(--track-bg);
+  overflow: hidden;
+}
+
+.telemetry-bar-fill {
+  position: absolute;
+  inset-inline: 0.35rem;
+  bottom: 0.35rem;
+  border-radius: 0.65rem 0.65rem 0.45rem 0.45rem;
+}
+
+.telemetry-bar-label,
+.telemetry-bar-value {
+  margin: 0;
+}
+
 .data-mono {
   font-family: var(--mono-font);
   letter-spacing: -0.01em;
@@ -548,15 +629,49 @@
   outline-offset: 2px;
 }
 
-.project-studio {
+.panel-collapse-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
   border: 1px solid var(--border);
-  border-radius: 1.15rem;
-  background: var(--panel-bg);
-  box-shadow: 0 24px 70px rgba(30, 55, 86, 0.1);
-  backdrop-filter: blur(18px);
-  padding: 1.1rem;
+  background: var(--toggle-bg);
+  color: var(--toggle-color);
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.panel-collapse-button:hover {
+  background: var(--toggle-hover-bg);
+}
+
+.project-panel-collapsed-copy {
+  flex: 1;
   display: grid;
-  gap: 1rem;
+  place-items: center;
+  min-height: 12rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
+.project-studio {
+  min-height: 0;
+  overflow-y: auto;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  display: grid;
+  gap: 0.95rem;
 }
 
 .project-studio-header,
@@ -572,8 +687,8 @@
 
 .project-studio-grid {
   display: grid;
-  grid-template-columns: minmax(320px, 0.92fr) minmax(0, 1.08fr);
-  gap: 1rem;
+  grid-template-columns: 1fr;
+  gap: 0.95rem;
 }
 
 .project-form-card,
@@ -582,7 +697,7 @@
 .toggle-card {
   border: 1px solid var(--border);
   border-radius: 0.95rem;
-  background: var(--bubble-bg);
+  background: var(--panel-subtle);
 }
 
 .project-form-card,
@@ -743,11 +858,28 @@
     grid-template-columns: 1fr;
   }
 
+  .app-shell-project-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .project-panel-collapsed {
+    align-items: stretch;
+    padding: 0.85rem;
+  }
+
+  .project-panel-collapsed-copy {
+    writing-mode: initial;
+    transform: none;
+    min-height: auto;
+    justify-items: flex-start;
+  }
+
   .project-studio-grid,
   .toggle-row {
     grid-template-columns: 1fr;
   }
 
+  .project-panel,
   .workspace-panel,
   .insight-panel {
     min-height: auto;
@@ -760,6 +892,7 @@
   }
 
   .workspace-chat,
+  .project-panel,
   .insight-panel,
   .project-studio {
     padding: 0.85rem;
@@ -772,10 +905,13 @@
   .insight-list-item,
   .incident-meta,
   .project-studio-header,
+  .project-panel-header,
   .project-card-header,
   .project-status-row,
   .project-toolbar,
-  .toggle-card {
+    .toggle-card,
+    .workspace-actions,
+    .settings-banner-group {
     flex-direction: column;
     align-items: stretch;
   }

@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS processed_source_events (
     PRIMARY KEY (source_event_id, processing_kind)
 );
 
+ALTER TABLE IF EXISTS processed_source_events ADD COLUMN IF NOT EXISTS processed_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE IF EXISTS processed_source_events ADD COLUMN IF NOT EXISTS email_sent boolean NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS processed_source_events ADD COLUMN IF NOT EXISTS email_recipient text NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS processed_source_events ADD COLUMN IF NOT EXISTS workflow_result text NOT NULL DEFAULT '';
+
 ALTER TABLE IF EXISTS ticket_knowledge ADD COLUMN IF NOT EXISTS source_event_id text NOT NULL DEFAULT '';
 ALTER TABLE IF EXISTS ticket_knowledge ADD COLUMN IF NOT EXISTS problem text NOT NULL DEFAULT '';
 ALTER TABLE IF EXISTS ticket_knowledge ADD COLUMN IF NOT EXISTS root_cause text NOT NULL DEFAULT '';
@@ -192,6 +197,7 @@ SET pooling_enabled = COALESCE(pooling_enabled, TRUE),
     email_recipients = COALESCE(email_recipients, ''),
     ticket_source_type = COALESCE(NULLIF(ticket_source_type, ''), 'sql'),
     connection_string = COALESCE(connection_string, ''),
+    knowledge_sources = COALESCE(knowledge_sources, '{}'),
     application_filter = COALESCE(NULLIF(application_filter, ''), project_name),
     created_at = COALESCE(created_at, now());
 
@@ -215,6 +221,10 @@ CREATE TABLE IF NOT EXISTS ingestion_status (
     last_updated timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE IF EXISTS ingestion_status ADD COLUMN IF NOT EXISTS total_tickets integer NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS ingestion_status ADD COLUMN IF NOT EXISTS ingested_tickets integer NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS ingestion_status ADD COLUMN IF NOT EXISTS last_updated timestamptz NOT NULL DEFAULT now();
+
 CREATE UNIQUE INDEX IF NOT EXISTS ingestion_status_project_id_uidx
     ON ingestion_status (project_id);
 
@@ -232,7 +242,13 @@ CREATE TABLE IF NOT EXISTS feedback_logs (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE IF EXISTS feedback_logs ADD COLUMN IF NOT EXISTS ticket_query text NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS feedback_logs ADD COLUMN IF NOT EXISTS suggested_resolution text NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS feedback_logs ADD COLUMN IF NOT EXISTS feedback_type integer NOT NULL DEFAULT 0;
 ALTER TABLE IF EXISTS feedback_logs ADD COLUMN IF NOT EXISTS was_used boolean NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS feedback_logs ADD COLUMN IF NOT EXISTS comment text NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS feedback_logs ADD COLUMN IF NOT EXISTS retrieved_ticket_ids text NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS feedback_logs ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS interaction_logs (
     id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -245,6 +261,15 @@ CREATE TABLE IF NOT EXISTS interaction_logs (
     processing_time_ms integer NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE IF EXISTS interaction_logs ADD COLUMN IF NOT EXISTS query text NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS interaction_logs ADD COLUMN IF NOT EXISTS generated_embedding_length integer NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS interaction_logs ADD COLUMN IF NOT EXISTS retrieved_ticket_ids text NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS interaction_logs ADD COLUMN IF NOT EXISTS retrieved_contents text NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS interaction_logs ADD COLUMN IF NOT EXISTS suggested_resolution text NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS interaction_logs ADD COLUMN IF NOT EXISTS confidence real NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS interaction_logs ADD COLUMN IF NOT EXISTS processing_time_ms integer NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS interaction_logs ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
 
 CREATE INDEX IF NOT EXISTS ticket_knowledge_created_at_idx
     ON ticket_knowledge (created_at DESC);

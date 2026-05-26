@@ -77,7 +77,7 @@ Install these before running locally:
 
 ### API Settings
 
-The API reads configuration from `PoolSense.Api/appsettings.json` and `PoolSense.Api/appsettings.Development.json`.
+The API reads configuration from `PoolSense.Api/appsettings.json` and `PoolSense.Api/appsettings.Development.json`. Use `PoolSense.Api/appsettings.example.json` as the checked-in template for non-secret defaults such as model names, API versions, polling labels, and local PostgreSQL defaults.
 
 Important sections:
 
@@ -85,6 +85,7 @@ Important sections:
     - `BaseUrl`
     - `ApiKey`
     - `ApiVersion`
+    - `ImageApiVersion`
     - `Models.Chat`
     - `Models.Embeddings`
 
@@ -112,6 +113,7 @@ Important sections:
 Recommended approach for local development:
 
 - Keep non-secret defaults in `appsettings.Development.json`.
+- Keep checked-in non-secret examples in `PoolSense.Api/appsettings.example.json`.
 - Store secrets such as API keys outside source control using environment variables or `dotnet user-secrets`.
 
 The API project now has a `UserSecretsId`, so you can configure local secrets without changing tracked files.
