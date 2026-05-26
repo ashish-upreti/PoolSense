@@ -1,155 +1,78 @@
 <div class="workspace-layout">
-  <div class="app-shell" [class.app-shell-project-collapsed]="isProjectPanelCollapsed">
-    <aside class="project-panel" [class.project-panel-collapsed]="isProjectPanelCollapsed" [attr.aria-label]="isProjectPanelCollapsed ? 'Project configuration panel collapsed' : 'Project configuration panel'">
-      <div class="project-panel-header">
-        <div *ngIf="!isProjectPanelCollapsed">
-          <p class="panel-kicker">Configuration</p>
-          <h2>Project Configuration Studio</h2>
-          <p class="workspace-copy">Persist project defaults in PostgreSQL and monitor ingestion progress per project.</p>
+  <div class="app-shell" [class.app-shell-sidebar-collapsed]="isSidebarCollapsed">
+    <aside class="project-panel sidebar-panel" [class.sidebar-panel-collapsed]="isSidebarCollapsed" [attr.aria-label]="isSidebarCollapsed ? 'Primary navigation collapsed' : 'Primary navigation'">
+      <div class="project-panel-header sidebar-brand">
+        <div *ngIf="!isSidebarCollapsed" class="sidebar-brand-copy">
+          <p class="panel-kicker">Navigation</p>
+          <h2>PoolSense Console</h2>
+          <p class="workspace-copy">Use the left rail to switch between incident triage and application administration.</p>
         </div>
-
-        <button
-          type="button"
-          class="panel-collapse-button"
-          (click)="toggleProjectPanel()"
-          [attr.aria-expanded]="!isProjectPanelCollapsed"
-          [attr.aria-label]="isProjectPanelCollapsed ? 'Expand project configuration panel' : 'Collapse project configuration panel'"
-          [attr.title]="isProjectPanelCollapsed ? 'Expand project configuration panel' : 'Collapse project configuration panel'">
-          {{ isProjectPanelCollapsed ? '>' : '<' }}
+        <div *ngIf="isSidebarCollapsed" class="sidebar-brand-mark" aria-hidden="true">PS</div>
+        <button type="button" class="sidebar-collapse-button" (click)="toggleSidebar()" [attr.aria-expanded]="!isSidebarCollapsed" [attr.aria-label]="isSidebarCollapsed ? 'Expand navigation sidebar' : 'Collapse navigation sidebar'" [attr.title]="isSidebarCollapsed ? 'Expand navigation sidebar' : 'Collapse navigation sidebar'">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path *ngIf="!isSidebarCollapsed" d="M15 18l-6-6 6-6"></path>
+            <path *ngIf="isSidebarCollapsed" d="M9 18l6-6-6-6"></path>
+          </svg>
         </button>
       </div>
 
-      <div *ngIf="isProjectPanelCollapsed" class="project-panel-collapsed-copy">
-        <span>Project Config</span>
+      <nav class="sidebar-nav" aria-label="Workspace sections">
+        <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'main'" (click)="setActiveSection('main')" [attr.aria-pressed]="activeSection === 'main'" aria-label="Open PoolSense main panel" [attr.title]="isSidebarCollapsed ? 'PoolSense' : null">
+          <span class="sidebar-nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 5h16v14H4z"></path>
+              <path d="M8 9h8"></path>
+              <path d="M8 13h5"></path>
+              <path d="M16 13h.01"></path>
+            </svg>
+          </span>
+          <span *ngIf="!isSidebarCollapsed" class="sidebar-nav-body">
+            <span class="sidebar-nav-kicker">Main Panel</span>
+            <span class="sidebar-nav-title">PoolSense</span>
+            <span class="sidebar-nav-copy">Search incidents, review recommendations, and inspect live operational context.</span>
+          </span>
+        </button>
+
+        <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'projectConfig'" (click)="setActiveSection('projectConfig')" [attr.aria-pressed]="activeSection === 'projectConfig'" aria-label="Open application configuration" [attr.title]="isSidebarCollapsed ? 'Application Configuration' : null">
+          <span class="sidebar-nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v4"></path>
+              <path d="M12 17v4"></path>
+              <path d="M4 12h4"></path>
+              <path d="M16 12h4"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M5.6 5.6l2.8 2.8"></path>
+              <path d="M15.6 15.6l2.8 2.8"></path>
+              <path d="M18.4 5.6l-2.8 2.8"></path>
+              <path d="M8.4 15.6l-2.8 2.8"></path>
+            </svg>
+          </span>
+          <span *ngIf="!isSidebarCollapsed" class="sidebar-nav-body">
+            <span class="sidebar-nav-kicker">Admin</span>
+            <span class="sidebar-nav-title">Application Configuration</span>
+            <span class="sidebar-nav-copy">Manage application defaults, ingestion settings, and configured workspace scope.</span>
+          </span>
+        </button>
+      </nav>
+
+      <div *ngIf="!isSidebarCollapsed" class="sidebar-summary">
+        <div class="workspace-banner">
+          <span class="workspace-dot"></span>
+          <span>{{ projects.length }} configured application{{ projects.length === 1 ? '' : 's' }}</span>
+        </div>
+        <div class="workspace-banner">
+          <span class="workspace-dot"></span>
+          <span>{{ appSettings.ticketAutomation.email.deliveryMode }} · {{ appSettings.ticketAutomation.pollIntervalSeconds }}s polling</span>
+        </div>
       </div>
-
-      <section *ngIf="!isProjectPanelCollapsed" class="project-studio">
-        <div class="settings-banner-group settings-banner-group-left">
-          <div class="workspace-banner">
-            <span class="workspace-dot"></span>
-            <span>{{ projects.length }} configured project{{ projects.length === 1 ? '' : 's' }}</span>
-          </div>
-          <div class="workspace-banner">
-            <span class="workspace-dot"></span>
-            <span>{{ appSettings.ticketAutomation.email.deliveryMode }} · {{ appSettings.ticketAutomation.pollIntervalSeconds }}s polling · {{ appSettings.ticketAutomation.sourceDatabaseName }}</span>
-          </div>
-        </div>
-
-        <p *ngIf="projectError" class="project-feedback-banner">{{ projectError }}</p>
-        <p *ngIf="projectNotice" class="project-feedback-banner project-feedback-banner-success">{{ projectNotice }}</p>
-
-        <div class="project-studio-grid">
-          <form class="project-form-card" (ngSubmit)="handleProjectSubmit()">
-            <div class="card-heading-row project-toolbar">
-              <div>
-                <p class="panel-kicker">Form</p>
-                <h3>{{ editingProjectId ? 'Edit project configuration' : 'Add project configuration' }}</h3>
-              </div>
-              <button *ngIf="editingProjectId" type="button" class="feedback-button feedback-button-secondary" (click)="cancelProjectEdit()">Cancel edit</button>
-            </div>
-
-            <div class="project-form-grid">
-              <label class="field-group">
-                <span class="field-label">Project Name</span>
-                <input class="field-input" type="text" name="projectName" [(ngModel)]="projectForm.projectName" placeholder="FSCO-Fab" [disabled]="isProjectSaving" />
-              </label>
-
-              <label class="field-group field-group-full">
-                <span class="field-label">Application Filter(Pool Application)</span>
-                <input class="field-input" type="text" name="applicationFilter" [(ngModel)]="projectForm.applicationFilter" placeholder="%FSCO-FAB%" [disabled]="isProjectSaving" />
-                <span class="field-note">Optional. Use an exact application name for one app, or use `%` wildcards to group multiple apps together.</span>
-              </label>
-
-              <label class="field-group">
-                <span class="field-label">Project Id</span>
-                <input class="field-input" type="text" [value]="editingProjectId ? projectForm.projectId : generatedProjectId" placeholder="Auto-generated" readonly [disabled]="isProjectSaving" />
-                <span class="field-note">{{ editingProjectId ? 'Stable identifier used for scoping, ingestion status, and updates.' : generatedProjectId ? 'Generated automatically from Project Name when you create the project.' : 'Will be auto-generated from Project Name when you create the project.' }}</span>
-              </label>
-
-              <label class="field-group">
-                <span class="field-label">Knowledge Lookback Years</span>
-                <input class="field-input" type="number" name="knowledgeLookbackYears" min="0" [(ngModel)]="projectForm.knowledgeLookbackYears" [disabled]="isProjectSaving" />
-              </label>
-
-              <label class="field-group">
-                <span class="field-label">Similarity Search Limit</span>
-                <input class="field-input" type="number" name="similaritySearchLimit" min="1" max="20" [(ngModel)]="projectForm.similaritySearchLimit" [disabled]="isProjectSaving" />
-                <span class="field-note">Allowed range: 1 to 20</span>
-              </label>
-
-              <label class="field-group field-group-full">
-                <span class="field-label">Email Recipients</span>
-                <input class="field-input" type="text" name="emailRecipients" [(ngModel)]="projectForm.emailRecipients" placeholder="ashish.upreti@intel.com;" [disabled]="isProjectSaving" />
-                <span class="field-note">Optional, comma-separated email addresses.</span>
-              </label>
-            </div>
-
-            <div class="toggle-row">
-              <label class="toggle-card">
-                <input type="checkbox" name="sendEmail" [(ngModel)]="projectForm.sendEmail" [disabled]="isProjectSaving" />
-                <span><strong>Send Email</strong><small>Keep notification delivery enabled for this project.</small></span>
-              </label>
-
-              <label class="toggle-card">
-                <input type="checkbox" name="poolingEnabled" [(ngModel)]="projectForm.poolingEnabled" [disabled]="isProjectSaving" />
-                <span><strong>Pooling Enabled</strong><small>Allow ingestion to process this project during scheduled runs.</small></span>
-              </label>
-            </div>
-
-            <div class="composer-footer">
-              <p class="helper-text">Project ID is auto-generated on create and remains immutable to keep project scoping and ingestion status stable.</p>
-              <button type="submit" class="send-button" [disabled]="isProjectSaving">{{ isProjectSaving ? 'Saving...' : editingProjectId ? 'Update Project' : 'Create Project' }}</button>
-            </div>
-          </form>
-
-          <div class="project-list-card">
-            <div class="card-heading-row project-toolbar">
-              <div>
-                <p class="panel-kicker">Status</p>
-                <h3>Configured projects</h3>
-              </div>
-              <button type="button" class="feedback-button feedback-button-secondary" (click)="loadProjectWorkspace(true)" [disabled]="isProjectLoading">Refresh</button>
-            </div>
-
-            <div *ngIf="isProjectLoading" class="project-empty"><p class="empty-copy">Loading project configuration and ingestion status...</p></div>
-            <div *ngIf="!isProjectLoading && projects.length === 0" class="project-empty"><p class="empty-copy">No projects are configured yet. Create the first project from the form.</p></div>
-
-            <div *ngIf="!isProjectLoading && projects.length > 0" class="project-list">
-              <article *ngFor="let project of projects" class="project-card">
-                <div class="project-card-header">
-                  <div>
-                    <p class="project-card-title">{{ project.projectName }}</p>
-                    <p class="project-card-meta">{{ project.projectId }}</p>
-                  </div>
-                  <button type="button" class="feedback-button feedback-button-secondary project-edit-button" (click)="handleEditProject(project)">Edit</button>
-                </div>
-
-                <div class="project-status-row">
-                  <span class="project-chip">Ingestion Status</span>
-                  <span class="data-mono">{{ getProjectStatus(project).ingested }} / {{ getProjectStatus(project).total }}</span>
-                </div>
-
-                <div class="project-progress-track" aria-hidden="true"><span class="project-progress-fill" [style.width.%]="clampPercentage(getProjectStatus(project).progressPercentage)"></span></div>
-
-                <div class="project-status-row">
-                  <span class="helper-text">Progress</span>
-                  <span class="confidence-value">{{ getProjectStatus(project).progressPercentage }}%</span>
-                </div>
-
-                <p class="project-card-copy">Lookback: {{ project.knowledgeLookbackYears }} year{{ project.knowledgeLookbackYears === 1 ? '' : 's' }} &bull; Similarity limit: {{ project.similaritySearchLimit }} &bull; Email: {{ project.sendEmail ? 'On' : 'Off' }} &bull; Pooling: {{ project.poolingEnabled ? 'On' : 'Off' }}</p>
-                <p class="project-card-meta">Filter: {{ project.applicationFilter || project.projectName }}</p>
-              </article>
-            </div>
-          </div>
-        </div>
-      </section>
     </aside>
 
+    <ng-container *ngIf="activeSection === 'main'; else projectConfigView">
     <section class="workspace-panel workspace-chat">
       <header class="workspace-header">
         <div>
           <p class="panel-kicker">FSMS</p>
-          <h1><span [style.color]="isDark ? '#ffffff' : '#0068B5'">Pool</span><span style="color: #00C7FD">Sense</span></h1>
+          <h1 class="brand-title"><span class="brand-title-primary">Pool</span><span class="brand-title-accent">Sense</span></h1>
           <p class="workspace-copy">Detect. Diagnose. Resolve.</p>
         </div>
         <div class="workspace-actions">
@@ -157,8 +80,23 @@
             <span class="workspace-dot"></span>
             <span>{{ isLoading ? 'Analyzing live incident context' : 'Ready for triage' }}</span>
           </div>
-          <button type="button" class="dark-toggle" (click)="toggleTheme()" [attr.aria-label]="isDark ? 'Switch to light mode' : 'Switch to dark mode'" [attr.title]="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
-            {{ isDark ? 'L' : 'D' }}
+          <button type="button" class="theme-toggle" (click)="toggleTheme()" [attr.aria-label]="isDark ? 'Switch to light theme' : 'Switch to dark theme'" [attr.title]="isDark ? 'Switch to light theme' : 'Switch to dark theme'">
+            <span class="theme-toggle-icon" aria-hidden="true">
+              <svg *ngIf="isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="4"></circle>
+                <path d="M12 2v2"></path>
+                <path d="M12 20v2"></path>
+                <path d="M4.93 4.93l1.41 1.41"></path>
+                <path d="M17.66 17.66l1.41 1.41"></path>
+                <path d="M2 12h2"></path>
+                <path d="M20 12h2"></path>
+                <path d="M4.93 19.07l1.41-1.41"></path>
+                <path d="M17.66 6.34l1.41-1.41"></path>
+              </svg>
+              <svg *ngIf="!isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"></path>
+              </svg>
+            </span>
           </button>
         </div>
       </header>
@@ -167,7 +105,7 @@
         <button *ngFor="let prompt of quickPrompts" type="button" class="prompt-chip" (click)="handleSend(prompt)" [disabled]="isLoading">{{ prompt }}</button>
       </div>
 
-      <div *ngIf="groups.length > 0" class="group-selector" role="group" aria-label="Project group filter">
+      <div *ngIf="groups.length > 0" class="group-selector" role="group" aria-label="Application group filter">
         <p class="group-selector-label">Search scope</p>
         <div class="group-selector-options">
           <label class="group-chip" [class.group-chip-active]="isAllGroupsSelected">
@@ -342,6 +280,139 @@
         </section>
       </ng-container>
     </aside>
+    </ng-container>
+
+    <ng-template #projectConfigView>
+      <section class="workspace-panel project-config-screen">
+        <div class="project-config-screen-header">
+          <div>
+            <p class="panel-kicker">Configuration</p>
+            <h2>Application Configuration</h2>
+            <p class="workspace-copy">Persist application defaults in PostgreSQL and monitor ingestion progress per application.</p>
+          </div>
+          <div class="settings-banner-group">
+            <div class="workspace-banner">
+              <span class="workspace-dot"></span>
+              <span>{{ projects.length }} configured application{{ projects.length === 1 ? '' : 's' }}</span>
+            </div>
+            <div class="workspace-banner">
+              <span class="workspace-dot"></span>
+              <span>{{ appSettings.ticketAutomation.email.deliveryMode }} · {{ appSettings.ticketAutomation.pollIntervalSeconds }}s polling · {{ appSettings.ticketAutomation.sourceDatabaseName }}</span>
+            </div>
+          </div>
+        </div>
+
+        <p *ngIf="projectError" class="project-feedback-banner">{{ projectError }}</p>
+        <p *ngIf="projectNotice" class="project-feedback-banner project-feedback-banner-success">{{ projectNotice }}</p>
+
+        <section class="project-studio">
+          <div class="project-studio-grid">
+            <form class="project-form-card" (ngSubmit)="handleProjectSubmit()">
+              <div class="card-heading-row project-toolbar">
+                <div>
+                  <p class="panel-kicker">Form</p>
+                  <h3>{{ editingProjectId ? 'Edit application configuration' : 'Add application configuration' }}</h3>
+                </div>
+                <button *ngIf="editingProjectId" type="button" class="feedback-button feedback-button-secondary" (click)="cancelProjectEdit()">Cancel edit</button>
+              </div>
+
+              <div class="project-form-grid">
+                <label class="field-group">
+                  <span class="field-label">Application Name</span>
+                  <input class="field-input" type="text" name="projectName" [(ngModel)]="projectForm.projectName" placeholder="FSCO-Fab" [disabled]="isProjectSaving" />
+                </label>
+
+                <label class="field-group field-group-full">
+                  <span class="field-label">Application Filter(Pool Application)</span>
+                  <input class="field-input" type="text" name="applicationFilter" [(ngModel)]="projectForm.applicationFilter" placeholder="%FSCO-FAB%" [disabled]="isProjectSaving" />
+                  <span class="field-note">Optional. Use an exact application name for one app, or use `%` wildcards to group multiple apps together.</span>
+                </label>
+
+                <label class="field-group">
+                  <span class="field-label">Application Id</span>
+                  <input class="field-input" type="text" [value]="editingProjectId ? projectForm.projectId : generatedProjectId" placeholder="Auto-generated" readonly [disabled]="isProjectSaving" />
+                  <span class="field-note">{{ editingProjectId ? 'Stable identifier used for scoping, ingestion status, and updates.' : generatedProjectId ? 'Generated automatically from Application Name when you create the application.' : 'Will be auto-generated from Application Name when you create the application.' }}</span>
+                </label>
+
+                <label class="field-group">
+                  <span class="field-label">Knowledge Lookback Years</span>
+                  <input class="field-input" type="number" name="knowledgeLookbackYears" min="0" [(ngModel)]="projectForm.knowledgeLookbackYears" [disabled]="isProjectSaving" />
+                </label>
+
+                <label class="field-group">
+                  <span class="field-label">Similarity Search Limit</span>
+                  <input class="field-input" type="number" name="similaritySearchLimit" min="1" max="20" [(ngModel)]="projectForm.similaritySearchLimit" [disabled]="isProjectSaving" />
+                  <span class="field-note">Allowed range: 1 to 20</span>
+                </label>
+
+                <label class="field-group field-group-full">
+                  <span class="field-label">Email Recipients</span>
+                  <input class="field-input" type="text" name="emailRecipients" [(ngModel)]="projectForm.emailRecipients" placeholder="ashish.upreti@intel.com;" [disabled]="isProjectSaving" />
+                  <span class="field-note">Optional, comma-separated email addresses.</span>
+                </label>
+              </div>
+
+              <div class="toggle-row">
+                <label class="toggle-card">
+                  <input type="checkbox" name="sendEmail" [(ngModel)]="projectForm.sendEmail" [disabled]="isProjectSaving" />
+                  <span><strong>Send Email</strong><small>Keep notification delivery enabled for this application.</small></span>
+                </label>
+
+                <label class="toggle-card">
+                  <input type="checkbox" name="poolingEnabled" [(ngModel)]="projectForm.poolingEnabled" [disabled]="isProjectSaving" />
+                  <span><strong>Pooling Enabled</strong><small>Allow ingestion to process this application during scheduled runs.</small></span>
+                </label>
+              </div>
+
+              <div class="composer-footer">
+                <p class="helper-text">Application ID is auto-generated on create and remains immutable to keep application scoping and ingestion status stable.</p>
+                <button type="submit" class="send-button" [disabled]="isProjectSaving">{{ isProjectSaving ? 'Saving...' : editingProjectId ? 'Update Application' : 'Create Application' }}</button>
+              </div>
+            </form>
+
+            <div class="project-list-card">
+              <div class="card-heading-row project-toolbar">
+                <div>
+                  <p class="panel-kicker">Status</p>
+                  <h3>Configured applications</h3>
+                </div>
+                <button type="button" class="feedback-button feedback-button-secondary" (click)="loadProjectWorkspace(true)" [disabled]="isProjectLoading">Refresh</button>
+              </div>
+
+              <div *ngIf="isProjectLoading" class="project-empty"><p class="empty-copy">Loading application configuration and ingestion status...</p></div>
+              <div *ngIf="!isProjectLoading && projects.length === 0" class="project-empty"><p class="empty-copy">No applications are configured yet. Create the first application from the form.</p></div>
+
+              <div *ngIf="!isProjectLoading && projects.length > 0" class="project-list">
+                <article *ngFor="let project of projects" class="project-card">
+                  <div class="project-card-header">
+                    <div>
+                      <p class="project-card-title">{{ project.projectName }}</p>
+                      <p class="project-card-meta">{{ project.projectId }}</p>
+                    </div>
+                    <button type="button" class="feedback-button feedback-button-secondary project-edit-button" (click)="handleEditProject(project)">Edit</button>
+                  </div>
+
+                  <div class="project-status-row">
+                    <span class="project-chip">Ingestion Status</span>
+                    <span class="data-mono">{{ getProjectStatus(project).ingested }} / {{ getProjectStatus(project).total }}</span>
+                  </div>
+
+                  <div class="project-progress-track" aria-hidden="true"><span class="project-progress-fill" [style.width.%]="clampPercentage(getProjectStatus(project).progressPercentage)"></span></div>
+
+                  <div class="project-status-row">
+                    <span class="helper-text">Progress</span>
+                    <span class="confidence-value">{{ getProjectStatus(project).progressPercentage }}%</span>
+                  </div>
+
+                  <p class="project-card-copy">Lookback: {{ project.knowledgeLookbackYears }} year{{ project.knowledgeLookbackYears === 1 ? '' : 's' }} &bull; Similarity limit: {{ project.similaritySearchLimit }} &bull; Email: {{ project.sendEmail ? 'On' : 'Off' }} &bull; Pooling: {{ project.poolingEnabled ? 'On' : 'Off' }}</p>
+                  <p class="project-card-meta">Filter: {{ project.applicationFilter || project.projectName }}</p>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </ng-template>
   </div>
 
 </div>

@@ -33,7 +33,7 @@ The main interaction starts in [src/app/app.component.ts](src/app/app.component.
 Key UI modules:
 
 - [src/app/app.component.ts](src/app/app.component.ts)
-	Standalone Angular component for the chat workspace, insights sidebar, project configuration studio, and UI state.
+	Standalone Angular component for the chat workspace, insights sidebar, project configuration, and UI state.
 
 - [src/app/app.component.html](src/app/app.component.html)
 	Angular template for the workspace layout, scope selector, assistant feedback, insights, and project forms.

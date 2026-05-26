@@ -36,23 +36,22 @@ public class BackgroundTicketPollingService : BackgroundService
             var settings = _settingsMonitor.CurrentValue;
             var delay = TimeSpan.FromSeconds(Math.Max(10, settings.PollIntervalSeconds));
 
-            if (!settings.PollingEnabled)
-            {
-                _logger.LogInformation("Polling is paused (PollingEnabled=false). Waiting {DelaySeconds} seconds before the next check.", delay.TotalSeconds);
-                await Task.Delay(delay, stoppingToken);
-                continue;
-            }
-
-            if (!HasRequiredAiSettings(_aiSettingsMonitor.CurrentValue))
-            {
-                _logger.LogWarning("Polling is skipped because Azure OpenAI settings are incomplete. Configure AiSettings:BaseUrl, AiSettings:ApiKey, AiSettings:Models:Chat, and AiSettings:Models:Embeddings.");
-                await Task.Delay(delay, stoppingToken);
-                continue;
-            }
-
             try
             {
-                await PollOnceAsync(stoppingToken);
+                if (!settings.PollingEnabled)
+                {
+                    _logger.LogInformation("Polling is paused (PollingEnabled=false). Waiting {DelaySeconds} seconds before the next check.", delay.TotalSeconds);
+                }
+                else if (!HasRequiredAiSettings(_aiSettingsMonitor.CurrentValue))
+                {
+                    _logger.LogWarning("Polling is skipped because Azure OpenAI settings are incomplete. Configure AiSettings:BaseUrl, AiSettings:ApiKey, AiSettings:Models:Chat, and AiSettings:Models:Embeddings.");
+                }
+                else
+                {
+                    await PollOnceAsync(stoppingToken);
+                }
+
+                await Task.Delay(delay, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -62,8 +61,6 @@ public class BackgroundTicketPollingService : BackgroundService
             {
                 _logger.LogError(ex, "Ticket polling iteration failed.");
             }
-
-            await Task.Delay(delay, stoppingToken);
         }
     }
 

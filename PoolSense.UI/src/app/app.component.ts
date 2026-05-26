@@ -42,6 +42,8 @@ type TelemetryDatum = {
   color: string
 }
 
+type AppSection = 'main' | 'projectConfig'
+
 const quickPrompts = ['VG item missing', 'Data load job failed', 'UI error']
 
 const defaultProjectForm: ProjectConfigInput = {
@@ -86,10 +88,11 @@ export class AppComponent implements OnInit {
   input = ''
   groups: ProjectGroup[] = []
   selectedGroupIds: string[] = []
-  isDark = localStorage.getItem('theme') === 'dark'
+  activeSection: AppSection = 'main'
+  isSidebarCollapsed = true
+  isDark = localStorage.getItem('theme') !== 'light'
   projects: ProjectConfig[] = []
   ingestionStatuses: IngestionStatus[] = []
-  isProjectPanelCollapsed = false
   projectForm = createDefaultProjectForm()
   editingProjectId: string | null = null
   isProjectLoading = true
@@ -150,9 +153,9 @@ export class AppComponent implements OnInit {
         : 0
 
     return [
-      { name: 'Confidence', value: this.confidence, color: '#2f79c8' },
-      { name: 'Incidents', value: avgSimilarity, color: '#79a6d6' },
-      { name: 'Pattern fit', value: Math.min(this.insights.failurePatternFrequency * 10, 100), color: '#9db9da' },
+      { name: 'Confidence', value: this.confidence, color: '#6366f1' },
+      { name: 'Incidents', value: avgSimilarity, color: '#818cf8' },
+      { name: 'Pattern fit', value: Math.min(this.insights.failurePatternFrequency * 10, 100), color: '#a5b4fc' },
     ]
   }
 
@@ -200,8 +203,12 @@ export class AppComponent implements OnInit {
     this.applyTheme()
   }
 
-  toggleProjectPanel() {
-    this.isProjectPanelCollapsed = !this.isProjectPanelCollapsed
+  setActiveSection(section: AppSection) {
+    this.activeSection = section
+  }
+
+  toggleSidebar() {
+    this.isSidebarCollapsed = !this.isSidebarCollapsed
   }
 
   handleAllGroupChange(checked: boolean) {
@@ -232,7 +239,7 @@ export class AppComponent implements OnInit {
       this.projects = loadedProjects
       this.ingestionStatuses = loadedStatuses
     } catch (requestError) {
-      this.projectError = requestError instanceof Error ? requestError.message : 'Unable to load project configuration data.'
+      this.projectError = requestError instanceof Error ? requestError.message : 'Unable to load application configuration data.'
     } finally {
       this.isProjectLoading = false
     }
@@ -270,7 +277,7 @@ export class AppComponent implements OnInit {
     }
 
     if (!payload.projectName) {
-      this.projectError = 'Project name is required.'
+      this.projectError = 'Application name is required.'
       return
     }
 
@@ -290,7 +297,7 @@ export class AppComponent implements OnInit {
       this.resetProjectForm()
       await this.loadProjectWorkspace(true)
     } catch (requestError) {
-      this.projectError = requestError instanceof Error ? requestError.message : 'Unable to save the project configuration.'
+      this.projectError = requestError instanceof Error ? requestError.message : 'Unable to save the application configuration.'
     } finally {
       this.isProjectSaving = false
     }
