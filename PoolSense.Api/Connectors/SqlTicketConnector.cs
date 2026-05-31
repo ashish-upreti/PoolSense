@@ -52,14 +52,15 @@ public class SqlTicketConnector : ITicketSourceConnector
 
     private async Task<IReadOnlyList<TicketRequest>> GetTicketsByProjectAsync(ProjectConfig projectConfig, string status, CancellationToken cancellationToken)
     {
-        await using var connection = new SqlConnection(GetConnectionString(projectConfig));
+        var connectionString = GetConnectionString(projectConfig);
+        await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
         var applicationFilter = GetApplicationFilter(projectConfig);
         var isPattern = applicationFilter.Contains('%');
         var appOperator = isPattern ? "LIKE" : "=";
 
-        var sql = BuildBaseSql() + Environment.NewLine + $"""
+                var sql = BuildBaseSql(connectionString) + Environment.NewLine + $$"""
             WHERE a.Application {appOperator} @application
               AND s.EventStatusName = @status
             """;
@@ -102,14 +103,15 @@ public class SqlTicketConnector : ITicketSourceConnector
             return null;
         }
 
-        await using var connection = new SqlConnection(GetConnectionString(projectConfig));
+        var connectionString = GetConnectionString(projectConfig);
+        await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
         var applicationFilter = GetApplicationFilter(projectConfig);
         var isPattern = applicationFilter.Contains('%');
         var appOperator = isPattern ? "LIKE" : "=";
 
-        var sql = BuildBaseSql() + Environment.NewLine + $"""
+                var sql = BuildBaseSql(connectionString) + Environment.NewLine + $$"""
             WHERE e.LogID = @ticketId
               AND a.Application {appOperator} @application
             """;
@@ -165,11 +167,12 @@ public class SqlTicketConnector : ITicketSourceConnector
             : projectConfig.ConnectionString;
     }
 
-    private string BuildBaseSql()
+    private string BuildBaseSql(string connectionString)
     {
-        var databasePrefix = string.IsNullOrWhiteSpace(_settings.SourceDatabaseName)
+        var databaseName = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
+        var databasePrefix = string.IsNullOrWhiteSpace(databaseName)
             ? string.Empty
-            : $"[{_settings.SourceDatabaseName}].";
+            : $"[{databaseName.Replace("]", "]]", StringComparison.Ordinal)}].";
 
         return $$"""
             SELECT CAST(e.LogID AS nvarchar(50)) AS TicketId,

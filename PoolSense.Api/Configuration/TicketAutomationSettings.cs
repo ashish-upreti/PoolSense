@@ -6,7 +6,6 @@ public sealed class TicketAutomationSettings
     public int PollIntervalSeconds { get; set; } = 60;
     public string ClosedStatusName { get; set; } = "Closed";
     public string NewStatusName { get; set; } = "New";
-    public string SourceDatabaseName { get; set; } = string.Empty;
     public int SimilaritySearchLimit { get; set; } = 5;
     public EmailDeliverySettings Email { get; set; } = new();
 }
