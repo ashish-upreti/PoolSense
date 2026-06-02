@@ -1,4 +1,5 @@
-using Npgsql;
+using Microsoft.Data.SqlClient;
+using PoolSense.Api.Data;
 using PoolSense.Api.Models;
 using System.Text;
 
@@ -9,12 +10,12 @@ namespace PoolSense.Api.Logging;
 /// </summary>
 public sealed class InteractionLogger
 {
-    private readonly IConfiguration _configuration;
+    private readonly IPoolSenseSqlConnectionFactory _connectionFactory;
     private readonly ILogger<InteractionLogger> _logger;
 
-    public InteractionLogger(IConfiguration configuration, ILogger<InteractionLogger> logger)
+    public InteractionLogger(IPoolSenseSqlConnectionFactory connectionFactory, ILogger<InteractionLogger> logger)
     {
-        _configuration = configuration;
+        _connectionFactory = connectionFactory;
         _logger = logger;
     }
 
@@ -71,7 +72,7 @@ public sealed class InteractionLogger
 
         ArgumentNullException.ThrowIfNull(retrievedTickets);
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
         await EnsureTableAsync(connection, cancellationToken);
 
@@ -88,7 +89,7 @@ public sealed class InteractionLogger
         };
 
         const string sql = """
-            INSERT INTO interaction_logs (
+            INSERT INTO dbo.interaction_logs (
                 query,
                 generated_embedding_length,
                 retrieved_ticket_ids,
@@ -108,15 +109,15 @@ public sealed class InteractionLogger
                 @createdAt);
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("query", interactionLog.Query);
-        command.Parameters.AddWithValue("generatedEmbeddingLength", interactionLog.GeneratedEmbeddingLength);
-        command.Parameters.AddWithValue("retrievedTicketIds", interactionLog.RetrievedTicketIds);
-        command.Parameters.AddWithValue("retrievedContents", interactionLog.RetrievedContents);
-        command.Parameters.AddWithValue("suggestedResolution", interactionLog.SuggestedResolution);
-        command.Parameters.AddWithValue("confidence", interactionLog.Confidence);
-        command.Parameters.AddWithValue("processingTimeMs", interactionLog.ProcessingTimeMs);
-        command.Parameters.AddWithValue("createdAt", interactionLog.CreatedAt);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@query", interactionLog.Query);
+        command.Parameters.AddWithValue("@generatedEmbeddingLength", interactionLog.GeneratedEmbeddingLength);
+        command.Parameters.AddWithValue("@retrievedTicketIds", interactionLog.RetrievedTicketIds);
+        command.Parameters.AddWithValue("@retrievedContents", interactionLog.RetrievedContents);
+        command.Parameters.AddWithValue("@suggestedResolution", interactionLog.SuggestedResolution);
+        command.Parameters.AddWithValue("@confidence", interactionLog.Confidence);
+        command.Parameters.AddWithValue("@processingTimeMs", interactionLog.ProcessingTimeMs);
+        command.Parameters.AddWithValue("@createdAt", interactionLog.CreatedAt);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
         _logger.LogInformation("Logged AI interaction for query length {QueryLength} with {RetrievedTicketCount} retrieved tickets.", interactionLog.Query.Length, retrievedTickets.Count);
@@ -147,39 +148,29 @@ public sealed class InteractionLogger
         return builder.ToString();
     }
 
-    private static async Task EnsureTableAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task EnsureTableAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
-            CREATE TABLE IF NOT EXISTS interaction_logs (
-                id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                query text NOT NULL,
-                generated_embedding_length integer NOT NULL DEFAULT 0,
-                retrieved_ticket_ids text NOT NULL DEFAULT '',
-                retrieved_contents text NOT NULL DEFAULT '',
-                suggested_resolution text NOT NULL DEFAULT '',
-                confidence real NOT NULL DEFAULT 0,
-                processing_time_ms integer NOT NULL DEFAULT 0,
-                created_at timestamptz NOT NULL DEFAULT now()
-            );
+            IF OBJECT_ID(N'dbo.interaction_logs', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.interaction_logs (
+                    id int IDENTITY(1,1) NOT NULL CONSTRAINT PK_interaction_logs PRIMARY KEY,
+                    query nvarchar(max) NOT NULL,
+                    generated_embedding_length int NOT NULL CONSTRAINT DF_interaction_logs_generated_embedding_length DEFAULT 0,
+                    retrieved_ticket_ids nvarchar(max) NOT NULL CONSTRAINT DF_interaction_logs_retrieved_ticket_ids DEFAULT '',
+                    retrieved_contents nvarchar(max) NOT NULL CONSTRAINT DF_interaction_logs_retrieved_contents DEFAULT '',
+                    suggested_resolution nvarchar(max) NOT NULL CONSTRAINT DF_interaction_logs_suggested_resolution DEFAULT '',
+                    confidence real NOT NULL CONSTRAINT DF_interaction_logs_confidence DEFAULT 0,
+                    processing_time_ms int NOT NULL CONSTRAINT DF_interaction_logs_processing_time_ms DEFAULT 0,
+                    created_at datetime2(7) NOT NULL CONSTRAINT DF_interaction_logs_created_at DEFAULT SYSUTCDATETIME()
+                );
+            END;
 
-            CREATE INDEX IF NOT EXISTS interaction_logs_created_at_idx
-                ON interaction_logs (created_at DESC);
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_interaction_logs_created_at' AND object_id = OBJECT_ID(N'dbo.interaction_logs'))
+                CREATE INDEX IX_interaction_logs_created_at ON dbo.interaction_logs (created_at DESC);
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
         await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    private string GetConnectionString()
-    {
-        var connectionString = _configuration.GetConnectionString("Postgres")
-            ?? _configuration.GetConnectionString("DefaultConnection");
-
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            throw new InvalidOperationException("A PostgreSQL connection string was not found. Configure ConnectionStrings:Postgres or ConnectionStrings:DefaultConnection.");
-        }
-
-        return connectionString;
     }
 }

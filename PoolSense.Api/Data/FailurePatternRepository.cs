@@ -1,5 +1,4 @@
-using Microsoft.Extensions.Configuration;
-using Npgsql;
+using Microsoft.Data.SqlClient;
 using PoolSense.Api.Models;
 
 namespace PoolSense.Api.Data;
@@ -34,12 +33,12 @@ public sealed class SystemIncidentFrequency
 
 public class FailurePatternRepository : IFailurePatternRepository
 {
-    private readonly IConfiguration _configuration;
+    private readonly IPoolSenseSqlConnectionFactory _connectionFactory;
     private readonly IProjectRepository _projectRepository;
 
-    public FailurePatternRepository(IConfiguration configuration, IProjectRepository projectRepository)
+    public FailurePatternRepository(IPoolSenseSqlConnectionFactory connectionFactory, IProjectRepository projectRepository)
     {
-        _configuration = configuration;
+        _connectionFactory = connectionFactory;
         _projectRepository = projectRepository;
     }
 
@@ -47,24 +46,42 @@ public class FailurePatternRepository : IFailurePatternRepository
     {
         ArgumentNullException.ThrowIfNull(failurePattern);
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         const string sql = """
-            INSERT INTO failure_patterns (system, component, failure_type, resolution_category, ticket_id, source_event_id, application, knowledge_year, created_at)
-            VALUES (@system, @component, @failureType, @resolutionCategory, @ticketId, @sourceEventId, @application, @knowledgeYear, @createdAt);
+            INSERT INTO dbo.failure_patterns (
+                system,
+                component,
+                failure_type,
+                resolution_category,
+                ticket_id,
+                source_event_id,
+                application,
+                knowledge_year,
+                created_at)
+            VALUES (
+                @system,
+                @component,
+                @failureType,
+                @resolutionCategory,
+                @ticketId,
+                @sourceEventId,
+                @application,
+                @knowledgeYear,
+                @createdAt);
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("system", failurePattern.System);
-        command.Parameters.AddWithValue("component", failurePattern.Component);
-        command.Parameters.AddWithValue("failureType", failurePattern.FailureType);
-        command.Parameters.AddWithValue("resolutionCategory", failurePattern.ResolutionCategory);
-        command.Parameters.AddWithValue("ticketId", failurePattern.TicketId);
-        command.Parameters.AddWithValue("sourceEventId", failurePattern.SourceEventId ?? string.Empty);
-        command.Parameters.AddWithValue("application", failurePattern.Application ?? string.Empty);
-        command.Parameters.AddWithValue("knowledgeYear", failurePattern.KnowledgeYear > 0 ? failurePattern.KnowledgeYear : DateTime.UtcNow.Year);
-        command.Parameters.AddWithValue("createdAt", failurePattern.CreatedAt == default ? DateTime.UtcNow : failurePattern.CreatedAt);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@system", failurePattern.System ?? string.Empty);
+        command.Parameters.AddWithValue("@component", failurePattern.Component ?? string.Empty);
+        command.Parameters.AddWithValue("@failureType", failurePattern.FailureType ?? string.Empty);
+        command.Parameters.AddWithValue("@resolutionCategory", failurePattern.ResolutionCategory ?? string.Empty);
+        command.Parameters.AddWithValue("@ticketId", failurePattern.TicketId ?? string.Empty);
+        command.Parameters.AddWithValue("@sourceEventId", failurePattern.SourceEventId ?? string.Empty);
+        command.Parameters.AddWithValue("@application", failurePattern.Application ?? string.Empty);
+        command.Parameters.AddWithValue("@knowledgeYear", failurePattern.KnowledgeYear > 0 ? failurePattern.KnowledgeYear : DateTime.UtcNow.Year);
+        command.Parameters.AddWithValue("@createdAt", failurePattern.CreatedAt == default ? DateTime.UtcNow : failurePattern.CreatedAt);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -76,7 +93,7 @@ public class FailurePatternRepository : IFailurePatternRepository
             return [];
         }
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
@@ -88,19 +105,19 @@ public class FailurePatternRepository : IFailurePatternRepository
                    failure_type,
                    resolution_category,
                    ticket_id,
-                 source_event_id,
-                 application,
-                 knowledge_year,
-                 created_at
-            FROM failure_patterns
+                   source_event_id,
+                   application,
+                   knowledge_year,
+                   created_at
+            FROM dbo.failure_patterns
             WHERE system = @system
             ORDER BY created_at DESC;
             """;
 
         sql = ApplyScopeToWhereClause(sql, "WHERE system = @system", scopedProjects);
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("system", system);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@system", system);
         ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<FailurePattern>();
@@ -108,19 +125,7 @@ public class FailurePatternRepository : IFailurePatternRepository
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new FailurePattern
-            {
-                Id = reader.GetInt32(0),
-                System = reader.GetString(1),
-                Component = reader.GetString(2),
-                FailureType = reader.GetString(3),
-                ResolutionCategory = reader.GetString(4),
-                TicketId = reader.GetString(5),
-                SourceEventId = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
-                Application = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
-                KnowledgeYear = reader.IsDBNull(8) ? 0 : reader.GetInt32(8),
-                CreatedAt = reader.GetDateTime(9)
-            });
+            results.Add(MapFailurePattern(reader));
         }
 
         return results;
@@ -133,27 +138,27 @@ public class FailurePatternRepository : IFailurePatternRepository
             return 0;
         }
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
 
         var sql = """
             SELECT COUNT(*)
-            FROM failure_patterns
+            FROM dbo.failure_patterns
             WHERE system = @system
               AND failure_type = @failureType
             """;
 
-                sql = ApplyScopeToWhereClause(sql, "WHERE system = @system\n              AND failure_type = @failureType", scopedProjects);
+        sql = ApplyScopeToWhereClause(sql, "WHERE system = @system\n              AND failure_type = @failureType", scopedProjects);
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("system", system);
-        command.Parameters.AddWithValue("failureType", failureType);
-                ApplyScopeParameters(command, scopedProjects);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@system", system);
+        command.Parameters.AddWithValue("@failureType", failureType);
+        ApplyScopeParameters(command, scopedProjects);
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
-        return result is long count ? (int)count : 0;
+        return Convert.ToInt32(result ?? 0);
     }
 
     public async Task<IReadOnlyList<FailureTypeFrequency>> GetMostFrequentFailureTypes(int limit = 10, CancellationToken cancellationToken = default)
@@ -163,24 +168,23 @@ public class FailurePatternRepository : IFailurePatternRepository
             return [];
         }
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
 
         var sql = """
-            SELECT failure_type,
+            SELECT TOP (@limit) failure_type,
                    COUNT(*) AS occurrence_count
-            FROM failure_patterns
+            FROM dbo.failure_patterns
             GROUP BY failure_type
-            ORDER BY occurrence_count DESC, failure_type ASC
-            LIMIT @limit;
+            ORDER BY occurrence_count DESC, failure_type ASC;
             """;
 
         sql = ApplyScopeToGroupByClause(sql, scopedProjects);
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("limit", limit);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@limit", limit);
         ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<FailureTypeFrequency>();
@@ -191,7 +195,7 @@ public class FailurePatternRepository : IFailurePatternRepository
             results.Add(new FailureTypeFrequency
             {
                 FailureType = reader.GetString(0),
-                Count = reader.GetInt32(1)
+                Count = Convert.ToInt32(reader.GetValue(1))
             });
         }
 
@@ -205,24 +209,23 @@ public class FailurePatternRepository : IFailurePatternRepository
             return [];
         }
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
 
         var sql = """
-            SELECT component,
+            SELECT TOP (@limit) component,
                    COUNT(*) AS occurrence_count
-            FROM failure_patterns
+            FROM dbo.failure_patterns
             GROUP BY component
-            ORDER BY occurrence_count DESC, component ASC
-            LIMIT @limit;
+            ORDER BY occurrence_count DESC, component ASC;
             """;
 
         sql = ApplyScopeToGroupByClause(sql, scopedProjects);
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("limit", limit);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@limit", limit);
         ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<ComponentFrequency>();
@@ -233,7 +236,7 @@ public class FailurePatternRepository : IFailurePatternRepository
             results.Add(new ComponentFrequency
             {
                 Component = reader.GetString(0),
-                Count = reader.GetInt32(1)
+                Count = Convert.ToInt32(reader.GetValue(1))
             });
         }
 
@@ -247,26 +250,25 @@ public class FailurePatternRepository : IFailurePatternRepository
             return [];
         }
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
 
         var sql = """
-            SELECT system,
+            SELECT TOP (@limit) system,
                    COUNT(*) AS occurrence_count
-            FROM failure_patterns
+            FROM dbo.failure_patterns
             GROUP BY system
             HAVING COUNT(*) >= @minimumIncidentCount
-            ORDER BY occurrence_count DESC, system ASC
-            LIMIT @limit;
+            ORDER BY occurrence_count DESC, system ASC;
             """;
 
         sql = ApplyScopeToGroupByClause(sql, scopedProjects);
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("minimumIncidentCount", minimumIncidentCount);
-        command.Parameters.AddWithValue("limit", limit);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@minimumIncidentCount", minimumIncidentCount);
+        command.Parameters.AddWithValue("@limit", limit);
         ApplyScopeParameters(command, scopedProjects);
 
         var results = new List<SystemIncidentFrequency>();
@@ -277,24 +279,28 @@ public class FailurePatternRepository : IFailurePatternRepository
             results.Add(new SystemIncidentFrequency
             {
                 System = reader.GetString(0),
-                Count = reader.GetInt32(1)
+                Count = Convert.ToInt32(reader.GetValue(1))
             });
         }
 
         return results;
     }
 
-    private string GetConnectionString()
+    private static FailurePattern MapFailurePattern(SqlDataReader reader)
     {
-        var connectionString = _configuration.GetConnectionString("Postgres")
-            ?? _configuration.GetConnectionString("DefaultConnection");
-
-        if (string.IsNullOrWhiteSpace(connectionString))
+        return new FailurePattern
         {
-            throw new InvalidOperationException("A PostgreSQL connection string was not found. Configure ConnectionStrings:Postgres or ConnectionStrings:DefaultConnection.");
-        }
-
-        return connectionString;
+            Id = reader.GetInt32(0),
+            System = reader.GetString(1),
+            Component = reader.GetString(2),
+            FailureType = reader.GetString(3),
+            ResolutionCategory = reader.GetString(4),
+            TicketId = reader.GetString(5),
+            SourceEventId = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
+            Application = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
+            KnowledgeYear = reader.IsDBNull(8) ? 0 : reader.GetInt32(8),
+            CreatedAt = reader.IsDBNull(9) ? DateTime.UtcNow : reader.GetDateTime(9)
+        };
     }
 
     private string ApplyScopeToWhereClause(string sql, string whereClause, IReadOnlyList<ProjectConfig> scopedProjects)
@@ -305,7 +311,7 @@ public class FailurePatternRepository : IFailurePatternRepository
             return sql;
         }
 
-        return sql.Replace(whereClause, $"{whereClause} AND {string.Join(" AND ", scopedConditions)}");
+        return sql.Replace(whereClause, $"{whereClause} AND {string.Join(" AND ", scopedConditions)}", StringComparison.Ordinal);
     }
 
     private string ApplyScopeToGroupByClause(string sql, IReadOnlyList<ProjectConfig> scopedProjects)
@@ -316,10 +322,10 @@ public class FailurePatternRepository : IFailurePatternRepository
             return sql;
         }
 
-        return sql.Replace("GROUP BY", $"WHERE {string.Join(" AND ", scopedConditions)} GROUP BY");
+        return sql.Replace("GROUP BY", $"WHERE {string.Join(" AND ", scopedConditions)} GROUP BY", StringComparison.Ordinal);
     }
 
-    private List<string> BuildScopeConditions(IReadOnlyList<ProjectConfig> scopedProjects)
+    private static List<string> BuildScopeConditions(IReadOnlyList<ProjectConfig> scopedProjects)
     {
         var conditions = new List<string>();
 
@@ -331,7 +337,7 @@ public class FailurePatternRepository : IFailurePatternRepository
                 continue;
             }
 
-            var appOperator = project.ApplicationFilter.Contains('%') ? "ILIKE" : "=";
+            var appOperator = project.ApplicationFilter.Contains('%') || project.ApplicationFilter.Contains('_') ? "LIKE" : "=";
             var projectConditions = new List<string>
             {
                 $"application {appOperator} @appFilter{index}"
@@ -350,7 +356,7 @@ public class FailurePatternRepository : IFailurePatternRepository
         return conditions;
     }
 
-    private void ApplyScopeParameters(NpgsqlCommand command, IReadOnlyList<ProjectConfig> scopedProjects)
+    private static void ApplyScopeParameters(SqlCommand command, IReadOnlyList<ProjectConfig> scopedProjects)
     {
         for (var index = 0; index < scopedProjects.Count; index++)
         {
@@ -360,7 +366,7 @@ public class FailurePatternRepository : IFailurePatternRepository
                 continue;
             }
 
-            var appFilterParameter = $"appFilter{index}";
+            var appFilterParameter = $"@appFilter{index}";
             if (!command.Parameters.Contains(appFilterParameter))
             {
                 command.Parameters.AddWithValue(appFilterParameter, project.ApplicationFilter);
@@ -368,7 +374,7 @@ public class FailurePatternRepository : IFailurePatternRepository
 
             if (project.KnowledgeLookbackYears > 0)
             {
-                var minimumYearParameter = $"minimumKnowledgeYear{index}";
+                var minimumYearParameter = $"@minimumKnowledgeYear{index}";
                 if (!command.Parameters.Contains(minimumYearParameter))
                 {
                     command.Parameters.AddWithValue(minimumYearParameter, GetMinimumKnowledgeYear(project.KnowledgeLookbackYears));

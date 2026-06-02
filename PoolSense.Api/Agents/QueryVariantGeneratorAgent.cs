@@ -1,5 +1,8 @@
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
+using PoolSense.Api.Configuration;
+using PoolSense.Api.Logging;
 
 namespace PoolSense.Api.Agents;
 
@@ -11,10 +14,17 @@ public interface IQueryVariantGeneratorAgent
 public class QueryVariantGeneratorAgent : IQueryVariantGeneratorAgent
 {
     private readonly Kernel _kernel;
+    private readonly ILlmTokenUsageRepository _tokenUsageRepository;
+    private readonly IOptionsMonitor<AiSettings> _aiSettings;
 
-    public QueryVariantGeneratorAgent(Kernel kernel)
+    public QueryVariantGeneratorAgent(
+        Kernel kernel,
+        ILlmTokenUsageRepository tokenUsageRepository,
+        IOptionsMonitor<AiSettings> aiSettings)
     {
         _kernel = kernel;
+        _tokenUsageRepository = tokenUsageRepository;
+        _aiSettings = aiSettings;
     }
 
     public async Task<IReadOnlyList<string>> GenerateQueryVariantsAsync(string problemDescription, string rootCause, string resolution)
@@ -63,7 +73,13 @@ Rules:
             { "resolution", resolution }
         };
 
-        var content = await SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(_kernel, prompt, arguments);
+        var content = await SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(
+            _kernel,
+            prompt,
+            arguments,
+            _tokenUsageRepository,
+            "QueryVariantGeneration",
+            _aiSettings.CurrentValue.Models.Chat);
         var queries = JsonSerializer.Deserialize<List<string>>(AiJsonResponseSanitizer.Normalize(content));
         return queries is { Count: > 0 } ? queries : [];
     }

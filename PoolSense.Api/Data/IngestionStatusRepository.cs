@@ -1,4 +1,4 @@
-using Npgsql;
+using Microsoft.Data.SqlClient;
 using PoolSense.Api.Models;
 
 namespace PoolSense.Api.Data;
@@ -14,11 +14,11 @@ public interface IIngestionStatusRepository
 
 public class IngestionStatusRepository : IIngestionStatusRepository
 {
-    private readonly IConfiguration _configuration;
+    private readonly IPoolSenseSqlConnectionFactory _connectionFactory;
 
-    public IngestionStatusRepository(IConfiguration configuration)
+    public IngestionStatusRepository(IPoolSenseSqlConnectionFactory connectionFactory)
     {
-        _configuration = configuration;
+        _connectionFactory = connectionFactory;
     }
 
     public async Task InitializeStatusAsync(string projectId, int totalTickets, CancellationToken cancellationToken = default)
@@ -28,21 +28,26 @@ public class IngestionStatusRepository : IIngestionStatusRepository
             return;
         }
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         const string sql = """
-            INSERT INTO ingestion_status (project_id, total_tickets, ingested_tickets, last_updated)
-            VALUES (@projectId, @totalTickets, 0, CURRENT_TIMESTAMP)
-            ON CONFLICT (project_id) DO UPDATE
-            SET total_tickets = EXCLUDED.total_tickets,
+            UPDATE dbo.ingestion_status
+            SET total_tickets = @totalTickets,
                 ingested_tickets = 0,
-                last_updated = CURRENT_TIMESTAMP;
+                last_updated = SYSUTCDATETIME()
+            WHERE project_id = @projectId;
+
+            IF @@ROWCOUNT = 0
+            BEGIN
+                INSERT INTO dbo.ingestion_status (project_id, total_tickets, ingested_tickets, last_updated)
+                VALUES (@projectId, @totalTickets, 0, SYSUTCDATETIME());
+            END;
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("projectId", projectId);
-        command.Parameters.AddWithValue("totalTickets", Math.Max(0, totalTickets));
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@projectId", projectId);
+        command.Parameters.AddWithValue("@totalTickets", Math.Max(0, totalTickets));
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -54,30 +59,34 @@ public class IngestionStatusRepository : IIngestionStatusRepository
             return;
         }
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         var normalizedTotal = Math.Max(0, totalTickets);
         var normalizedIngested = Math.Min(Math.Max(0, ingestedTickets), normalizedTotal);
 
         const string sql = """
-            INSERT INTO ingestion_status (project_id, total_tickets, ingested_tickets, last_updated)
-            VALUES (@projectId, @totalTickets, @ingestedTickets, CURRENT_TIMESTAMP)
-            ON CONFLICT (project_id) DO UPDATE
-            SET total_tickets = EXCLUDED.total_tickets,
-                ingested_tickets = EXCLUDED.ingested_tickets,
+            UPDATE dbo.ingestion_status
+            SET total_tickets = @totalTickets,
+                ingested_tickets = @ingestedTickets,
                 last_updated = CASE
-                    WHEN ingestion_status.total_tickets IS DISTINCT FROM EXCLUDED.total_tickets
-                        OR ingestion_status.ingested_tickets IS DISTINCT FROM EXCLUDED.ingested_tickets
-                    THEN CURRENT_TIMESTAMP
-                    ELSE ingestion_status.last_updated
-                END;
+                    WHEN total_tickets <> @totalTickets OR ingested_tickets <> @ingestedTickets
+                    THEN SYSUTCDATETIME()
+                    ELSE last_updated
+                END
+            WHERE project_id = @projectId;
+
+            IF @@ROWCOUNT = 0
+            BEGIN
+                INSERT INTO dbo.ingestion_status (project_id, total_tickets, ingested_tickets, last_updated)
+                VALUES (@projectId, @totalTickets, @ingestedTickets, SYSUTCDATETIME());
+            END;
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("projectId", projectId);
-        command.Parameters.AddWithValue("totalTickets", normalizedTotal);
-        command.Parameters.AddWithValue("ingestedTickets", normalizedIngested);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@projectId", projectId);
+        command.Parameters.AddWithValue("@totalTickets", normalizedTotal);
+        command.Parameters.AddWithValue("@ingestedTickets", normalizedIngested);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -89,28 +98,37 @@ public class IngestionStatusRepository : IIngestionStatusRepository
             return;
         }
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         const string sql = """
-            INSERT INTO ingestion_status (project_id, total_tickets, ingested_tickets, last_updated)
-            VALUES (@projectId, @ingestedCount, @ingestedCount, CURRENT_TIMESTAMP)
-            ON CONFLICT (project_id) DO UPDATE
-            SET ingested_tickets = GREATEST(
-                    ingestion_status.ingested_tickets,
-                    LEAST(@ingestedCount, ingestion_status.total_tickets)),
+            UPDATE dbo.ingestion_status
+            SET ingested_tickets = CASE
+                    WHEN @ingestedCount > total_tickets THEN total_tickets
+                    WHEN @ingestedCount > ingested_tickets THEN @ingestedCount
+                    ELSE ingested_tickets
+                END,
                 last_updated = CASE
-                    WHEN GREATEST(
-                        ingestion_status.ingested_tickets,
-                        LEAST(@ingestedCount, ingestion_status.total_tickets)) > ingestion_status.ingested_tickets
-                    THEN CURRENT_TIMESTAMP
-                    ELSE ingestion_status.last_updated
-                END;
+                    WHEN CASE
+                            WHEN @ingestedCount > total_tickets THEN total_tickets
+                            WHEN @ingestedCount > ingested_tickets THEN @ingestedCount
+                            ELSE ingested_tickets
+                         END > ingested_tickets
+                    THEN SYSUTCDATETIME()
+                    ELSE last_updated
+                END
+            WHERE project_id = @projectId;
+
+            IF @@ROWCOUNT = 0
+            BEGIN
+                INSERT INTO dbo.ingestion_status (project_id, total_tickets, ingested_tickets, last_updated)
+                VALUES (@projectId, @ingestedCount, @ingestedCount, SYSUTCDATETIME());
+            END;
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("projectId", projectId);
-        command.Parameters.AddWithValue("ingestedCount", Math.Max(0, ingestedCount));
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@projectId", projectId);
+        command.Parameters.AddWithValue("@ingestedCount", Math.Max(0, ingestedCount));
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -122,22 +140,21 @@ public class IngestionStatusRepository : IIngestionStatusRepository
             return null;
         }
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         const string sql = """
-            SELECT id,
+            SELECT TOP (1) id,
                    project_id,
                    total_tickets,
                    ingested_tickets,
                    last_updated
-            FROM ingestion_status
-            WHERE project_id = @projectId
-            LIMIT 1;
+            FROM dbo.ingestion_status
+            WHERE project_id = @projectId;
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("projectId", projectId);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@projectId", projectId);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
@@ -150,7 +167,7 @@ public class IngestionStatusRepository : IIngestionStatusRepository
 
     public async Task<IReadOnlyList<IngestionStatus>> GetAllStatusAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         const string sql = """
@@ -159,11 +176,11 @@ public class IngestionStatusRepository : IIngestionStatusRepository
                    total_tickets,
                    ingested_tickets,
                    last_updated
-            FROM ingestion_status
+            FROM dbo.ingestion_status
             ORDER BY project_id ASC;
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
         var results = new List<IngestionStatus>();
@@ -175,7 +192,7 @@ public class IngestionStatusRepository : IIngestionStatusRepository
         return results;
     }
 
-    private static IngestionStatus MapStatus(NpgsqlDataReader reader)
+    private static IngestionStatus MapStatus(SqlDataReader reader)
     {
         return new IngestionStatus
         {
@@ -183,20 +200,7 @@ public class IngestionStatusRepository : IIngestionStatusRepository
             ProjectId = reader.GetString(1),
             TotalTickets = reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
             IngestedTickets = reader.IsDBNull(3) ? 0 : reader.GetInt32(3),
-            LastUpdated = reader.IsDBNull(4) ? DateTime.UtcNow : reader.GetFieldValue<DateTime>(4)
+            LastUpdated = reader.IsDBNull(4) ? DateTime.UtcNow : reader.GetDateTime(4)
         };
-    }
-
-    private string GetConnectionString()
-    {
-        var connectionString = _configuration.GetConnectionString("Postgres")
-            ?? _configuration.GetConnectionString("DefaultConnection");
-
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            throw new InvalidOperationException("A PostgreSQL connection string was not found. Configure ConnectionStrings:Postgres or ConnectionStrings:DefaultConnection.");
-        }
-
-        return connectionString;
     }
 }

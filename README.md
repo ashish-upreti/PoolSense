@@ -1,67 +1,73 @@
 # PoolSense
 
-PoolSense is an incident-assistance application built as a .NET 9 solution with an ASP.NET Core API, a React/Vite frontend, Semantic Kernel-based AI orchestration, and PostgreSQL persistence with vector search.
+PoolSense is a .NET 9 incident-assistance platform with an ASP.NET Core API, an Angular 18 operator console, Azure OpenAI-backed orchestration, and SQL Server persistence for knowledge, project configuration, ingestion tracking, feedback, telemetry, and operational logging.
 
-The primary workflow is:
+At a high level, PoolSense does four things:
 
-1. A user submits a ticket or incident description.
-2. The API analyzes the request with Azure OpenAI-backed agents.
-3. Embeddings and historical knowledge are used to find similar incidents.
-4. A workflow orchestrator returns a suggested root cause, resolution, confidence score, and related failure patterns.
+1. Accepts an incident or ticket description from a user or integrated client.
+2. Retrieves similar historical incidents and failure-pattern context.
+3. Uses AI orchestration to generate a suggested root cause, resolution, confidence score, and reasoning.
+4. Supports ongoing operations through project configuration, feedback capture, ingestion tracking, and email recommendation delivery.
+
+## Core Capabilities
+
+- Incident triage through the `POST /api/ticket/process` workflow.
+- Similar-incident retrieval using stored embeddings and cosine similarity search over SQL Server-backed knowledge rows.
+- AI-generated root cause, resolution, reasoning, confidence, and failure-pattern enrichment.
+- Background polling of a SQL Server ticket source for new tickets and closed-ticket knowledge ingestion.
+- Project-based application scoping through `project_configs` and application filters.
+- UI-based application administration for project rows, search scope, ingestion progress, and email settings.
+- Feedback capture with helpful / not helpful rating, selected primary incident, optional comment, and usage signal.
+- Operational insight endpoints for failures, systems, components, and timelines.
+- Recommendation email delivery through SMTP or SQL Server Database Mail.
+- External API support for toggling `send_email` and updating semicolon-separated Lifeguard email recipients by `application_filter`.
+- SQL Server-backed interaction logs, application logs, and LLM token usage tracking.
 
 ## Solution Layout
 
 ```text
 PoolSense/
 ├── PoolSense.sln
-├── PoolSense.Api/             # ASP.NET Core API, orchestration, controllers, services
-├── PoolSense.Application/     # Shared request models and application-facing contracts
-├── PoolSense.Domain/          # Domain layer placeholder
-├── PoolSense.Infrastructure/  # Infrastructure layer placeholder
-└── PoolSense.UI/              # React + Vite frontend wrapped as a SDK-style .NET project
+├── README.md
+├── database/
+│   ├── sqlserver-bootstrap.sql
+│   ├── testingSQL.sql
+│   ├── postgres-bootstrap.sql
+│   └── testingPGSQL.sql
+├── PoolSense.Api/
+├── PoolSense.Application/
+├── PoolSense.Domain/
+├── PoolSense.Infrastructure/
+└── PoolSense.UI/
 ```
 
 ### Project Responsibilities
 
 - `PoolSense.Api`
-    Hosts the HTTP API, registers Semantic Kernel and services, exposes Swagger in development, and serves the built SPA when frontend assets are published.
+  Hosts the HTTP API, background polling service, AI orchestration, SQL Server persistence, Swagger in development, and static SPA hosting when built frontend assets are published.
 
 - `PoolSense.UI`
-    Contains the React application. It remains a Node/Vite frontend, but it is now represented in the solution as a first-class SDK-style .NET project. `dotnet build` on this project runs the frontend production build through MSBuild.
+  Contains the Angular 18 operator console. It is wrapped in an SDK-style .NET project so it can participate in the solution and solution builds while still being developed with Angular CLI.
 
 - `PoolSense.Application`
-    Holds application models shared by the API, including ticket request payloads.
+  Holds application-facing models and shared request/response contracts.
 
 - `PoolSense.Domain` and `PoolSense.Infrastructure`
-    Present as solution layers but currently contain minimal implementation.
+  Present as solution layers and available for future domain/infrastructure expansion.
 
-## Core Capabilities
-
-- Ticket analysis through AI agents.
-- Ticket processing that combines analysis, similarity search, and failure-pattern reasoning.
-- Knowledge storage backed by embeddings.
-- Similar-incident lookup using PostgreSQL + pgvector.
-- Automated background polling of a SQL Server ticket source for closed-ticket knowledge ingestion.
-- Email recommendation delivery for newly detected tickets.
-- Multi-project support scoped by application name and knowledge year.
-- User feedback capture from the React UI with helpful / not-helpful actions and optional comments.
-- Feedback-weighted retrieval ranking using helpfulness and outcome-usage signals.
-- Interaction logging for query text, retrieved incident metadata, confidence, and processing time.
-- Insight endpoints for failure trends, repeated systems, components, and incident timelines.
-- A React operator workspace for asking PoolSense and reviewing returned evidence.
+- `database`
+  Contains bootstrap and smoke-test SQL scripts. The active persistence path in the application is SQL Server, and [database/sqlserver-bootstrap.sql](database/sqlserver-bootstrap.sql) is the relevant schema bootstrap script.
 
 ## Tech Stack
 
 - .NET 9
 - ASP.NET Core Web API
+- Angular 18
+- TypeScript 5
 - Microsoft Semantic Kernel
 - Azure OpenAI chat + embeddings
-- PostgreSQL
-- pgvector
-- React 19
-- Vite 8
-- TypeScript 5
-- Recharts
+- SQL Server
+- SMTP or SQL Server Database Mail for recommendation delivery
 
 ## Prerequisites
 
@@ -69,781 +75,410 @@ Install these before running locally:
 
 - .NET 9 SDK
 - Node.js 20+ and npm
-- PostgreSQL
-- pgvector enabled in the target database
 - Access to an Azure OpenAI-compatible endpoint for chat and embeddings
+- Access to SQL Server instances for:
+  - `PoolSenseSqlServer` — PoolSense persistence, logging, project configuration, and Database Mail delivery when enabled
+  - `TicketSourceSqlServer` — source ticket database used by polling and ingestion
 
 ## Configuration
 
-### API Settings
+The API reads settings from [PoolSense.Api/appsettings.json](PoolSense.Api/appsettings.json), [PoolSense.Api/appsettings.Development.json](PoolSense.Api/appsettings.Development.json), user secrets, and environment variables.
 
-The API reads configuration from `PoolSense.Api/appsettings.json` and `PoolSense.Api/appsettings.Development.json`. Use `PoolSense.Api/appsettings.example.json` as the checked-in template for non-secret defaults such as model names, API versions, polling labels, and local PostgreSQL defaults.
+Use [PoolSense.Api/appsettings.example.json](PoolSense.Api/appsettings.example.json) as the checked-in baseline template.
 
-Important sections:
+### Important Configuration Sections
 
 - `AiSettings`
-    - `BaseUrl`
-    - `ApiKey`
-    - `ApiVersion`
-    - `ImageApiVersion`
-    - `Models.Chat`
-    - `Models.Embeddings`
+  - `BaseUrl`
+  - `ApiKey`
+  - `ApiVersion`
+  - `ImageApiVersion`
+  - `Models.Chat`
+  - `Models.Embeddings`
 
-- `ConnectionStrings.Postgres`
-- `ConnectionStrings.TicketSourceSqlServer` — SQL Server connection string to the ticket source database (read-only; used by the background polling service).
+- `ConnectionStrings`
+  - `PoolSenseSqlServer` — PoolSense persistence database
+  - `TicketSourceSqlServer` — source ticket database used by the polling connector
 
 - `TicketAutomation`
-    - `PollingEnabled` — switch that controls the background polling service.
-    - `SendEmail` — whether to send email recommendations for new tickets.
-    - `ApplicationName` — default application scope for knowledge storage and queries.
-    - `KnowledgeLookbackYears` — rolling-year window used for ingestion filtering and knowledge base queries. Set to `0` for no limit (ingest all historical tickets).
-    - `PollIntervalSeconds` — seconds between polling iterations (minimum enforced at 10).
-    - `ClosedStatusName` — status value that marks a ticket as closed in the source system.
-    - `NewStatusName` — status value that marks a ticket as new in the source system.
-    - `SourceDatabaseName` — source database name queried via `tbl_Application`.
-    - `ProjectGroups` — list of named application groups. Each entry has a `GroupId`, `DisplayName`, and `ApplicationFilter` (supports SQL LIKE wildcards, e.g. `%FSCO-FAB%`).
-    - `Email.Recipient` — recipient address for recommendation emails.
-    - `Email.FromAddress` — from address on outbound recommendation emails.
-    - `Email.DeliveryMode` — `Smtp` (default) or `DatabaseMail`. Use `DatabaseMail` to relay via SQL Server Database Mail on the ticket-source server.
-    - `Email.SmtpHost` — SMTP relay hostname (used when `DeliveryMode = Smtp`).
-    - `Email.Port` — SMTP port (default `25`), used when `DeliveryMode = Smtp`.
-    - `Email.TimeoutMs` — SMTP connection and send timeout in milliseconds (default `30000`).
-    - `Email.DatabaseMailProfile` — Database Mail profile name configured in `msdb` (used when `DeliveryMode = DatabaseMail`).
+  - `PollingEnabled`
+  - `PollIntervalSeconds`
+  - `ClosedStatusName`
+  - `NewStatusName`
+  - `SimilaritySearchLimit`
+  - `Email.Recipient`
+  - `Email.FromAddress`
+  - `Email.DeliveryMode` (`Smtp` or `DatabaseMail`)
+  - `Email.SmtpHost`
+  - `Email.Port`
+  - `Email.TimeoutMs`
+  - `Email.DatabaseMailProfile`
 
-Recommended approach for local development:
-
-- Keep non-secret defaults in `appsettings.Development.json`.
-- Keep checked-in non-secret examples in `PoolSense.Api/appsettings.example.json`.
-- Store secrets such as API keys outside source control using environment variables or `dotnet user-secrets`.
-
-The API project now has a `UserSecretsId`, so you can configure local secrets without changing tracked files.
-
-Recommended local setup:
+Recommended local setup uses user secrets for sensitive values:
 
 ```powershell
 dotnet user-secrets set --project .\PoolSense.Api "AiSettings:BaseUrl" "https://your-endpoint.openai.azure.com"
 dotnet user-secrets set --project .\PoolSense.Api "AiSettings:ApiKey" "<your-api-key>"
-dotnet user-secrets set --project .\PoolSense.Api "ConnectionStrings:Postgres" "Host=localhost;Port=5433;Username=postgres;Password=postgres;Database=PoolSense"
+dotnet user-secrets set --project .\PoolSense.Api "ConnectionStrings:PoolSenseSqlServer" "Server=your-sql-server,1433;Database=PoolSense;Trusted_Connection=True;TrustServerCertificate=True"
+dotnet user-secrets set --project .\PoolSense.Api "ConnectionStrings:TicketSourceSqlServer" "Server=your-ticket-source-server,1433;Database=PoolProd;Trusted_Connection=True;TrustServerCertificate=True"
 ```
 
-Example shape:
-
-```json
-{
-    "AiSettings": {
-        "BaseUrl": "https://your-endpoint.openai.azure.com",
-        "ApiKey": "<set-via-user-secrets-or-env>",
-        "ApiVersion": "2024-02-15-preview",
-        "Models": {
-            "Chat": "gpt-4",
-            "Embeddings": "text-embedding-3-large"
-        }
-    },
-    "ConnectionStrings": {
-        "Postgres": "Host=localhost;Port=5433;Username=postgres;Password=postgres;Database=PoolSense",
-        "TicketSourceSqlServer": "Server=your-sql-server,1433;Database=PoolProd;Trusted_Connection=True;TrustServerCertificate=True"
-    },
-    "TicketAutomation": {
-        "Enabled": false,
-        "SendEmail": true,
-        "PollingEnabled": true,
-        "ApplicationName": "AT MPS Capacity Response",
-        "KnowledgeLookbackYears": 3,
-        "PollIntervalSeconds": 60,
-        "ClosedStatusName": "Closed",
-        "NewStatusName": "New",
-        "SourceDatabaseName": "PoolProd",
-        "ProjectGroups": [
-            {
-                "GroupId": "atcr",
-                "DisplayName": "ATCR",
-                "ApplicationFilter": "AT MPS Capacity Response"
-            }
-        ],
-        "Email": {
-            "Recipient": "<recipient@your-domain.com>",
-            "FromAddress": "<from@your-domain.com>",
-            "DeliveryMode": "Smtp",
-            "SmtpHost": "smtp.your-domain.com",
-            "Port": 25,
-            "TimeoutMs": 30000,
-            "DatabaseMailProfile": ""
-        }
-    }
-}
-```
-
-### Frontend Settings
-
-`PoolSense.UI/.env.example` contains the frontend variables used by Vite:
-
-- `VITE_API_BASE_URL`
-    Optional explicit API base URL. Leave empty when proxying through Vite in development.
-
-- `VITE_API_PROXY_TARGET`
-    The API target used by the Vite dev server. Default local value is `http://localhost:5217`.
+Do not store real API keys, passwords, or production connection strings in tracked files.
 
 ## Database Setup
 
-The repository currently contains runtime SQL queries but no EF Core migrations. A checked-in PostgreSQL bootstrap script is now available at [database/postgres-bootstrap.sql](database/postgres-bootstrap.sql).
+PoolSense currently persists operational data in SQL Server. The checked-in bootstrap script is [database/sqlserver-bootstrap.sql](database/sqlserver-bootstrap.sql).
 
-### 1. Enable `pgvector`
-
-The bootstrap script handles `pgvector` and the required tables for you. If you want to apply the steps manually, the first command is:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-```
-
-### 2. Run the Bootstrap Script
-
-From a shell with `psql` available:
+Run it in SQL Server Management Studio, Azure Data Studio, or `sqlcmd` against the PoolSense persistence database:
 
 ```powershell
-psql "Host=localhost;Port=5433;Username=postgres;Password=postgres;Database=PoolSense" -f .\database\postgres-bootstrap.sql
+sqlcmd -S your-sql-server,1433 -d PoolSense -E -i .\database\sqlserver-bootstrap.sql
 ```
 
-If you are using the checked-in Docker pgvector container instead of a local `psql` install, you can run the script like this:
+Useful smoke-test and verification scripts:
 
-```powershell
-Get-Content .\database\postgres-bootstrap.sql -Raw | docker exec -i pgvector-db psql -U postgres -d PoolSense
-```
+- [database/testingSQL.sql](database/testingSQL.sql) — SQL Server smoke-test and validation queries
+- [database/sqlserver-bootstrap.sql](database/sqlserver-bootstrap.sql) — schema bootstrap and indexes
 
-### 3. What the Script Creates
+### Main SQL Server Tables
 
-The API writes to six tables:
+The bootstrap script creates and/or maintains these primary tables:
 
-- `ticket_knowledge`
-    Stores enriched incident text, extracted root cause and resolution, keywords, and the embedding used for similarity search. Scoped by `application` and `knowledge_year`.
+- `dbo.ticket_knowledge`
+- `dbo.failure_patterns`
+- `dbo.processed_source_events`
+- `dbo.project_configs`
+- `dbo.ingestion_status`
+- `dbo.feedback_logs`
+- `dbo.interaction_logs`
+- `dbo.application_run_logs`
+- `dbo.llm_token_usage`
 
-- `failure_patterns`
-    Stores structured failure classifications produced by the AI workflow. Scoped by `application` and `knowledge_year`.
+## Run Locally
 
-- `processed_source_events`
-    Tracks deduplicated polling state per source event. Prevents reprocessing the same closed ticket (`ClosedKnowledge`) or sending a repeated email for the same new ticket (`NewRecommendation`).
+### 1. Start the API
 
-- `project_configs`
-    Stores ticket-source registration metadata for `/api/projects`.
-
-- `feedback_logs`
-    Stores UI feedback submitted for AI responses, including the original query, suggested resolution, helpful / not-helpful rating, whether the suggestion was used, optional comment text, and retrieved ticket ids.
-
-- `interaction_logs`
-    Stores AI pipeline interaction metadata such as query text, embedding length, retrieved ticket ids and summarized content, suggested resolution, confidence, and processing time.
-
-Key columns in `ticket_knowledge`:
-
-```sql
-CREATE TABLE IF NOT EXISTS ticket_knowledge (
-    id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    ticket_id text NOT NULL,
-    source_event_id text NOT NULL DEFAULT '',
-    problem text NOT NULL,
-    root_cause text NOT NULL,
-    resolution text NOT NULL,
-    keywords text[] NOT NULL DEFAULT '{}',
-    embedding vector(1536) NOT NULL,
-    application text NOT NULL DEFAULT '',
-    knowledge_year integer NOT NULL DEFAULT EXTRACT(YEAR FROM now()),
-    source_status text NOT NULL DEFAULT '',
-    source_submitted_at timestamptz,
-    source_closed_at timestamptz,
-    submitter_id text NOT NULL DEFAULT '',
-    lifeguard_id text NOT NULL DEFAULT '',
-    source_project text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-```
-
-Key columns in `failure_patterns`:
-
-```sql
-CREATE TABLE IF NOT EXISTS failure_patterns (
-    id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    system text NOT NULL,
-    component text NOT NULL,
-    failure_type text NOT NULL,
-    resolution_category text NOT NULL,
-    ticket_id text NOT NULL,
-    source_event_id text NOT NULL DEFAULT '',
-    application text NOT NULL DEFAULT '',
-    knowledge_year integer NOT NULL DEFAULT EXTRACT(YEAR FROM now()),
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-```
-
-`processed_source_events` schema:
-
-```sql
-CREATE TABLE IF NOT EXISTS processed_source_events (
-    source_event_id text NOT NULL,
-    processing_kind text NOT NULL,
-    processed_at timestamptz NOT NULL DEFAULT now(),
-    email_sent boolean NOT NULL DEFAULT FALSE,
-    email_recipient text NOT NULL DEFAULT '',
-    workflow_result text NOT NULL DEFAULT '',
-    PRIMARY KEY (source_event_id, processing_kind)
-);
-```
-
-`feedback_logs` schema:
-
-```sql
-CREATE TABLE IF NOT EXISTS feedback_logs (
-    id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    ticket_query text NOT NULL,
-    suggested_resolution text NOT NULL,
-    feedback_type integer NOT NULL,
-    was_used boolean NOT NULL DEFAULT FALSE,
-    comment text NOT NULL DEFAULT '',
-    retrieved_ticket_ids text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-```
-
-`interaction_logs` schema:
-
-```sql
-CREATE TABLE IF NOT EXISTS interaction_logs (
-    id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    query text NOT NULL,
-    generated_embedding_length integer NOT NULL DEFAULT 0,
-    retrieved_ticket_ids text NOT NULL DEFAULT '',
-    retrieved_contents text NOT NULL DEFAULT '',
-    suggested_resolution text NOT NULL DEFAULT '',
-    confidence real NOT NULL DEFAULT 0,
-    processing_time_ms integer NOT NULL DEFAULT 0,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-```
-
-The bootstrap script also creates an HNSW cosine index for fast vector similarity search:
-
-```sql
-CREATE INDEX IF NOT EXISTS ticket_knowledge_embedding_cosine_idx
-    ON ticket_knowledge
-    USING hnsw (embedding vector_cosine_ops);
-
-ANALYZE ticket_knowledge;
-```
-
-Refer to [database/postgres-bootstrap.sql](database/postgres-bootstrap.sql) for the complete and authoritative schema including all indexes.
-
-### 4. Embedding Dimension Note
-
-The checked-in configuration uses `text-embedding-3-large`. The `ticket_knowledge.embedding` column is defined as `vector(1536)`. If you switch to a model that produces a different number of dimensions, update the column definition to match before inserting records.
-
-### 5. Connect To The PostgreSQL Terminal
-
-If `psql` is installed on your machine:
-
-```powershell
-psql "Host=localhost;Port=5433;Username=postgres;Password=postgres;Database=PoolSense"
-```
-
-If you want to connect through the running Docker container:
-
-```powershell
-docker exec -it pgvector-db psql -U postgres -d PoolSense
-```
-
-Useful interactive `psql` commands:
-
-```sql
-\dt
-\d ticket_knowledge
-\d failure_patterns
-\d processed_source_events
-\q
-```
-
-### 6. Verify Stored Data With SELECT Queries
-
-Use these queries to verify that the polling workflow is writing the expected data.
-
-Check recent ticket knowledge rows:
-
-```sql
-SELECT id, ticket_id
-FROM ticket_knowledge;
-```
-
-```sql
-SELECT id,
-             ticket_id,
-             source_event_id,
-             application,
-             knowledge_year,
-             source_status,
-             problem,
-             root_cause,
-             resolution,
-             created_at
-FROM ticket_knowledge
-ORDER BY created_at DESC
-LIMIT 20;
-```
-
-Check recent failure-pattern rows:
-
-```sql
-SELECT id,
-             ticket_id,
-             source_event_id,
-             application,
-             knowledge_year,
-             system,
-             component,
-             failure_type,
-             resolution_category,
-             created_at
-FROM failure_patterns
-ORDER BY created_at DESC
-LIMIT 20;
-```
-
-Check processed polling state and email delivery:
-
-```sql
-SELECT source_event_id,
-             processing_kind,
-             processed_at,
-             email_sent,
-             email_recipient
-FROM processed_source_events
-ORDER BY processed_at DESC
-LIMIT 50;
-```
-
-Check active registered projects:
-
-```sql
-SELECT project_id,
-             project_name,
-             ticket_source_type,
-             is_active,
-             knowledge_sources
-FROM project_configs
-ORDER BY project_name;
-```
-
-Check only the current application and current-year knowledge scope:
-
-```sql
-SELECT ticket_id,
-             source_event_id,
-             application,
-             knowledge_year,
-             source_status,
-             created_at
-FROM ticket_knowledge
-WHERE application = 'AT MPS Capacity Response'
-    AND knowledge_year = EXTRACT(YEAR FROM CURRENT_DATE)::int
-ORDER BY created_at DESC;
-```
-
-## Ticket Automation and Background Polling
-
-The API includes a hosted `BackgroundTicketPollingService` that continuously reads from the SQL Server ticket source. It drives three flows:
-
-### Flow 1 — Closed Ticket Knowledge Ingestion
-
-1. The polling service queries tickets with status `ClosedStatusName` (default: `Closed`) from the SQL source.
-2. Each new closed ticket is processed through the AI workflow: analyzed, enriched, embedded, and stored in `ticket_knowledge` and `failure_patterns`.
-3. The event is recorded in `processed_source_events` with `processing_kind = 'ClosedKnowledge'` to prevent reprocessing.
-
-### Flow 2 — New Ticket Recommendation and Email
-
-1. The polling service queries tickets with status `NewStatusName` (default: `New`).
-2. For each unseen new ticket, the workflow searches the knowledge base for similar incidents and generates a root-cause and resolution suggestion.
-3. If `SendEmail = true`, the recommendation is emailed to the configured `Email.Recipient`.
-4. The event is recorded in `processed_source_events` with `processing_kind = 'NewRecommendation'`.
-
-### Flow 3 — User Query UI
-
-The React UI lets operators enter a problem statement and receive suggestions from the same knowledge base without triggering automation. See [PoolSense.UI/README.md](PoolSense.UI/README.md).
-
-### Enabling Polling
-
-Polling is controlled by `TicketAutomation:PollingEnabled`. To enable it for local testing:
-
-```json
-"TicketAutomation": {
-    "PollingEnabled": true,
-    "SendEmail": false
-}
-```
-
-Set `SendEmail: false` during local testing to avoid sending real emails.
-
-### ProjectGroups
-
-`ProjectGroups` lets you define multiple named application scopes. Each group's `ApplicationFilter` is applied as a SQL `ILIKE` query when the filter contains `%`, or as an exact match otherwise.
-
-```json
-"ProjectGroups": [
-    { "GroupId": "atcr",     "DisplayName": "ATCR",     "ApplicationFilter": "AT MPS Capacity Response" },
-    { "GroupId": "fsco-fab", "DisplayName": "FSCO-FAB", "ApplicationFilter": "%FSCO-FAB%" },
-    { "GroupId": "dxcr",     "DisplayName": "DxCR",     "ApplicationFilter": "Die Prep / Die Sort Capacity Response" }
-]
-```
-
-## Local Development
-
-### Quick Start: Run the API and UI
-
-1. Open a terminal at the solution root.
-2. Start the API:
+From the repository root:
 
 ```powershell
 dotnet run --project .\PoolSense.Api\PoolSense.Api.csproj --launch-profile http
 ```
 
-3. Open a second terminal.
-4. Go to the UI project:
+Development defaults:
+
+- API base URL: `http://localhost:5217`
+- Swagger: `http://localhost:5217/swagger`
+
+### 2. Start the Angular UI
+
+From the repository root:
 
 ```powershell
 cd .\PoolSense.UI
-```
-
-5. Install frontend dependencies if you have not already:
-
-```powershell
 npm install
+npm start
 ```
 
-6. Start the UI:
+This runs Angular with the local proxy from [PoolSense.UI/proxy.conf.json](PoolSense.UI/proxy.conf.json), forwarding `/api` to `http://localhost:5217`.
 
-```powershell
-npm run dev
+Open the UI at:
+
+```text
+http://localhost:4200
 ```
 
-7. Open the app in your browser:
-   - UI: `http://localhost:5173`
-   - API: `http://localhost:5217`
-   - Swagger: `http://localhost:5217/swagger`
+### 3. Integrated Builds
 
-Notes:
-- The UI proxies `/api` requests to `http://localhost:5217` during development.
-- To stop both apps, press `Ctrl+C` in each terminal.
-
-### Option 1: Run API and Vite Separately
-
-This is the best setup for frontend development.
-
-1. Restore .NET dependencies:
+Useful build commands:
 
 ```powershell
-dotnet restore .\PoolSense.sln
-```
-
-2. Install frontend dependencies:
-
-```powershell
-Set-Location .\PoolSense.UI
-npm ci
-```
-
-3. Start the API from the solution root in a separate terminal:
-
-```powershell
-dotnet run --project .\PoolSense.Api
-```
-
-That command uses the HTTP launch profile at `http://localhost:5217`. If you want to run with the HTTPS launch profile instead, use:
-
-```powershell
-dotnet run --project .\PoolSense.Api --launch-profile https
-```
-
-4. Start the frontend dev server:
-
-```powershell
-Set-Location .\PoolSense.UI
-npm run dev
-```
-
-Default local URLs:
-
-- API: `http://localhost:5217`
-- API HTTPS profile: `https://localhost:7028`
-- Frontend: `http://localhost:5173`
-- Swagger: `http://localhost:5217/swagger`
-
-### Option 2: Build the Whole Solution
-
-This validates the backend and frontend together:
-
-```powershell
+dotnet build .\PoolSense.Api\PoolSense.Api.csproj
+dotnet build .\PoolSense.UI\PoolSense.UI.csproj
 dotnet build .\PoolSense.sln
 ```
 
-Because `PoolSense.UI` is an SDK-style project with MSBuild targets, this build will:
+`PoolSense.UI.csproj` runs `npm ci` automatically when `node_modules` is missing, then performs an Angular production build through MSBuild.
 
-- ensure Node modules exist using `npm ci` when needed
-- run the frontend production build via `npm run build`
+## How To Use The App
 
-### Option 3: Start with a Fresh Database
+The operator experience has two primary work areas.
 
-If you are bringing up the app on a new machine:
+### Incident Workspace
 
-1. Create the PostgreSQL database.
-2. Enable `pgvector`.
-3. Run [database/postgres-bootstrap.sql](database/postgres-bootstrap.sql).
-4. Set `ConnectionStrings:Postgres` to that database.
-5. Start the API and use `POST /api/ticket/store` or the main workflow to seed incident knowledge.
+1. Open `http://localhost:4200`.
+2. Stay on the `PoolSense` section in the left navigation rail.
+3. Choose a search scope:
+   - `All` to search all configured projects
+   - one or more configured project groups such as `ATCR`, `FSCO-FAB`, `DxCR`, or `ONEMPS`
+4. Type an incident description or click a quick prompt such as `VG item missing`.
+5. Press Enter or click `Ask PoolSense`.
+6. Review:
+   - suggested root cause
+   - suggested resolution
+   - confidence
+   - reasoning
+   - similar incidents
+   - failure-pattern details
+   - telemetry summary
+7. Submit feedback as `Helpful` or `Not Helpful`, optionally selecting the primary incident, adding a comment, and marking whether the resolution was used.
 
-## Frontend Hosting Behavior
+### Application Configuration Workspace
 
-`PoolSense.Api` includes `PublishSpaAssets`, which copies built files from `PoolSense.UI/dist` into the API publish output under `wwwroot`.
+Use the `Application Configuration` section in the left navigation rail to:
 
-At runtime the API:
+- create application/project configuration rows
+- edit existing rows
+- set application filters
+- set knowledge lookback years
+- set similarity search limit
+- toggle `Send Email`
+- toggle `Pooling Enabled`
+- set semicolon-separated email recipients
+- review ingestion progress and refresh status
 
-- serves static frontend assets when `wwwroot` exists
-- uses `MapFallbackToFile("index.html")` so client-side routes resolve to the SPA
+Recipient format example:
 
-This means:
+```text
+lifeguard1@intel.com; lifeguard2@intel.com
+```
 
-- during development, use Vite for hot reload
-- during publish or integrated deployments, the API can serve the built frontend directly
+Application filter examples:
 
-## API Endpoints
+```text
+AT MPS Capacity Response
+%FSCO-FAB%
+```
 
-### Ticket Endpoints
+## API Surface
 
-- `POST /api/ticket/analyze`
-    Runs the ticket analyzer agent and returns raw structured analysis.
+### Main Endpoints
 
-- `POST /api/ticket/process`
-    Main workflow endpoint used by the UI. Returns a `TicketWorkflowResult` including suggested root cause, suggested resolution, confidence, similar incidents, failure pattern, and reasoning.
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/ticket/analyze` | Analyze a ticket/incident request. |
+| `POST /api/ticket/process` | Main incident workflow endpoint used by the UI. |
+| `POST /api/ticket/store` | Store ticket knowledge. |
+| `POST /api/ticket/similar` | Retrieve similar historical tickets. |
+| `POST /api/feedback` | Submit helpful / not-helpful response feedback. |
+| `GET /api/projects` | List configured projects/applications. |
+| `POST /api/projects` | Create a project/application configuration. |
+| `POST /api/projects/register` | Alias for project registration. |
+| `GET /api/projects/{projectId}` | Fetch one project by id. |
+| `PUT /api/projects/{projectId}` | Update one project by id. |
+| `GET /api/projects/groups` | Return project groups for UI search scoping. |
+| `PATCH /api/projects/email-settings/by-application` | Update `send_email` and `email_recipients` by exact `application_filter`. |
+| `GET /api/ingestion/status` | Get ingestion status for all projects. |
+| `GET /api/ingestion/status/{projectId}` | Get ingestion status for one project. |
+| `GET /api/insights` | General insight summary. |
+| `GET /api/insights/failures` | Failure insights. |
+| `GET /api/insights/components` | Component insights. |
+| `GET /api/insights/systems` | System insights. |
+| `GET /api/insights/timeline` | Timeline insights. |
 
-- `POST /api/ticket/store`
-    Analyzes a ticket, enriches it, generates embeddings, and stores knowledge for future similarity search.
-
-- `POST /api/ticket/similar`
-    Searches for similar tickets using the configured similarity search service.
-
-### Project Endpoints
-
-- `POST /api/projects/register`
-    Registers a project configuration including ticket source type, connection string, and knowledge sources.
-
-- `GET /api/projects`
-    Lists active projects.
-
-### Insight Endpoints
-
-- `GET /api/insights`
-    Returns top failures, components, repeated systems, and a monthly incident timeline.
-
-- `GET /api/insights/failures`
-    Returns top failure types.
-
-- `GET /api/insights/components`
-    Returns most problematic components.
-
-- `GET /api/insights/systems`
-    Returns systems with repeated incidents.
-
-- `GET /api/insights/timeline`
-    Returns incident counts by month.
-
-## Swagger Test Prompts
-
-Use these sample requests in `http://localhost:5217/swagger` to test each API.
-
-### `POST /api/ticket/analyze`
-
-Request body:
+### Example Workflow Request
 
 ```json
 {
-    "title": "VG item missing from queue",
-    "description": "Upstream source error caused a VG item to not appear in the work queue. Tool is idle waiting for material."
+  "title": "VG item missing",
+  "description": "VG item missing",
+  "selectedGroupIds": ["atcr", "fsco-fab"]
 }
 ```
 
-### `POST /api/ticket/process`
+Pass `null`, an empty array, or omit `selectedGroupIds` to search across all configured project groups.
 
-Request body:
+### Example External Email Settings Request
 
 ```json
 {
-    "ticketId": "Pool-10001",
-    "title": "VG item missing from queue",
-    "description": "Upstream source error caused a VG item to not appear in the work queue. Tool is idle waiting for material."
+  "applicationFilter": "AT MPS Capacity Response",
+  "sendEmail": true,
+  "emailRecipients": "lifeguard1@intel.com; lifeguard2@intel.com"
 }
 ```
 
-### `POST /api/ticket/store`
+## Similarity Logic And Workflow Algorithm
 
-Request body:
+PoolSense currently performs similarity retrieval in application code over a cached SQL Server knowledge set. The current path is not a SQL-side vector index lookup. Embeddings are stored in `dbo.ticket_knowledge` as JSON arrays, loaded into memory, filtered by project scope, and then scored with cosine similarity.
 
-```json
-{
-    "ticketId": "Pool-20003",
-    "title": "VG item missing from queue",
-    "description": "Upstream source error caused a VG item to not appear in the work queue. Tool is idle waiting for material.",
-    "resolution": "Manually triggered upstream source sync. Item reappeared in queue after a queue refresh."
-}
-```
+### 1. Search Text Selection
 
-### `POST /api/ticket/similar`
+For `POST /api/ticket/process`, the orchestrator first runs the ticket analyzer agent to extract a structured `Problem`, `RootCause`, `Resolution`, and `Keywords`.
 
-Request body:
+The similarity search text is chosen as:
 
-```json
-{
-    "title": "VG item not showing in work queue",
-    "description": "Tool waiting for material. Upstream may have dropped an item."
-}
-```
+- `analysis.Problem` when the analyzer returns a non-empty problem statement
+- otherwise a fallback string built from the raw title and description
 
-### `POST /api/projects/register`
+This means retrieval is usually driven by the analyzer's normalized problem summary rather than the raw incident body.
 
-Request body:
+### 2. Query Embedding
 
-```json
-{
-    "projectName": "AT MPS Capacity Response",
-    "ticketSourceType": "SqlServer",
-    "connectionString": "Server=your-sql-server,1433;Database=PoolProd;Trusted_Connection=True;TrustServerCertificate=True",
-    "knowledgeSources": []
-}
-```
+The selected search text is embedded through the configured Azure OpenAI embedding model using a fixed dimension of `1536`.
 
-### `GET /api/projects`
+Current embedding behavior:
 
-No request body.
+- model comes from `AiSettings.Models.Embeddings`
+- embedding generation uses Semantic Kernel retry handling
+- token and latency usage are logged to `dbo.llm_token_usage`
 
-Test URL:
+### 3. Candidate Set Construction
 
-```text
-http://localhost:5217/api/projects
-```
+All knowledge rows with non-empty embeddings are loaded from `dbo.ticket_knowledge` and cached in memory.
 
-### `GET /api/insights`
+Before scoring, candidates are filtered by project scope:
 
-No request body.
+- if `selectedGroupIds` is empty or omitted, all configured projects with a non-empty `application_filter` are considered
+- if `selectedGroupIds` is provided, only those matching `project_configs.project_id` rows are considered
 
-Test URL:
+Each candidate ticket is kept only if it matches at least one scoped project:
 
-```text
-http://localhost:5217/api/insights?limit=10&minimumIncidentCount=2&monthCount=6
-```
+- `KnowledgeLookbackYears` is enforced by year
+- `ApplicationFilter` is matched against the knowledge row's `application`
 
-### `GET /api/insights/failures`
+Application filter matching rules:
 
-No request body.
+- exact case-insensitive match when no wildcard is present
+- SQL `LIKE`-style wildcards are supported in config:
+  - `%` becomes `.*`
+  - `_` becomes `.`
 
-Test URL:
+Those wildcard patterns are converted to a case-insensitive regular expression in memory.
+
+### 4. Base Similarity Score
+
+Each candidate is scored with cosine similarity:
 
 ```text
-http://localhost:5217/api/insights/failures?limit=10
+cosine(query, candidate) = dot(query, candidate) / (|query| * |candidate|)
 ```
 
-### `GET /api/insights/components`
+If the embedding lengths do not match, or either vector magnitude is zero, the similarity score is treated as `0`.
 
-No request body.
+### 5. Feedback-Aware Reranking
 
-Test URL:
+PoolSense does a two-stage ranking pass.
 
-```text
-http://localhost:5217/api/insights/components?limit=10
-```
+First pass:
 
-### `GET /api/insights/systems`
+- sort all candidates by raw cosine similarity descending
+- take `max(limit, limit * 5)` candidates as the rerank pool
 
-No request body.
+Second pass:
 
-Test URL:
+- add a feedback-derived weight to each candidate
+- sort again by `(cosine similarity + feedback weight)`
+- return the final top `limit`
 
-```text
-http://localhost:5217/api/insights/systems?limit=10&minimumIncidentCount=2
-```
+Current feedback weights:
 
-### `GET /api/insights/timeline`
+- helpful + used: `+0.10`
+- helpful only: `+0.05`
+- not helpful: `-0.05`
 
-No request body.
+Feedback decay and caps:
 
-Test URL:
+- exponential time decay with a `45 day` half-life
+- final feedback contribution clamped to `[-0.20, +0.20]`
+- final rerank adjustment also clamped to `[-0.20, +0.20]`
 
-```text
-http://localhost:5217/api/insights/timeline?monthCount=6
-```
+Feedback is associated to either:
 
-## Example Request
+- the explicitly selected `target_ticket_id`
+- or, for older feedback without a target ticket, each ticket id in `retrieved_ticket_ids`
 
-Main workflow request:
+### 6. Similarity Limit
 
-```http
-POST /api/ticket/process
-Content-Type: application/json
+The final similar-ticket count comes from:
 
-{
-    "ticketId": "Pool-10001",
-    "title": "VG item missing",
-    "description": "Upstream source error"
-}
-```
+- `request.SimilaritySearchLimitOverride` if it is greater than `0`
+- otherwise `TicketAutomation.SimilaritySearchLimit`
 
-Representative response shape:
+Project configuration currently constrains `SimilaritySearchLimit` to `1..20`.
 
-```json
-{
-    "suggestedRootCause": "Upstream synchronization failure caused the VG item to not be propagated to the work queue.",
-    "suggestedResolution": "Trigger a manual queue refresh or restart the upstream sync service. Verify that the item appears in the source system before refreshing.",
-    "confidence": 0.87,
-    "reasoning": "Three similar incidents from the past 2 years involved the same upstream source error pattern. All were resolved by triggering a manual sync.",
-    "failurePattern": {
-        "system": "VG Queue System",
-        "component": "Upstream Source Connector",
-        "failureType": "Item Missing",
-        "resolutionCategory": "Manual Sync"
-    },
-    "similarIncidents": [
-        {
-            "ticketId": "Pool-18742",
-            "problem": "VG item dropped during upstream handoff",
-            "resolution": "Triggered manual upstream sync, item reappeared.",
-            "similarity": 0.93
-        }
-    ]
-}
-```
+### 7. How Similarity Feeds Resolution
 
-- The API currently allows CORS from `http://localhost:5173`.
-- Swagger is enabled only in development.
-- The frontend currently posts to `POST /api/ticket/process`.
-- `PoolSense.UI` is included in the solution as a .NET project, but it is still fundamentally a Node/Vite application.
+The final ranked similar incidents are passed to the resolution agent in order, highest similarity first.
 
-## Common Commands
+The resolution agent is instructed to:
 
-From the solution root:
+- compare the new ticket mainly against the historical `Problem` field
+- choose the best 1-2 incidents
+- avoid blindly copying generic stored root-cause summaries
+- produce a specific root cause and adapted resolution
+- emit a confidence score based on match quality
 
-```powershell
-dotnet restore .\PoolSense.sln
-dotnet build .\PoolSense.sln
-dotnet run --project .\PoolSense.Api
-dotnet run --project .\PoolSense.Api --launch-profile https
-```
+Important distinction:
 
-From `PoolSense.UI`:
+- `similarIncidents[].similarity` is the retrieval score from cosine similarity plus feedback rerank
+- `result.confidence` is generated by the resolution agent and reflects how strong the AI believes the final recommendation is
 
-```powershell
-npm ci
-npm run dev
-npm run build
-npm run lint
-```
+Current confidence guidance in the prompt is:
 
-## Current Gaps
+- `0.8+` for close matches
+- `0.5-0.79` for partial matches
+- below `0.5` for weak or no relevant historical match
 
-- `PoolSense.Domain` and `PoolSense.Infrastructure` are still placeholders.
-- Database bootstrap now has a checked-in SQL script, but migrations and repeatable schema automation are not yet present in this repository.
+### 8. Persistence Flow After Retrieval
 
-## Recommended Next Improvements
+For the normal `ProcessAsync` path, retrieval is only part of the pipeline. After similarity search and resolution generation, PoolSense also:
 
-- Add automated schema migrations and schema versioning for PostgreSQL changes.
-- Use deployment-specific environment variables or a secret manager outside local development.
-- Add an end-to-end local bootstrap script for API, UI, and database.
+1. logs the interaction metadata
+2. builds a `TicketKnowledge` record for the current ticket
+3. enriches it with AI-generated query variants
+4. creates a second embedding for storage using:
+   - problem
+   - root cause
+   - resolution
+   - generated search variants
+5. extracts a structured failure pattern
+6. persists both knowledge and failure-pattern rows when the workflow is in persist mode
+
+This means the search embedding and the storage embedding are related but not identical:
+
+- search embedding uses the incoming issue text or analyzed problem
+- storage embedding uses enriched knowledge text built from the final structured fields and generated search variants
+
+## Runtime Flow
+
+1. The UI loads project groups and application configuration from the API.
+2. A user submits an incident description.
+3. The API orchestrates ticket analysis, retrieval, resolution generation, and failure-pattern reasoning.
+4. Similar incidents and context are pulled from persisted knowledge in SQL Server.
+5. The UI renders the response and accepts operator feedback.
+6. Background polling continuously checks the ticket source for:
+   - closed tickets to ingest as knowledge
+   - new tickets to evaluate for recommendation email delivery
+7. Project configuration and ingestion status drive application scoping and operational behavior.
+
+## Key Files
+
+| File | Purpose |
+| --- | --- |
+| [PoolSense.Api/Program.cs](PoolSense.Api/Program.cs) | Service registration, Swagger, CORS, and app pipeline. |
+| [PoolSense.Api/Controllers](PoolSense.Api/Controllers) | HTTP endpoints for ticket workflow, projects, ingestion, feedback, and insights. |
+| [PoolSense.Api/Services/BackgroundTicketPollingService.cs](PoolSense.Api/Services/BackgroundTicketPollingService.cs) | Scheduled polling, ingestion, and recommendation-email workflow. |
+| [PoolSense.Api/Services/DatabaseMailEmailService.cs](PoolSense.Api/Services/DatabaseMailEmailService.cs) | SQL Server Database Mail delivery via `PoolSenseSqlServer`. |
+| [PoolSense.Api/Data/ProjectRepository.cs](PoolSense.Api/Data/ProjectRepository.cs) | SQL Server persistence for `project_configs`. |
+| [PoolSense.UI/src/app/app.component.ts](PoolSense.UI/src/app/app.component.ts) | Angular UI state and interaction orchestration. |
+| [PoolSense.UI/src/app/app.component.html](PoolSense.UI/src/app/app.component.html) | Angular template for the operator console and project admin. |
+| [PoolSense.UI/src/app/api.service.ts](PoolSense.UI/src/app/api.service.ts) | Frontend fetch wrapper for PoolSense APIs. |
+| [database/sqlserver-bootstrap.sql](database/sqlserver-bootstrap.sql) | SQL Server schema bootstrap. |
+| [database/testingSQL.sql](database/testingSQL.sql) | SQL Server smoke-test and verification queries. |
+
+## Troubleshooting
+
+- If `npm start` fails immediately, run `npm install` or `npm ci` in [PoolSense.UI](PoolSense.UI) and retry.
+- If the UI cannot reach the API, confirm the backend is listening on `http://localhost:5217` or update [PoolSense.UI/proxy.conf.json](PoolSense.UI/proxy.conf.json).
+- If the API returns `500`, check API logs and verify `AiSettings`, `PoolSenseSqlServer`, and `TicketSourceSqlServer` values.
+- If project configuration does not load, confirm `dbo.project_configs` exists in the PoolSense database.
+- If ingestion status is empty or incorrect, confirm `dbo.ingestion_status` exists and the polling service is enabled.
+- If recommendation emails are not sent, verify project-level `Send Email`, semicolon-separated recipients, and the configured email delivery mode.
+- If `DeliveryMode = DatabaseMail`, verify the SQL Server Database Mail profile exists on `PoolSenseSqlServer` and is usable by the configured login.
+- If `dotnet build .\PoolSense.UI\PoolSense.UI.csproj` fails, confirm Node.js/npm are installed and frontend dependencies restore correctly.
+
+## Notes
+
+- The active local UI dev server uses Angular, not React/Vite.
+- The active persistence path is SQL Server.
+- The checked-in PostgreSQL scripts are no longer the primary runtime path for the current app configuration.

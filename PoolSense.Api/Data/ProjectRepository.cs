@@ -1,5 +1,6 @@
-using Npgsql;
+using Microsoft.Data.SqlClient;
 using PoolSense.Api.Models;
+using System.Text.Json;
 
 namespace PoolSense.Api.Data;
 
@@ -8,27 +9,32 @@ public interface IProjectRepository
     Task<ProjectConfig> CreateProjectAsync(ProjectConfig projectConfig, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProjectConfig>> GetAllProjectsAsync(CancellationToken cancellationToken = default);
     Task<ProjectConfig?> GetProjectByIdAsync(string projectId, CancellationToken cancellationToken = default);
+    Task<ProjectConfig?> GetProjectByApplicationFilterAsync(string applicationFilter, CancellationToken cancellationToken = default);
     Task<ProjectConfig?> UpdateProjectAsync(ProjectConfig projectConfig, CancellationToken cancellationToken = default);
 }
 
 public class ProjectRepository : IProjectRepository
 {
-    private readonly IConfiguration _configuration;
+    private readonly IPoolSenseSqlConnectionFactory _connectionFactory;
+    private readonly IVectorStoreCacheInvalidator _vectorStoreCacheInvalidator;
 
-    public ProjectRepository(IConfiguration configuration)
+    public ProjectRepository(
+        IPoolSenseSqlConnectionFactory connectionFactory,
+        IVectorStoreCacheInvalidator vectorStoreCacheInvalidator)
     {
-        _configuration = configuration;
+        _connectionFactory = connectionFactory;
+        _vectorStoreCacheInvalidator = vectorStoreCacheInvalidator;
     }
 
     public async Task<ProjectConfig> CreateProjectAsync(ProjectConfig projectConfig, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(projectConfig);
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         const string sql = """
-            INSERT INTO project_configs (
+            INSERT INTO dbo.project_configs (
                 project_id,
                 project_name,
                 knowledge_lookback_years,
@@ -40,6 +46,7 @@ public class ProjectRepository : IProjectRepository
                 connection_string,
                 knowledge_sources,
                 application_filter)
+            OUTPUT INSERTED.id, INSERTED.created_at
             VALUES (
                 @projectId,
                 @projectName,
@@ -51,20 +58,20 @@ public class ProjectRepository : IProjectRepository
                 @ticketSourceType,
                 @connectionString,
                 @knowledgeSources,
-                @applicationFilter)
-            RETURNING id, created_at;
+                @applicationFilter);
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
         AddProjectParameters(command, projectConfig);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (await reader.ReadAsync(cancellationToken))
         {
             projectConfig.Id = reader.GetInt32(0);
-            projectConfig.CreatedAt = reader.GetFieldValue<DateTime>(1);
+            projectConfig.CreatedAt = reader.GetDateTime(1);
         }
 
+        _vectorStoreCacheInvalidator.Invalidate();
         return projectConfig;
     }
 
@@ -75,30 +82,29 @@ public class ProjectRepository : IProjectRepository
             return null;
         }
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-          const string sql = """
-            SELECT id,
-                 project_id,
-                 project_name,
-                 knowledge_lookback_years,
-                 similarity_search_limit,
-                 send_email,
-                 pooling_enabled,
-                 email_recipients,
-                 created_at,
-                 ticket_source_type,
-                 connection_string,
-                 knowledge_sources,
-                 application_filter
-            FROM project_configs
-            WHERE project_id = @projectId
-            LIMIT 1;
+        const string sql = """
+            SELECT TOP (1) id,
+                   project_id,
+                   project_name,
+                   knowledge_lookback_years,
+                   similarity_search_limit,
+                   send_email,
+                   pooling_enabled,
+                   email_recipients,
+                   created_at,
+                   ticket_source_type,
+                   connection_string,
+                   knowledge_sources,
+                   application_filter
+            FROM dbo.project_configs
+            WHERE project_id = @projectId;
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("projectId", projectId);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@projectId", projectId);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
@@ -111,7 +117,7 @@ public class ProjectRepository : IProjectRepository
 
     public async Task<IReadOnlyList<ProjectConfig>> GetAllProjectsAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         const string sql = """
@@ -128,11 +134,11 @@ public class ProjectRepository : IProjectRepository
                    connection_string,
                    knowledge_sources,
                    application_filter
-            FROM project_configs
+            FROM dbo.project_configs
             ORDER BY project_name ASC;
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
 
         var results = new List<ProjectConfig>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -145,15 +151,55 @@ public class ProjectRepository : IProjectRepository
         return results;
     }
 
+    public async Task<ProjectConfig?> GetProjectByApplicationFilterAsync(string applicationFilter, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(applicationFilter))
+        {
+            return null;
+        }
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = """
+            SELECT TOP (1) id,
+                   project_id,
+                   project_name,
+                   knowledge_lookback_years,
+                   similarity_search_limit,
+                   send_email,
+                   pooling_enabled,
+                   email_recipients,
+                   created_at,
+                   ticket_source_type,
+                   connection_string,
+                   knowledge_sources,
+                   application_filter
+            FROM dbo.project_configs
+            WHERE application_filter = @applicationFilter;
+            """;
+
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@applicationFilter", applicationFilter);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return MapProjectConfig(reader);
+    }
+
     public async Task<ProjectConfig?> UpdateProjectAsync(ProjectConfig projectConfig, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(projectConfig);
 
-        await using var connection = new NpgsqlConnection(GetConnectionString());
+        await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         const string sql = """
-            UPDATE project_configs
+            UPDATE dbo.project_configs
             SET project_name = @projectName,
                 knowledge_lookback_years = @knowledgeLookbackYears,
                 similarity_search_limit = @similaritySearchLimit,
@@ -164,11 +210,11 @@ public class ProjectRepository : IProjectRepository
                 connection_string = @connectionString,
                 knowledge_sources = @knowledgeSources,
                 application_filter = @applicationFilter
-            WHERE project_id = @projectId
-            RETURNING id, created_at;
+            OUTPUT INSERTED.id, INSERTED.created_at
+            WHERE project_id = @projectId;
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
         AddProjectParameters(command, projectConfig);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -178,27 +224,28 @@ public class ProjectRepository : IProjectRepository
         }
 
         projectConfig.Id = reader.GetInt32(0);
-        projectConfig.CreatedAt = reader.GetFieldValue<DateTime>(1);
+        projectConfig.CreatedAt = reader.GetDateTime(1);
+        _vectorStoreCacheInvalidator.Invalidate();
 
         return projectConfig;
     }
 
-    private static void AddProjectParameters(NpgsqlCommand command, ProjectConfig projectConfig)
+    private static void AddProjectParameters(SqlCommand command, ProjectConfig projectConfig)
     {
-        command.Parameters.AddWithValue("projectId", projectConfig.ProjectId);
-        command.Parameters.AddWithValue("projectName", projectConfig.ProjectName);
-        command.Parameters.AddWithValue("knowledgeLookbackYears", projectConfig.KnowledgeLookbackYears);
-        command.Parameters.AddWithValue("similaritySearchLimit", projectConfig.SimilaritySearchLimit);
-        command.Parameters.AddWithValue("sendEmail", projectConfig.SendEmail);
-        command.Parameters.AddWithValue("poolingEnabled", projectConfig.PoolingEnabled);
-        command.Parameters.AddWithValue("emailRecipients", projectConfig.EmailRecipients ?? string.Empty);
-        command.Parameters.AddWithValue("ticketSourceType", projectConfig.TicketSourceType ?? "sql");
-        command.Parameters.AddWithValue("connectionString", projectConfig.ConnectionString ?? string.Empty);
-        command.Parameters.AddWithValue("knowledgeSources", projectConfig.KnowledgeSources?.ToArray() ?? []);
-        command.Parameters.AddWithValue("applicationFilter", projectConfig.ApplicationFilter ?? string.Empty);
+        command.Parameters.AddWithValue("@projectId", projectConfig.ProjectId);
+        command.Parameters.AddWithValue("@projectName", projectConfig.ProjectName);
+        command.Parameters.AddWithValue("@knowledgeLookbackYears", projectConfig.KnowledgeLookbackYears);
+        command.Parameters.AddWithValue("@similaritySearchLimit", projectConfig.SimilaritySearchLimit);
+        command.Parameters.AddWithValue("@sendEmail", projectConfig.SendEmail);
+        command.Parameters.AddWithValue("@poolingEnabled", projectConfig.PoolingEnabled);
+        command.Parameters.AddWithValue("@emailRecipients", projectConfig.EmailRecipients ?? string.Empty);
+        command.Parameters.AddWithValue("@ticketSourceType", projectConfig.TicketSourceType ?? "sql");
+        command.Parameters.AddWithValue("@connectionString", projectConfig.ConnectionString ?? string.Empty);
+        command.Parameters.AddWithValue("@knowledgeSources", JsonSerializer.Serialize(projectConfig.KnowledgeSources ?? []));
+        command.Parameters.AddWithValue("@applicationFilter", projectConfig.ApplicationFilter ?? string.Empty);
     }
 
-    private static ProjectConfig MapProjectConfig(NpgsqlDataReader reader)
+    private static ProjectConfig MapProjectConfig(SqlDataReader reader)
     {
         return new ProjectConfig
         {
@@ -210,24 +257,21 @@ public class ProjectRepository : IProjectRepository
             SendEmail = reader.IsDBNull(5) || reader.GetBoolean(5),
             PoolingEnabled = reader.IsDBNull(6) || reader.GetBoolean(6),
             EmailRecipients = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
-            CreatedAt = reader.IsDBNull(8) ? DateTime.UtcNow : reader.GetFieldValue<DateTime>(8),
+            CreatedAt = reader.IsDBNull(8) ? DateTime.UtcNow : reader.GetDateTime(8),
             TicketSourceType = reader.IsDBNull(9) ? "sql" : reader.GetString(9),
             ConnectionString = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
-            KnowledgeSources = reader.IsDBNull(11) ? [] : reader.GetFieldValue<string[]>(11).ToList(),
+            KnowledgeSources = reader.IsDBNull(11) ? [] : DeserializeKnowledgeSources(reader.GetString(11)),
             ApplicationFilter = reader.IsDBNull(12) ? string.Empty : reader.GetString(12)
         };
     }
 
-    private string GetConnectionString()
+    private static List<string> DeserializeKnowledgeSources(string json)
     {
-        var connectionString = _configuration.GetConnectionString("Postgres")
-            ?? _configuration.GetConnectionString("DefaultConnection");
-
-        if (string.IsNullOrWhiteSpace(connectionString))
+        if (string.IsNullOrWhiteSpace(json))
         {
-            throw new InvalidOperationException("A PostgreSQL connection string was not found. Configure ConnectionStrings:Postgres or ConnectionStrings:DefaultConnection.");
+            return [];
         }
 
-        return connectionString;
+        return JsonSerializer.Deserialize<List<string>>(json) ?? [];
     }
 }

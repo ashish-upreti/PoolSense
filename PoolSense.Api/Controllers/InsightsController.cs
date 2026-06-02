@@ -12,17 +12,17 @@ namespace PoolSense.Api.Controllers;
 public class InsightsController : ControllerBase
 {
     private readonly IFailurePatternService _failurePatternService;
-    private readonly IPgVectorRepository _pgVectorRepository;
+    private readonly IVectorStore _vectorStore;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="InsightsController"/> class.
     /// </summary>
     /// <param name="failurePatternService">The service that supplies failure pattern aggregates.</param>
-    /// <param name="pgVectorRepository">The repository that supplies incident timeline data.</param>
-    public InsightsController(IFailurePatternService failurePatternService, IPgVectorRepository pgVectorRepository)
+    /// <param name="vectorStore">The vector store that supplies incident timeline data.</param>
+    public InsightsController(IFailurePatternService failurePatternService, IVectorStore vectorStore)
     {
         _failurePatternService = failurePatternService;
-        _pgVectorRepository = pgVectorRepository;
+        _vectorStore = vectorStore;
     }
 
     /// <summary>
@@ -39,7 +39,7 @@ public class InsightsController : ControllerBase
         try
         {
             var insights = await _failurePatternService.GetInsightsAsync(limit, minimumIncidentCount, cancellationToken);
-            var timeline = await _pgVectorRepository.GetIncidentTimeline(monthCount, cancellationToken);
+            var timeline = await _vectorStore.GetIncidentTimeline(monthCount, cancellationToken);
 
             return Ok(new
             {
@@ -167,7 +167,7 @@ public class InsightsController : ControllerBase
     {
         try
         {
-            var timeline = await _pgVectorRepository.GetIncidentTimeline(monthCount, cancellationToken);
+            var timeline = await _vectorStore.GetIncidentTimeline(monthCount, cancellationToken);
 
             return Ok(new
             {

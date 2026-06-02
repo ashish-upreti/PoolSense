@@ -24,7 +24,7 @@ public class KnowledgeController : ControllerBase
     private readonly IKnowledgeEnrichmentService _knowledgeEnrichmentService;
     private readonly IEmbeddingService _embeddingService;
     private readonly ISimilaritySearchService _similaritySearchService;
-    private readonly IPgVectorRepository _pgVectorRepository;
+    private readonly IVectorStore _vectorStore;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="KnowledgeController"/> class.
@@ -33,19 +33,19 @@ public class KnowledgeController : ControllerBase
     /// <param name="knowledgeEnrichmentService">The service that enriches ticket knowledge before storage.</param>
     /// <param name="embeddingService">The service that generates embeddings for enriched knowledge.</param>
     /// <param name="similaritySearchService">The service that searches for similar tickets.</param>
-    /// <param name="pgVectorRepository">The repository used to persist ticket knowledge.</param>
+    /// <param name="vectorStore">The vector store used to persist ticket knowledge.</param>
     public KnowledgeController(
         ITicketAnalyzerAgent ticketAnalyzerAgent,
         IKnowledgeEnrichmentService knowledgeEnrichmentService,
         IEmbeddingService embeddingService,
         ISimilaritySearchService similaritySearchService,
-        IPgVectorRepository pgVectorRepository)
+        IVectorStore vectorStore)
     {
         _ticketAnalyzerAgent = ticketAnalyzerAgent;
         _knowledgeEnrichmentService = knowledgeEnrichmentService;
         _embeddingService = embeddingService;
         _similaritySearchService = similaritySearchService;
-        _pgVectorRepository = pgVectorRepository;
+        _vectorStore = vectorStore;
     }
 
     /// <summary>
@@ -99,7 +99,7 @@ public class KnowledgeController : ControllerBase
             var enrichedKnowledge = await _knowledgeEnrichmentService.EnrichAsync(ticketKnowledge);
 
             enrichedKnowledge.TicketKnowledge.Embedding = await _embeddingService.GenerateEmbedding(enrichedKnowledge.EmbeddingText);
-            await _pgVectorRepository.InsertTicketKnowledge(enrichedKnowledge.TicketKnowledge, cancellationToken);
+            await _vectorStore.InsertTicketKnowledge(enrichedKnowledge.TicketKnowledge, cancellationToken);
 
             return Ok(enrichedKnowledge.TicketKnowledge);
         }

@@ -27,7 +27,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
 
     private readonly ITicketAnalyzerAgent _ticketAnalyzerAgent;
     private readonly IEmbeddingService _embeddingService;
-    private readonly IPgVectorRepository _pgVectorRepository;
+    private readonly IVectorStore _vectorStore;
     private readonly IncidentContextBuilder _incidentContextBuilder;
     private readonly IResolutionAgent _resolutionAgent;
     private readonly IKnowledgeEnrichmentService _knowledgeEnrichmentService;
@@ -40,7 +40,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
     public TicketWorkflowOrchestrator(
         ITicketAnalyzerAgent ticketAnalyzerAgent,
         IEmbeddingService embeddingService,
-        IPgVectorRepository pgVectorRepository,
+        IVectorStore vectorStore,
         IncidentContextBuilder incidentContextBuilder,
         IResolutionAgent resolutionAgent,
         IKnowledgeEnrichmentService knowledgeEnrichmentService,
@@ -52,7 +52,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
     {
         _ticketAnalyzerAgent = ticketAnalyzerAgent;
         _embeddingService = embeddingService;
-        _pgVectorRepository = pgVectorRepository;
+        _vectorStore = vectorStore;
         _incidentContextBuilder = incidentContextBuilder;
         _resolutionAgent = resolutionAgent;
         _knowledgeEnrichmentService = knowledgeEnrichmentService;
@@ -112,7 +112,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         var similaritySearchLimit = request.SimilaritySearchLimitOverride is > 0
             ? request.SimilaritySearchLimitOverride.Value
             : _settings.SimilaritySearchLimit;
-        var similarTickets = await _pgVectorRepository.SearchSimilarTickets(searchEmbedding, similaritySearchLimit, request.SelectedGroupIds, cancellationToken);
+        var similarTickets = await _vectorStore.SearchSimilarTickets(searchEmbedding, similaritySearchLimit, request.SelectedGroupIds, cancellationToken);
         _logger.LogInformation("Found {SimilarTicketCount} similar tickets for ticket {TicketId}.", similarTickets.Count, request.TicketId);
 
         var resolutionIncidents = similarTickets
@@ -190,7 +190,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         if (persistKnowledge)
         {
             _logger.LogInformation("Persisting knowledge and failure pattern for ticket {TicketId}.", resolvedTicketId);
-            await _pgVectorRepository.InsertTicketKnowledge(enrichedKnowledge.TicketKnowledge, cancellationToken);
+            await _vectorStore.InsertTicketKnowledge(enrichedKnowledge.TicketKnowledge, cancellationToken);
             await _failurePatternRepository.InsertFailurePattern(failurePattern, cancellationToken);
         }
 

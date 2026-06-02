@@ -1,4 +1,7 @@
+using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
+using PoolSense.Api.Configuration;
+using PoolSense.Api.Logging;
 
 namespace PoolSense.Api.Agents;
 
@@ -10,10 +13,17 @@ public interface IFailurePatternAgent
 public class FailurePatternAgent : IFailurePatternAgent
 {
     private readonly Kernel _kernel;
+    private readonly ILlmTokenUsageRepository _tokenUsageRepository;
+    private readonly IOptionsMonitor<AiSettings> _aiSettings;
 
-    public FailurePatternAgent(Kernel kernel)
+    public FailurePatternAgent(
+        Kernel kernel,
+        ILlmTokenUsageRepository tokenUsageRepository,
+        IOptionsMonitor<AiSettings> aiSettings)
     {
         _kernel = kernel;
+        _tokenUsageRepository = tokenUsageRepository;
+        _aiSettings = aiSettings;
     }
 
     public Task<string> ExtractFailurePatternAsync(string problem, string rootCause, string resolution)
@@ -60,6 +70,12 @@ Rules:
             { "resolution", resolution }
         };
 
-        return SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(_kernel, prompt, arguments);
+        return SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(
+            _kernel,
+            prompt,
+            arguments,
+            _tokenUsageRepository,
+            "FailurePatternExtraction",
+            _aiSettings.CurrentValue.Models.Chat);
     }
 }

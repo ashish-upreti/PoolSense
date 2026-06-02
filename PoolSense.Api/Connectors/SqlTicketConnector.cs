@@ -60,7 +60,7 @@ public class SqlTicketConnector : ITicketSourceConnector
         var isPattern = applicationFilter.Contains('%');
         var appOperator = isPattern ? "LIKE" : "=";
 
-                var sql = BuildBaseSql(connectionString) + Environment.NewLine + $$"""
+                var sql = BuildBaseSql(connectionString) + Environment.NewLine + $"""
             WHERE a.Application {appOperator} @application
               AND s.EventStatusName = @status
             """;
@@ -111,7 +111,7 @@ public class SqlTicketConnector : ITicketSourceConnector
         var isPattern = applicationFilter.Contains('%');
         var appOperator = isPattern ? "LIKE" : "=";
 
-                var sql = BuildBaseSql(connectionString) + Environment.NewLine + $$"""
+                var sql = BuildBaseSql(connectionString) + Environment.NewLine + $"""
             WHERE e.LogID = @ticketId
               AND a.Application {appOperator} @application
             """;

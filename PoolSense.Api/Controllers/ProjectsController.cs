@@ -15,6 +15,30 @@ public class ProjectsController : ControllerBase
     private readonly IProjectRepository _projectRepository;
 
     /// <summary>
+    /// Request payload used to update email delivery settings for one application mapping.
+    /// </summary>
+    public sealed class ProjectEmailSettingsUpdateRequest
+    {
+        /// <summary>
+        /// Exact value of the project_configs.application_filter column to update.
+        /// </summary>
+        /// <example>AT MPS Capacity Response</example>
+        public string ApplicationFilter { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Enables or disables recommendation email delivery for the matched application.
+        /// </summary>
+        /// <example>true</example>
+        public bool SendEmail { get; set; }
+
+        /// <summary>
+        /// Semicolon-separated Lifeguard recipient email addresses.
+        /// </summary>
+        /// <example>lifeguard1@intel.com; lifeguard2@intel.com</example>
+        public string EmailRecipients { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="ProjectsController"/> class.
     /// </summary>
     /// <param name="projectRepository">The repository used to manage project registrations.</param>
@@ -150,6 +174,79 @@ public class ProjectsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Updates recommendation email settings for the project row that matches an application filter.
+    /// </summary>
+    /// <remarks>
+    /// Sample request:
+    ///
+    ///     PATCH /api/projects/email-settings/by-application
+    ///     {
+    ///       "applicationFilter": "AT MPS Capacity Response",
+    ///       "sendEmail": true,
+    ///       "emailRecipients": "lifeguard1@intel.com; lifeguard2@intel.com"
+    ///     }
+    ///
+    /// The application filter is matched against the exact value stored in dbo.project_configs.application_filter.
+    /// Email recipients are normalized as semicolon-separated addresses before being saved.
+    /// </remarks>
+    /// <param name="request">The application filter plus the new send-email flag and recipient list.</param>
+    /// <param name="cancellationToken">The cancellation token for the request.</param>
+    /// <returns>The updated project configuration response.</returns>
+    [Consumes("application/json")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    [HttpPatch("email-settings/by-application")]
+    [HttpPut("email-settings/by-application")]
+    [HttpPut("email-settings")]
+    public async Task<IActionResult> UpdateEmailSettingsByApplicationFilter(
+        [FromBody] ProjectEmailSettingsUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest("Email settings update request is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ApplicationFilter))
+        {
+            ModelState.AddModelError(nameof(ProjectEmailSettingsUpdateRequest.ApplicationFilter), "ApplicationFilter is required.");
+        }
+
+        if (!TryNormalizeEmailRecipients(request.EmailRecipients, out var normalizedRecipients, out var errorMessage))
+        {
+            ModelState.AddModelError(nameof(ProjectEmailSettingsUpdateRequest.EmailRecipients), errorMessage);
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        try
+        {
+            var existingProject = await _projectRepository.GetProjectByApplicationFilterAsync(request.ApplicationFilter.Trim(), cancellationToken);
+            if (existingProject is null)
+            {
+                return NotFound($"Project with ApplicationFilter '{request.ApplicationFilter}' was not found.");
+            }
+
+            existingProject.SendEmail = request.SendEmail;
+            existingProject.EmailRecipients = normalizedRecipients;
+
+            var savedProject = await _projectRepository.UpdateProjectAsync(existingProject, cancellationToken);
+            return savedProject is null
+                ? NotFound($"Project with ApplicationFilter '{request.ApplicationFilter}' was not found.")
+                : Ok(ToResponse(savedProject));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"An error occurred while updating email settings for ApplicationFilter '{request.ApplicationFilter}': {ex.Message}");
+        }
+    }
+
     private static string CreateProjectId(string projectName)
     {
         var normalized = new string(projectName
@@ -271,7 +368,7 @@ public class ProjectsController : ControllerBase
         }
 
         var recipients = emailRecipients
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(recipient => !string.IsNullOrWhiteSpace(recipient))
             .ToList();
 
@@ -289,7 +386,7 @@ public class ProjectsController : ControllerBase
             }
         }
 
-        normalizedRecipients = string.Join(", ", recipients);
+        normalizedRecipients = string.Join("; ", recipients);
         return true;
     }
 }

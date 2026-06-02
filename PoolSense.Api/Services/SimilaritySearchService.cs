@@ -18,22 +18,22 @@ public interface ISimilaritySearchService
 }
 
 /// <summary>
-/// Uses embeddings and pgvector to search for similar ticket knowledge.
+/// Uses embeddings and the configured vector store to search for similar ticket knowledge.
 /// </summary>
 public class SimilaritySearchService : ISimilaritySearchService
 {
     private readonly IEmbeddingService _embeddingService;
-    private readonly IPgVectorRepository _pgVectorRepository;
+    private readonly IVectorStore _vectorStore;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SimilaritySearchService"/> class.
     /// </summary>
     /// <param name="embeddingService">The service that generates search embeddings.</param>
-    /// <param name="pgVectorRepository">The repository used to perform similarity search.</param>
-    public SimilaritySearchService(IEmbeddingService embeddingService, IPgVectorRepository pgVectorRepository)
+    /// <param name="vectorStore">The vector store used to perform similarity search.</param>
+    public SimilaritySearchService(IEmbeddingService embeddingService, IVectorStore vectorStore)
     {
         _embeddingService = embeddingService;
-        _pgVectorRepository = pgVectorRepository;
+        _vectorStore = vectorStore;
     }
 
     /// <summary>
@@ -50,6 +50,6 @@ public class SimilaritySearchService : ISimilaritySearchService
         }
 
         var embedding = await _embeddingService.GenerateEmbedding(text);
-        return await _pgVectorRepository.SearchSimilarTickets(embedding, 5, cancellationToken: cancellationToken);
+        return await _vectorStore.SearchSimilarTickets(embedding, 5, cancellationToken: cancellationToken);
     }
 }

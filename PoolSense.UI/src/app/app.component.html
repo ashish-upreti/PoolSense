@@ -366,8 +366,8 @@
 
                 <label class="field-group field-group-full">
                   <span class="field-label">Email Recipients</span>
-                  <input class="field-input" type="text" name="emailRecipients" [(ngModel)]="projectForm.emailRecipients" placeholder="ashish.upreti@intel.com;" [disabled]="isProjectSaving" />
-                  <span class="field-note">Optional, comma-separated email addresses.</span>
+                  <input class="field-input" type="text" name="emailRecipients" [(ngModel)]="projectForm.emailRecipients" placeholder="ashish.upreti@intel.com; jane.doe@intel.com" [disabled]="isProjectSaving" />
+                  <span class="field-note">Optional, semicolon-separated email addresses.</span>
                 </label>
               </div>
 

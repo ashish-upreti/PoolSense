@@ -8,7 +8,7 @@ namespace PoolSense.Api.Services;
 
 /// <summary>
 /// Sends ticket recommendation emails via SQL Server Database Mail (msdb.dbo.sp_send_dbmail)
-/// on the TicketSourceSqlServer. Use this when the API host cannot reach the SMTP server directly.
+/// on the PoolSenseSqlServer. Use this when the API host cannot reach the SMTP server directly.
 /// </summary>
 public class DatabaseMailEmailService : ITicketRecommendationEmailService
 {
@@ -53,9 +53,9 @@ public class DatabaseMailEmailService : ITicketRecommendationEmailService
             return false;
         }
 
-        var connectionString = _configuration.GetConnectionString("TicketSourceSqlServer")
+        var connectionString = _configuration.GetConnectionString("PoolSenseSqlServer")
             ?? throw new InvalidOperationException(
-                "ConnectionStrings:TicketSourceSqlServer is required for DatabaseMail delivery mode.");
+            "ConnectionStrings:PoolSenseSqlServer is required for DatabaseMail delivery mode.");
 
         var subject = RecommendationEmailContent.BuildSubject(ticket);
         var body = RecommendationEmailContent.BuildBody(ticket, workflowResult);

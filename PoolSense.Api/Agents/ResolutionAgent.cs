@@ -1,5 +1,8 @@
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
+using PoolSense.Api.Configuration;
+using PoolSense.Api.Logging;
 
 namespace PoolSense.Api.Agents;
 
@@ -19,10 +22,17 @@ public sealed class ResolutionIncident
 public class ResolutionAgent : IResolutionAgent
 {
     private readonly Kernel _kernel;
+    private readonly ILlmTokenUsageRepository _tokenUsageRepository;
+    private readonly IOptionsMonitor<AiSettings> _aiSettings;
 
-    public ResolutionAgent(Kernel kernel)
+    public ResolutionAgent(
+        Kernel kernel,
+        ILlmTokenUsageRepository tokenUsageRepository,
+        IOptionsMonitor<AiSettings> aiSettings)
     {
         _kernel = kernel;
+        _tokenUsageRepository = tokenUsageRepository;
+        _aiSettings = aiSettings;
     }
 
     public Task<string> GenerateResolutionAsync(string title, string description, IReadOnlyList<ResolutionIncident> similarHistoricalIncidents)
@@ -78,6 +88,12 @@ Rules:
             { "similarHistoricalIncidents", incidentsJson }
         };
 
-        return SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(_kernel, prompt, arguments);
+        return SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(
+            _kernel,
+            prompt,
+            arguments,
+            _tokenUsageRepository,
+            "ResolutionGeneration",
+            _aiSettings.CurrentValue.Models.Chat);
     }
 }

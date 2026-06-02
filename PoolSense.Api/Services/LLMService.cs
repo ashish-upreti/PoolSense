@@ -1,4 +1,8 @@
+using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
+using PoolSense.Api.Agents;
+using PoolSense.Api.Configuration;
+using PoolSense.Api.Logging;
 
 namespace PoolSense.Api.Services;
 
@@ -21,14 +25,21 @@ public interface ILLMService
 public class LLMService : ILLMService
 {
     private readonly Kernel _kernel;
+    private readonly ILlmTokenUsageRepository _tokenUsageRepository;
+    private readonly IOptionsMonitor<AiSettings> _aiSettings;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LLMService"/> class.
     /// </summary>
     /// <param name="kernel">The Semantic Kernel instance used to invoke prompts.</param>
-    public LLMService(Kernel kernel)
+    public LLMService(
+        Kernel kernel,
+        ILlmTokenUsageRepository tokenUsageRepository,
+        IOptionsMonitor<AiSettings> aiSettings)
     {
         _kernel = kernel;
+        _tokenUsageRepository = tokenUsageRepository;
+        _aiSettings = aiSettings;
     }
 
     /// <summary>
@@ -38,7 +49,12 @@ public class LLMService : ILLMService
     /// <returns>The model response.</returns>
     public async Task<string> GetResponseAsync(string prompt)
     {
-        var result = await _kernel.InvokePromptAsync(prompt);
-        return result.ToString();
+        return await SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(
+            _kernel,
+            prompt,
+            new KernelArguments(),
+            _tokenUsageRepository,
+            "GenericPrompt",
+            _aiSettings.CurrentValue.Models.Chat);
     }
 }

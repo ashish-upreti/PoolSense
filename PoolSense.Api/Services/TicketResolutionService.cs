@@ -25,7 +25,7 @@ public interface ITicketResolutionService
 public class TicketResolutionService : ITicketResolutionService
 {
     private readonly IEmbeddingService _embeddingService;
-    private readonly IPgVectorRepository _pgVectorRepository;
+    private readonly IVectorStore _vectorStore;
     private readonly IncidentContextBuilder _incidentContextBuilder;
     private readonly IResolutionAgent _resolutionAgent;
 
@@ -33,17 +33,17 @@ public class TicketResolutionService : ITicketResolutionService
     /// Initializes a new instance of the <see cref="TicketResolutionService"/> class.
     /// </summary>
     /// <param name="embeddingService">The service that generates embeddings for the ticket.</param>
-    /// <param name="pgVectorRepository">The repository used to find similar incidents.</param>
+    /// <param name="vectorStore">The vector store used to find similar incidents.</param>
     /// <param name="incidentContextBuilder">The builder that formats historical incident context.</param>
     /// <param name="resolutionAgent">The agent that generates the final resolution suggestion.</param>
     public TicketResolutionService(
         IEmbeddingService embeddingService,
-        IPgVectorRepository pgVectorRepository,
+        IVectorStore vectorStore,
         IncidentContextBuilder incidentContextBuilder,
         IResolutionAgent resolutionAgent)
     {
         _embeddingService = embeddingService;
-        _pgVectorRepository = pgVectorRepository;
+        _vectorStore = vectorStore;
         _incidentContextBuilder = incidentContextBuilder;
         _resolutionAgent = resolutionAgent;
     }
@@ -59,7 +59,7 @@ public class TicketResolutionService : ITicketResolutionService
     {
         var ticketText = $"Title: {title}{Environment.NewLine}Description: {description}";
         var embedding = await _embeddingService.GenerateEmbedding(ticketText);
-        var similarTickets = await _pgVectorRepository.SearchSimilarTickets(embedding, 5, cancellationToken: cancellationToken);
+        var similarTickets = await _vectorStore.SearchSimilarTickets(embedding, 5, cancellationToken: cancellationToken);
 
         var incidentContext = _incidentContextBuilder.Build(similarTickets.ToList());
 

@@ -1,5 +1,4 @@
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using Microsoft.SemanticKernel;
@@ -13,6 +12,11 @@ using PoolSense.Api.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 const string PoolSenseUiCorsPolicy = "PoolSenseUi";
+
+builder.Logging.AddProvider(new SqlServerApplicationLoggerProvider(
+    builder.Configuration,
+    builder.Environment.ApplicationName,
+    builder.Environment.EnvironmentName));
 
 static bool HasHttpsBinding(IConfiguration configuration)
 {
@@ -67,10 +71,12 @@ builder.Services.AddScoped<IQueryVariantGeneratorAgent, QueryVariantGeneratorAge
 builder.Services.AddScoped<IFailurePatternAgent, FailurePatternAgent>();
 
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
+builder.Services.AddScoped<ILLMService, LLMService>();
 builder.Services.AddScoped<IKnowledgeEnrichmentService, KnowledgeEnrichmentService>();
 builder.Services.AddScoped<IFailurePatternService, FailurePatternService>();
 builder.Services.AddScoped<ITicketIngestionService, TicketIngestionService>();
 builder.Services.AddScoped<InteractionLogger>();
+builder.Services.AddScoped<ILlmTokenUsageRepository, LlmTokenUsageRepository>();
 
 var emailDeliveryMode = builder.Configuration
     .GetSection("TicketAutomation:Email:DeliveryMode")
@@ -86,7 +92,13 @@ else
 
 builder.Services.AddScoped<IncidentContextBuilder>();
 
-builder.Services.AddScoped<IPgVectorRepository, PgVectorRepository>();
+builder.Services.AddSingleton<InMemoryVectorStoreCache>();
+builder.Services.AddSingleton<IVectorStoreCacheInvalidator>(sp => sp.GetRequiredService<InMemoryVectorStoreCache>());
+builder.Services.AddScoped<IPoolSenseSqlConnectionFactory, PoolSenseSqlConnectionFactory>();
+builder.Services.AddScoped<IVectorSimilaritySearch, CosineVectorSimilaritySearch>();
+builder.Services.AddScoped<SqlServerVectorStore>();
+builder.Services.AddScoped<IVectorStore>(sp => sp.GetRequiredService<SqlServerVectorStore>());
+builder.Services.AddScoped<ITicketKnowledgeEmbeddingStore>(sp => sp.GetRequiredService<SqlServerVectorStore>());
 builder.Services.AddScoped<IFeedbackRepository, FeedbackRepository>();
 builder.Services.AddScoped<IFailurePatternRepository, FailurePatternRepository>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
@@ -135,11 +147,27 @@ builder.Services.AddScoped<Kernel>(sp =>
 builder.Services.AddScoped<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
     sp.GetRequiredService<Kernel>()
       .Services
-      .GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>());
+            .GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>());
 
 
 var app = builder.Build();
 var spaIndexPath = Path.Combine(app.Environment.WebRootPath ?? string.Empty, "index.html");
+app.Logger.LogInformation(
+    "PoolSense API starting on host {MachineName} as user {UserName}. Environment: {EnvironmentName}. ProcessId: {ProcessId}. ContentRoot: {ContentRoot}. OS: {OSDescription}.",
+    Environment.MachineName,
+    Environment.UserName,
+    app.Environment.EnvironmentName,
+    Environment.ProcessId,
+    app.Environment.ContentRootPath,
+    System.Runtime.InteropServices.RuntimeInformation.OSDescription);
+
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStopping.Register(() =>
+    app.Logger.LogInformation(
+        "PoolSense API stopping on host {MachineName} as user {UserName}. ProcessId: {ProcessId}.",
+        Environment.MachineName,
+        Environment.UserName,
+        Environment.ProcessId));
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -158,6 +186,25 @@ if (HasHttpsBinding(app.Configuration))
 }
 
 app.UseCors(PoolSenseUiCorsPolicy);
+
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(
+            ex,
+            "Unhandled HTTP request exception. Method: {Method}. Path: {Path}. RemoteIp: {RemoteIp}. User: {User}.",
+            context.Request.Method,
+            context.Request.Path.Value,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.User.Identity?.Name ?? string.Empty);
+        throw;
+    }
+});
 
 if (Directory.Exists(app.Environment.WebRootPath))
 {

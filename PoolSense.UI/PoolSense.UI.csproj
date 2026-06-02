@@ -17,7 +17,6 @@
     <None Include="package-lock.json" />
     <None Include="package.json" />
     <None Include="proxy.conf.json" />
-    <None Include="README.md" />
     <None Include="tsconfig.app.json" />
     <None Include="tsconfig.json" />
     <None Include="public\**\*" />
