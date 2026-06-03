@@ -422,6 +422,9 @@ SELECT * FROM  [dbo].[processed_source_events]
 SELECT * FROM  [dbo].[project_configs]
 SELECT * FROM  [dbo].[ticket_knowledge]
 
+SELECT * FROM auth_users
+SELECT * FROM auth_login_audit
+
 
 -- Created by GitHub Copilot in SSMS - review carefully before executing
 SELECT 
