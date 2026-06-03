@@ -158,6 +158,8 @@ internal static class RecommendationEmailContent
         }
         b.AppendLine("</table>");
 
+        b.AppendLine("<p style='margin:16px 0 0;'>Explore more in <a href='https://poolsense.intel.com/'>PoolSense</a>.</p>");
+
         b.AppendLine("</body></html>");
         return b.ToString();
     }
