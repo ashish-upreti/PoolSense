@@ -6,6 +6,7 @@ namespace PoolSense.Api.Data;
 public interface IFeedbackRepository
 {
     Task<int> AddAsync(FeedbackLog feedback, CancellationToken cancellationToken = default);
+    Task<int> AddApplicationFeedbackAsync(ApplicationFeedbackLog feedback, CancellationToken cancellationToken = default);
     Task<double> GetFeedbackScore(string ticketId, CancellationToken cancellationToken = default);
     Task<IReadOnlyDictionary<string, double>> GetFeedbackScores(IReadOnlyCollection<string> ticketIds, CancellationToken cancellationToken = default);
 }
@@ -64,6 +65,41 @@ public sealed class FeedbackRepository : IFeedbackRepository
         command.Parameters.AddWithValue("@comment", string.IsNullOrWhiteSpace(feedback.Comment) ? string.Empty : feedback.Comment);
         command.Parameters.AddWithValue("@targetTicketId", string.IsNullOrWhiteSpace(feedback.TargetTicketId) ? string.Empty : feedback.TargetTicketId.Trim());
         command.Parameters.AddWithValue("@retrievedTicketIds", feedback.RetrievedTicketIds ?? string.Empty);
+        command.Parameters.AddWithValue("@createdAt", feedback.CreatedAt == default ? DateTime.UtcNow : feedback.CreatedAt);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result ?? 0);
+    }
+
+    public async Task<int> AddApplicationFeedbackAsync(ApplicationFeedbackLog feedback, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(feedback);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await EnsureApplicationFeedbackTableAsync(connection, cancellationToken);
+
+        const string sql = """
+            INSERT INTO dbo.application_feedback_logs (
+                user_name,
+                user_email,
+                feedback_type,
+                message,
+                created_at)
+            OUTPUT INSERTED.id
+            VALUES (
+                @userName,
+                @userEmail,
+                @feedbackType,
+                @message,
+                @createdAt);
+            """;
+
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@userName", feedback.UserName ?? string.Empty);
+        command.Parameters.AddWithValue("@userEmail", feedback.UserEmail ?? string.Empty);
+        command.Parameters.AddWithValue("@feedbackType", feedback.FeedbackType ?? string.Empty);
+        command.Parameters.AddWithValue("@message", feedback.Message ?? string.Empty);
         command.Parameters.AddWithValue("@createdAt", feedback.CreatedAt == default ? DateTime.UtcNow : feedback.CreatedAt);
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
@@ -216,6 +252,29 @@ public sealed class FeedbackRepository : IFeedbackRepository
 
             IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_feedback_logs_target_ticket_id' AND object_id = OBJECT_ID(N'dbo.feedback_logs'))
                 CREATE INDEX IX_feedback_logs_target_ticket_id ON dbo.feedback_logs (target_ticket_id);
+            """;
+
+        await using var command = new SqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task EnsureApplicationFeedbackTableAsync(SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            IF OBJECT_ID(N'dbo.application_feedback_logs', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.application_feedback_logs (
+                    id int IDENTITY(1,1) NOT NULL CONSTRAINT PK_application_feedback_logs PRIMARY KEY,
+                    user_name nvarchar(256) NOT NULL CONSTRAINT DF_application_feedback_logs_user_name DEFAULT '',
+                    user_email nvarchar(256) NOT NULL CONSTRAINT DF_application_feedback_logs_user_email DEFAULT '',
+                    feedback_type nvarchar(64) NOT NULL CONSTRAINT DF_application_feedback_logs_feedback_type DEFAULT '',
+                    message nvarchar(max) NOT NULL CONSTRAINT DF_application_feedback_logs_message DEFAULT '',
+                    created_at datetime2(7) NOT NULL CONSTRAINT DF_application_feedback_logs_created_at DEFAULT SYSUTCDATETIME()
+                );
+            END;
+
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_application_feedback_logs_created_at' AND object_id = OBJECT_ID(N'dbo.application_feedback_logs'))
+                CREATE INDEX IX_application_feedback_logs_created_at ON dbo.application_feedback_logs (created_at DESC);
             """;
 
         await using var command = new SqlCommand(sql, connection);

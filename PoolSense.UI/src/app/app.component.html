@@ -53,6 +53,21 @@
             <span class="sidebar-nav-copy">Manage application defaults, ingestion settings, and configured workspace scope.</span>
           </span>
         </button>
+
+        <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'applicationFeedback'" (click)="setActiveSection('applicationFeedback')" [attr.aria-pressed]="activeSection === 'applicationFeedback'" aria-label="Open application feedback" [attr.title]="isSidebarCollapsed ? 'Application Feedback' : null">
+          <span class="sidebar-nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              <path d="M8 9h8"></path>
+              <path d="M8 13h5"></path>
+            </svg>
+          </span>
+          <span *ngIf="!isSidebarCollapsed" class="sidebar-nav-body">
+            <span class="sidebar-nav-kicker">Feedback</span>
+            <span class="sidebar-nav-title">Application Feedback</span>
+            <span class="sidebar-nav-copy">Capture overall product feedback with submitter details for tracking in PoolSense.</span>
+          </span>
+        </button>
       </nav>
 
       <div *ngIf="!isSidebarCollapsed" class="sidebar-summary">
@@ -67,7 +82,7 @@
       </div>
     </aside>
 
-    <ng-container *ngIf="activeSection === 'main'; else projectConfigView">
+    <ng-container *ngIf="activeSection === 'main'; else nonMainView">
     <section class="workspace-panel workspace-chat">
       <header class="workspace-header">
         <div>
@@ -301,7 +316,8 @@
     </aside>
     </ng-container>
 
-    <ng-template #projectConfigView>
+    <ng-template #nonMainView>
+      <ng-container *ngIf="activeSection === 'projectConfig'; else applicationFeedbackView">
       <section class="workspace-panel project-config-screen">
         <div class="project-config-screen-header">
           <div>
@@ -428,6 +444,73 @@
                 </article>
               </div>
             </div>
+          </div>
+        </section>
+      </section>
+      </ng-container>
+    </ng-template>
+
+    <ng-template #applicationFeedbackView>
+      <section class="workspace-panel project-config-screen">
+        <div class="project-config-screen-header">
+          <div>
+            <p class="panel-kicker">Feedback</p>
+            <h2>Application Feedback</h2>
+            <p class="workspace-copy">Capture overall product feedback, issues, and suggestions along with submitter details.</p>
+          </div>
+          <div class="settings-banner-group">
+            <div class="workspace-banner">
+              <span class="workspace-dot"></span>
+              <span>{{ projects.length }} application{{ projects.length === 1 ? '' : 's' }} available</span>
+            </div>
+          </div>
+        </div>
+
+        <p *ngIf="applicationFeedbackError" class="project-feedback-banner">{{ applicationFeedbackError }}</p>
+        <p *ngIf="applicationFeedbackNotice" class="project-feedback-banner project-feedback-banner-success">{{ applicationFeedbackNotice }}</p>
+
+        <section class="project-studio">
+          <div class="project-studio-grid">
+            <form class="project-form-card" (ngSubmit)="handleApplicationFeedbackSubmit()">
+              <div class="card-heading-row project-toolbar">
+                <div>
+                  <p class="panel-kicker">Submission</p>
+                  <h3>Send application feedback</h3>
+                </div>
+              </div>
+
+              <div class="project-form-grid">
+                <label class="field-group">
+                  <span class="field-label">Your Name</span>
+                  <input class="field-input" type="text" name="feedbackUserName" [(ngModel)]="applicationFeedbackForm.userName" placeholder="Ashish Upreti" [disabled]="isApplicationFeedbackSaving" />
+                </label>
+
+                <label class="field-group">
+                  <span class="field-label">Your Email</span>
+                  <input class="field-input" type="email" name="feedbackUserEmail" [(ngModel)]="applicationFeedbackForm.userEmail" placeholder="name@intel.com" [disabled]="isApplicationFeedbackSaving" />
+                </label>
+
+                <label class="field-group">
+                  <span class="field-label">Feedback Type</span>
+                  <select class="field-input" name="feedbackType" [(ngModel)]="applicationFeedbackForm.feedbackType" [disabled]="isApplicationFeedbackSaving">
+                    <option value="Suggestion">Suggestion</option>
+                    <option value="Issue">Issue</option>
+                    <option value="Feature Request">Feature Request</option>
+                    <option value="Appreciation">Appreciation</option>
+                  </select>
+                </label>
+
+                <label class="field-group field-group-full">
+                  <span class="field-label">Feedback Details</span>
+                  <textarea class="feedback-comment-input" name="feedbackMessage" [(ngModel)]="applicationFeedbackForm.message" placeholder="Describe the issue, suggestion, or enhancement you want tracked for this application." rows="6" [disabled]="isApplicationFeedbackSaving"></textarea>
+                </label>
+              </div>
+
+              <div class="composer-footer">
+                <p class="helper-text">This feedback is stored in the PoolSense database with your contact details for follow-up.</p>
+                <button type="submit" class="send-button" [disabled]="isApplicationFeedbackSaving">{{ isApplicationFeedbackSaving ? 'Submitting...' : 'Submit Feedback' }}</button>
+              </div>
+            </form>
           </div>
         </section>
       </section>

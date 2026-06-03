@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using PoolSense.Api.Feedback;
 using PoolSense.Api.Data;
+using System.Net.Mail;
 
 namespace PoolSense.Api.Controllers;
 
@@ -86,6 +87,50 @@ public class FeedbackController : ControllerBase
         catch (Exception ex)
         {
             return StatusCode(500, $"An error occurred while storing feedback: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Stores user feedback about an application experience and captures submitter details.
+    /// </summary>
+    [HttpPost("application")]
+    public async Task<IActionResult> PostApplicationFeedback([FromBody] ApplicationFeedbackRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null
+            || string.IsNullOrWhiteSpace(request.UserName)
+            || string.IsNullOrWhiteSpace(request.UserEmail)
+            || string.IsNullOrWhiteSpace(request.FeedbackType)
+            || string.IsNullOrWhiteSpace(request.Message))
+        {
+            return BadRequest("UserName, UserEmail, FeedbackType, and Message are required.");
+        }
+
+        try
+        {
+            _ = new MailAddress(request.UserEmail.Trim());
+        }
+        catch (FormatException)
+        {
+            return BadRequest("UserEmail must be a valid email address.");
+        }
+
+        try
+        {
+            var feedback = new ApplicationFeedbackLog
+            {
+                UserName = request.UserName.Trim(),
+                UserEmail = request.UserEmail.Trim(),
+                FeedbackType = request.FeedbackType.Trim(),
+                Message = request.Message.Trim(),
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var id = await _feedbackRepository.AddApplicationFeedbackAsync(feedback, cancellationToken);
+            return Ok(new { id });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"An error occurred while storing application feedback: {ex.Message}");
         }
     }
 }

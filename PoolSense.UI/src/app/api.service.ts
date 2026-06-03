@@ -75,6 +75,13 @@ export interface FeedbackRequest {
   retrievedTicketIds: string[]
 }
 
+export interface ApplicationFeedbackRequest {
+  userName: string
+  userEmail: string
+  feedbackType: string
+  message: string
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly apiBaseUrl = environment.apiBaseUrl.replace(/\/$/, '')
@@ -154,6 +161,20 @@ export class ApiService {
 
     if (!response.ok) {
       throw new Error(await this.readErrorMessage(response, 'Unable to submit feedback.'))
+    }
+  }
+
+  async submitApplicationFeedback(request: ApplicationFeedbackRequest): Promise<void> {
+    const response = await fetch(this.apiUrl('/feedback/application'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    })
+
+    if (!response.ok) {
+      throw new Error(await this.readErrorMessage(response, 'Unable to submit application feedback.'))
     }
   }
 

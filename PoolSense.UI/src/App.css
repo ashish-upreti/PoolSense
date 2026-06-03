@@ -818,6 +818,11 @@
     border-bottom: 1px solid var(--insight-divider);
   }
 
+  .insight-list-item > :first-child {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
   .insight-item-title {
     display: flex;
     align-items: center;
@@ -858,14 +863,28 @@
   }
 
   .incident-meta {
+    min-width: 0;
+    max-width: 100%;
+    flex: 0 1 14rem;
     flex-direction: column;
     align-items: flex-end;
     gap: 0.45rem;
   }
 
+  .incident-tag {
+    max-width: 100%;
+    white-space: normal;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
   .incident-link {
     color: var(--banner-color);
     text-decoration: none;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    text-align: right;
   }
 
   .incident-link:hover {

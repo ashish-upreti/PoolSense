@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common'
 import { Component, OnInit, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import {
+  ApplicationFeedbackRequest,
   ApiService,
   IngestionStatus,
   ProjectConfig,
@@ -44,7 +45,9 @@ type TelemetryDatum = {
   color: string
 }
 
-type AppSection = 'main' | 'projectConfig'
+type AppSection = 'main' | 'projectConfig' | 'applicationFeedback'
+
+type ApplicationFeedbackForm = ApplicationFeedbackRequest
 
 const quickPrompts = ['VG item missing', 'Data load job failed', 'UI error']
 
@@ -61,6 +64,15 @@ const defaultProjectForm: ProjectConfigInput = {
 
 function createDefaultProjectForm(): ProjectConfigInput {
   return { ...defaultProjectForm }
+}
+
+function createDefaultApplicationFeedbackForm(): ApplicationFeedbackForm {
+  return {
+    userName: '',
+    userEmail: '',
+    feedbackType: 'Suggestion',
+    message: '',
+  }
 }
 
 function createFeedbackState(selectedTicketId = ''): FeedbackState {
@@ -117,6 +129,10 @@ export class AppComponent implements OnInit {
   isProjectSaving = false
   projectError = ''
   projectNotice = ''
+  applicationFeedbackForm = createDefaultApplicationFeedbackForm()
+  applicationFeedbackError = ''
+  applicationFeedbackNotice = ''
+  isApplicationFeedbackSaving = false
   feedbackStateByMessageId: Record<number, FeedbackState> = {}
 
   ngOnInit() {
@@ -322,6 +338,34 @@ export class AppComponent implements OnInit {
       this.projectError = requestError instanceof Error ? requestError.message : 'Unable to save the application configuration.'
     } finally {
       this.isProjectSaving = false
+    }
+  }
+
+  async handleApplicationFeedbackSubmit() {
+    const payload: ApplicationFeedbackRequest = {
+      userName: this.applicationFeedbackForm.userName.trim(),
+      userEmail: this.applicationFeedbackForm.userEmail.trim(),
+      feedbackType: this.applicationFeedbackForm.feedbackType.trim(),
+      message: this.applicationFeedbackForm.message.trim(),
+    }
+
+    if (!payload.userName || !payload.userEmail || !payload.message) {
+      this.applicationFeedbackError = 'Name, email, and feedback details are required.'
+      return
+    }
+
+    this.applicationFeedbackError = ''
+    this.applicationFeedbackNotice = ''
+    this.isApplicationFeedbackSaving = true
+
+    try {
+      await this.api.submitApplicationFeedback(payload)
+      this.applicationFeedbackNotice = 'Feedback submitted successfully.'
+      this.applicationFeedbackForm = createDefaultApplicationFeedbackForm()
+    } catch (requestError) {
+      this.applicationFeedbackError = requestError instanceof Error ? requestError.message : 'Unable to submit application feedback.'
+    } finally {
+      this.isApplicationFeedbackSaving = false
     }
   }
 

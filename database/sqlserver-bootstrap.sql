@@ -107,6 +107,19 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'dbo.application_feedback_logs', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.application_feedback_logs (
+        id int IDENTITY(1,1) NOT NULL CONSTRAINT PK_application_feedback_logs PRIMARY KEY,
+        user_name nvarchar(256) NOT NULL CONSTRAINT DF_application_feedback_logs_user_name DEFAULT '',
+        user_email nvarchar(256) NOT NULL CONSTRAINT DF_application_feedback_logs_user_email DEFAULT '',
+        feedback_type nvarchar(64) NOT NULL CONSTRAINT DF_application_feedback_logs_feedback_type DEFAULT '',
+        message nvarchar(max) NOT NULL CONSTRAINT DF_application_feedback_logs_message DEFAULT '',
+        created_at datetime2(7) NOT NULL CONSTRAINT DF_application_feedback_logs_created_at DEFAULT SYSUTCDATETIME()
+    );
+END;
+GO
+
 IF OBJECT_ID(N'dbo.interaction_logs', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.interaction_logs (
@@ -218,6 +231,10 @@ GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_feedback_logs_target_ticket_id' AND object_id = OBJECT_ID(N'dbo.feedback_logs'))
     CREATE INDEX IX_feedback_logs_target_ticket_id ON dbo.feedback_logs (target_ticket_id);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_application_feedback_logs_created_at' AND object_id = OBJECT_ID(N'dbo.application_feedback_logs'))
+    CREATE INDEX IX_application_feedback_logs_created_at ON dbo.application_feedback_logs (created_at DESC);
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_interaction_logs_created_at' AND object_id = OBJECT_ID(N'dbo.interaction_logs'))

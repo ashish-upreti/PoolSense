@@ -26,6 +26,7 @@ WHERE s.name = 'dbo'
 		'project_configs',
 		'ingestion_status',
 		'feedback_logs',
+		'application_feedback_logs',
 		'interaction_logs',
 		'application_run_logs',
 		'llm_token_usage')
@@ -64,6 +65,8 @@ ORDER BY i.name;
 -- 1. Quick row counts for every PoolSense table
 -- -----------------------------------------------------------------------------
 SELECT 'application_run_logs' AS table_name, COUNT(*) AS row_count FROM dbo.application_run_logs
+UNION ALL
+SELECT 'application_feedback_logs' AS table_name, COUNT(*) AS row_count FROM dbo.application_feedback_logs
 UNION ALL
 SELECT 'failure_patterns' AS table_name, COUNT(*) AS row_count FROM dbo.failure_patterns
 UNION ALL
@@ -205,6 +208,22 @@ FROM dbo.feedback_logs
 GROUP BY feedback_type
 ORDER BY feedback_type ASC;
 
+-- application_feedback_logs
+SELECT TOP (20) id,
+		 user_name,
+		 user_email,
+		 feedback_type,
+		 LEFT(message, 200) AS message_preview,
+		 created_at
+FROM dbo.application_feedback_logs
+ORDER BY created_at DESC;
+
+SELECT feedback_type,
+		 COUNT(*) AS feedback_count
+FROM dbo.application_feedback_logs
+GROUP BY feedback_type
+ORDER BY feedback_type ASC;
+
 -- interaction_logs
 SELECT TOP (20) id,
 		 LEFT(query, 120) AS query_preview,
@@ -260,6 +279,10 @@ ORDER BY tk.created_at DESC;
 SELECT *
 FROM dbo.project_configs
 WHERE project_id = 'replace-me-project-id';
+
+SELECT *
+FROM dbo.application_feedback_logs
+WHERE user_email = 'replace-me-user-email@example.com';
 
 SELECT *
 FROM dbo.ingestion_status
@@ -356,6 +379,15 @@ FROM dbo.feedback_logs
 WHERE id = -1;
 ROLLBACK;
 
+-- application_feedback_logs: delete a specific application feedback row by id
+BEGIN TRAN;
+DELETE FROM dbo.application_feedback_logs
+WHERE id = -1;
+SELECT COUNT(*) AS remaining_application_feedback_rows
+FROM dbo.application_feedback_logs
+WHERE id = -1;
+ROLLBACK;
+
 -- interaction_logs: delete a specific interaction row by id
 BEGIN TRAN;
 DELETE FROM dbo.interaction_logs
@@ -381,6 +413,7 @@ ROLLBACK;
 
 --Table dumps for quick reference during testing/debugging - review before executing
 SELECT * FROM [dbo].[application_run_logs]
+SELECT * FROM [dbo].[application_feedback_logs]
 SELECT * FROM  [dbo].[failure_patterns]
 SELECT * FROM  [dbo].[feedback_logs]
 SELECT * FROM  [dbo].[ingestion_status]

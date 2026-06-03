@@ -17,6 +17,7 @@ At a high level, PoolSense does four things:
 - Background polling of a SQL Server ticket source for new tickets and closed-ticket knowledge ingestion.
 - Project-based application scoping through `project_configs` and application filters.
 - UI-based application administration for project rows, search scope, ingestion progress, and email settings.
+- Dedicated application feedback capture with submitter name, email, and stored comments for the overall product.
 - Feedback capture with helpful / not helpful rating, selected primary incident, optional comment, and usage signal.
 - Operational insight endpoints for failures, systems, components, and timelines.
 - Recommendation email delivery through SMTP or SQL Server Database Mail.
@@ -150,6 +151,7 @@ The bootstrap script creates and/or maintains these primary tables:
 - `dbo.project_configs`
 - `dbo.ingestion_status`
 - `dbo.feedback_logs`
+- `dbo.application_feedback_logs`
 - `dbo.interaction_logs`
 - `dbo.application_run_logs`
 - `dbo.llm_token_usage`
@@ -236,6 +238,14 @@ Use the `Application Configuration` section in the left navigation rail to:
 - set semicolon-separated email recipients
 - review ingestion progress and refresh status
 
+### Application Feedback Workspace
+
+Use the `Application Feedback` section in the left navigation rail to:
+
+- submit overall product feedback, issues, appreciation, or feature requests
+- record submitter name and email for follow-up
+- store the feedback in the PoolSense SQL Server database for tracking
+
 Recipient format example:
 
 ```text
@@ -260,6 +270,7 @@ AT MPS Capacity Response
 | `POST /api/ticket/store` | Store ticket knowledge. |
 | `POST /api/ticket/similar` | Retrieve similar historical tickets. |
 | `POST /api/feedback` | Submit helpful / not-helpful response feedback. |
+| `POST /api/feedback/application` | Submit overall product feedback with submitter details. |
 | `GET /api/projects` | List configured projects/applications. |
 | `POST /api/projects` | Create a project/application configuration. |
 | `POST /api/projects/register` | Alias for project registration. |
