@@ -189,6 +189,39 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'dbo.auth_users', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.auth_users (
+        id int IDENTITY(1,1) NOT NULL CONSTRAINT PK_auth_users PRIMARY KEY,
+        username nvarchar(128) NOT NULL,
+        auth_principal nvarchar(256) NOT NULL,
+        display_name nvarchar(256) NOT NULL CONSTRAINT DF_auth_users_display_name DEFAULT '',
+        email nvarchar(256) NOT NULL CONSTRAINT DF_auth_users_email DEFAULT '',
+        is_admin bit NOT NULL CONSTRAINT DF_auth_users_is_admin DEFAULT 0,
+        groups_json nvarchar(max) NOT NULL CONSTRAINT DF_auth_users_groups_json DEFAULT '[]',
+        last_login_at datetime2(7) NULL,
+        created_at datetime2(7) NOT NULL CONSTRAINT DF_auth_users_created_at DEFAULT SYSUTCDATETIME(),
+        updated_at datetime2(7) NOT NULL CONSTRAINT DF_auth_users_updated_at DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT UQ_auth_users_username UNIQUE (username)
+    );
+END;
+GO
+
+IF OBJECT_ID(N'dbo.auth_login_audit', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.auth_login_audit (
+        id bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_auth_login_audit PRIMARY KEY,
+        username nvarchar(128) NOT NULL CONSTRAINT DF_auth_login_audit_username DEFAULT '',
+        auth_principal nvarchar(256) NOT NULL CONSTRAINT DF_auth_login_audit_auth_principal DEFAULT '',
+        success bit NOT NULL,
+        status_code int NOT NULL,
+        message nvarchar(512) NOT NULL CONSTRAINT DF_auth_login_audit_message DEFAULT '',
+        client_address nvarchar(64) NOT NULL CONSTRAINT DF_auth_login_audit_client_address DEFAULT '',
+        created_at datetime2(7) NOT NULL CONSTRAINT DF_auth_login_audit_created_at DEFAULT SYSUTCDATETIME()
+    );
+END;
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ticket_knowledge_created_at' AND object_id = OBJECT_ID(N'dbo.ticket_knowledge'))
     CREATE INDEX IX_ticket_knowledge_created_at ON dbo.ticket_knowledge (created_at DESC);
 GO
@@ -255,4 +288,16 @@ GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_llm_token_usage_service_operation' AND object_id = OBJECT_ID(N'dbo.llm_token_usage'))
     CREATE INDEX IX_llm_token_usage_service_operation ON dbo.llm_token_usage (service_type, operation_name, created_at DESC);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_auth_users_last_login_at' AND object_id = OBJECT_ID(N'dbo.auth_users'))
+    CREATE INDEX IX_auth_users_last_login_at ON dbo.auth_users (last_login_at DESC);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_auth_login_audit_created_at' AND object_id = OBJECT_ID(N'dbo.auth_login_audit'))
+    CREATE INDEX IX_auth_login_audit_created_at ON dbo.auth_login_audit (created_at DESC);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_auth_login_audit_username_created_at' AND object_id = OBJECT_ID(N'dbo.auth_login_audit'))
+    CREATE INDEX IX_auth_login_audit_username_created_at ON dbo.auth_login_audit (username, created_at DESC);
 GO

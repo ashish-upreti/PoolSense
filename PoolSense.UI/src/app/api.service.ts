@@ -82,12 +82,80 @@ export interface ApplicationFeedbackRequest {
   message: string
 }
 
+export interface AuthenticatedUser {
+  username: string
+  authPrincipal: string
+  displayName: string
+  email: string
+  groups: string[]
+  isAdmin?: boolean
+}
+
+export interface LoginResponse {
+  success: boolean
+  message: string
+  user: AuthenticatedUser
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly apiBaseUrl = environment.apiBaseUrl.replace(/\/$/, '')
 
+  async getSession(): Promise<AuthenticatedUser | null> {
+    const response = await fetch(this.apiUrl('/auth/session'), {
+      credentials: 'include',
+    })
+
+    if (response.status === 401 || response.status === 410) {
+      return null
+    }
+
+    if (!response.ok) {
+      throw new Error(await this.readErrorMessage(response, 'Unable to validate your session.'))
+    }
+
+    const data = (await response.json()) as { success: boolean; user?: AuthenticatedUser }
+    return data.success && data.user ? data.user : null
+  }
+
+  async login(username: string, password: string, rememberMe: boolean): Promise<LoginResponse> {
+    const encryptedPassword = await this.encryptPassword(password)
+    const response = await fetch(this.apiUrl('/auth/login'), {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        username,
+        rememberMe,
+        ...(encryptedPassword ? { encryptedPassword } : { password }),
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(await this.readErrorMessage(response, 'Unable to sign in.'))
+    }
+
+    const data = (await response.json()) as LoginResponse
+    if (!data.success) {
+      throw new Error(data.message || 'Unable to sign in.')
+    }
+
+    return data
+  }
+
+  async logout(): Promise<void> {
+    await fetch(this.apiUrl('/auth/logout'), {
+      method: 'POST',
+      credentials: 'include',
+    })
+  }
+
   async getProjectGroups(): Promise<ProjectGroup[]> {
-    const response = await fetch(this.apiUrl('/projects/groups'))
+    const response = await fetch(this.apiUrl('/projects/groups'), {
+      credentials: 'include',
+    })
     if (!response.ok) return []
 
     const data = (await response.json()) as { groups: ProjectGroup[] }
@@ -95,7 +163,9 @@ export class ApiService {
   }
 
   async getProjects(): Promise<ProjectConfig[]> {
-    const response = await fetch(this.apiUrl('/projects'))
+    const response = await fetch(this.apiUrl('/projects'), {
+      credentials: 'include',
+    })
 
     if (!response.ok) {
       throw new Error(await this.readErrorMessage(response, 'Unable to load projects.'))
@@ -107,6 +177,7 @@ export class ApiService {
   async createProject(project: ProjectConfigInput): Promise<ProjectConfig> {
     const response = await fetch(this.apiUrl('/projects'), {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -123,6 +194,7 @@ export class ApiService {
   async updateProject(projectId: string, project: ProjectConfigInput): Promise<ProjectConfig> {
     const response = await fetch(this.apiUrl(`/projects/${encodeURIComponent(projectId)}`), {
       method: 'PUT',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -138,7 +210,9 @@ export class ApiService {
 
   async getIngestionStatuses(refresh = false): Promise<IngestionStatus[]> {
     const query = refresh ? '?refresh=true' : ''
-    const response = await fetch(this.apiUrl(`/ingestion/status${query}`))
+    const response = await fetch(this.apiUrl(`/ingestion/status${query}`), {
+      credentials: 'include',
+    })
 
     if (!response.ok) {
       throw new Error(await this.readErrorMessage(response, 'Unable to load ingestion status.'))
@@ -150,6 +224,7 @@ export class ApiService {
   async submitFeedback(request: FeedbackRequest): Promise<void> {
     const response = await fetch(this.apiUrl('/feedback'), {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -167,6 +242,7 @@ export class ApiService {
   async submitApplicationFeedback(request: ApplicationFeedbackRequest): Promise<void> {
     const response = await fetch(this.apiUrl('/feedback/application'), {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -181,6 +257,7 @@ export class ApiService {
   async askPoolSense(message: string, selectedGroupIds?: string[]): Promise<TicketWorkflowResult> {
     const response = await fetch(this.apiUrl('/ticket/process'), {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -199,6 +276,70 @@ export class ApiService {
     return (await response.json()) as TicketWorkflowResult
   }
 
+  private async encryptPassword(password: string): Promise<string | null> {
+    if (!globalThis.crypto?.subtle) {
+      return null
+    }
+
+    try {
+      const response = await fetch(this.apiUrl('/auth/pubkey'), {
+        credentials: 'include',
+      })
+
+      if (!response.ok) {
+        return null
+      }
+
+      const data = (await response.json()) as { publicKey?: string }
+      if (!data.publicKey) {
+        return null
+      }
+
+      const key = await globalThis.crypto.subtle.importKey(
+        'spki',
+        this.pemToArrayBuffer(data.publicKey),
+        { name: 'RSA-OAEP', hash: 'SHA-256' },
+        false,
+        ['encrypt'],
+      )
+      const encrypted = await globalThis.crypto.subtle.encrypt(
+        { name: 'RSA-OAEP' },
+        key,
+        new TextEncoder().encode(password),
+      )
+
+      return this.arrayBufferToBase64(encrypted)
+    } catch {
+      return null
+    }
+  }
+
+  private pemToArrayBuffer(pem: string) {
+    const base64 = pem
+      .replace('-----BEGIN PUBLIC KEY-----', '')
+      .replace('-----END PUBLIC KEY-----', '')
+      .replace(/\s/g, '')
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index)
+    }
+
+    return bytes.buffer
+  }
+
+  private arrayBufferToBase64(buffer: ArrayBuffer) {
+    const bytes = new Uint8Array(buffer)
+    let binary = ''
+
+    for (let index = 0; index < bytes.byteLength; index += 1) {
+      binary += String.fromCharCode(bytes[index])
+    }
+
+    return btoa(binary)
+  }
+
   private apiUrl(path: string) {
     return `${this.apiBaseUrl}${path.startsWith('/') ? path : `/${path}`}`
   }
@@ -211,6 +352,8 @@ export class ApiService {
         title?: string
         errors?: Record<string, string[]>
         detail?: string
+        message?: string
+        error?: string
       }
 
       if (payload.errors) {
@@ -226,6 +369,14 @@ export class ApiService {
 
       if (payload.title) {
         return payload.title
+      }
+
+      if (payload.message) {
+        return payload.message
+      }
+
+      if (payload.error) {
+        return payload.error
       }
     }
 

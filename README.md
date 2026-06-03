@@ -101,6 +101,22 @@ Use [PoolSense.Api/appsettings.example.json](PoolSense.Api/appsettings.example.j
   - `PoolSenseSqlServer` — PoolSense persistence database
   - `TicketSourceSqlServer` — source ticket database used by the polling connector
 
+- `Cors`
+  - `AllowedOrigins` — Angular or hosted UI origins allowed to send credentialed API requests
+
+- `Auth`
+  - `JwtSecret` — strong signing secret, recommended length 32+ characters
+  - `AllowInsecurePasswordFallback` — permits plaintext password fallback for local HTTP development only
+  - `SessionHours`
+  - `RememberMeDays`
+
+- `ActiveDirectory`
+  - `Url`
+  - `BaseDn`
+  - `Domain`
+  - `AllowedGroups`
+  - `AdminGroupNames`
+
 - `TicketAutomation`
   - `PollingEnabled`
   - `PollIntervalSeconds`
@@ -122,6 +138,7 @@ dotnet user-secrets set --project .\PoolSense.Api "AiSettings:BaseUrl" "https://
 dotnet user-secrets set --project .\PoolSense.Api "AiSettings:ApiKey" "<your-api-key>"
 dotnet user-secrets set --project .\PoolSense.Api "ConnectionStrings:PoolSenseSqlServer" "Server=your-sql-server,1433;Database=PoolSense;Trusted_Connection=True;TrustServerCertificate=True"
 dotnet user-secrets set --project .\PoolSense.Api "ConnectionStrings:TicketSourceSqlServer" "Server=your-ticket-source-server,1433;Database=PoolProd;Trusted_Connection=True;TrustServerCertificate=True"
+dotnet user-secrets set --project .\PoolSense.Api "Auth:JwtSecret" "<at-least-32-random-characters>"
 ```
 
 Do not store real API keys, passwords, or production connection strings in tracked files.
@@ -155,6 +172,8 @@ The bootstrap script creates and/or maintains these primary tables:
 - `dbo.interaction_logs`
 - `dbo.application_run_logs`
 - `dbo.llm_token_usage`
+- `dbo.auth_users`
+- `dbo.auth_login_audit`
 
 ## Run Locally
 
@@ -208,13 +227,14 @@ The operator experience has two primary work areas.
 ### Incident Workspace
 
 1. Open `http://localhost:4200`.
-2. Stay on the `PoolSense` section in the left navigation rail.
-3. Choose a search scope:
+2. Sign in with an Intel Active Directory account that belongs to one of the configured `ActiveDirectory:AllowedGroups`.
+3. Stay on the `PoolSense` section in the left navigation rail.
+4. Choose a search scope:
    - `All` to search all configured projects
    - one or more configured project groups such as `ATCR`, `FSCO-FAB`, `DxCR`, or `ONEMPS`
-4. Type an incident description or click a quick prompt such as `VG item missing`.
-5. Press Enter or click `Ask PoolSense`.
-6. Review:
+5. Type an incident description or click a quick prompt such as `VG item missing`.
+6. Press Enter or click `Ask PoolSense`.
+7. Review:
    - suggested root cause
    - suggested resolution
    - confidence
@@ -222,7 +242,7 @@ The operator experience has two primary work areas.
    - similar incidents
    - failure-pattern details
    - telemetry summary
-7. Submit feedback as `Helpful` or `Not Helpful`, optionally selecting the primary incident, adding a comment, and marking whether the resolution was used.
+8. Submit feedback as `Helpful` or `Not Helpful`, optionally selecting the primary incident, adding a comment, and marking whether the resolution was used.
 
 ### Application Configuration Workspace
 
@@ -265,6 +285,11 @@ AT MPS Capacity Response
 
 | Endpoint | Purpose |
 | --- | --- |
+| `GET /api/auth/pubkey` | Return the RSA public key used by the UI to encrypt password submission. |
+| `POST /api/auth/login` | Authenticate against Intel Active Directory, set the auth cookie, and record login metadata. |
+| `POST /api/auth/logout` | Clear the auth cookie and invalidate the server-side session entry. |
+| `GET /api/auth/session` | Validate the current cookie or bearer token and return the signed-in user. |
+| `POST /api/auth/validate-ad` | Connectivity check for the configured Active Directory endpoint. |
 | `POST /api/ticket/analyze` | Analyze a ticket/incident request. |
 | `POST /api/ticket/process` | Main incident workflow endpoint used by the UI. |
 | `POST /api/ticket/store` | Store ticket knowledge. |

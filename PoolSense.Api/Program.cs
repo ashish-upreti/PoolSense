@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Mvc.Authorization;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
@@ -6,6 +8,7 @@ using PoolSense.Api.Agents;
 using PoolSense.Api.Configuration;
 using PoolSense.Api.Connectors;
 using PoolSense.Api.Data;
+using PoolSense.Api.Options;
 using PoolSense.Api.Orchestration;
 using PoolSense.Api.Services;
 using PoolSense.Api.Logging;
@@ -52,17 +55,39 @@ static void ValidateAiSettings(AiSettings aiSettings)
 }
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add(new AuthorizeFilter());
+});
 builder.Services.Configure<AiSettings>(builder.Configuration.GetSection("AiSettings"));
+builder.Services.Configure<ActiveDirectoryOptions>(builder.Configuration.GetSection(ActiveDirectoryOptions.SectionName));
+builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
 builder.Services.Configure<TicketAutomationSettings>(builder.Configuration.GetSection("TicketAutomation"));
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<IRsaKeyMaterialProvider, RsaKeyMaterialProvider>();
+builder.Services.AddSingleton<ISessionPasswordStore, SessionPasswordStore>();
+builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
+builder.Services.AddSingleton<IActiveDirectoryAuthService, ActiveDirectoryAuthService>();
+builder.Services.AddAuthentication(PoolSenseJwtAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, PoolSenseJwtAuthenticationHandler>(PoolSenseJwtAuthenticationHandler.SchemeName, _ => { });
+builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(PoolSenseUiCorsPolicy, policy =>
     {
+        var configuredOrigins = builder.Configuration
+            .GetSection("Cors:AllowedOrigins")
+            .Get<string[]>()
+            ?? [];
+        var allowedOrigins = configuredOrigins.Length == 0
+            ? ["http://localhost:4200", "http://localhost:5173"]
+            : configuredOrigins;
+
         policy
-            .WithOrigins("http://localhost:4200", "http://localhost:5173")
+            .WithOrigins(allowedOrigins)
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 builder.Services.AddScoped<ITicketAnalyzerAgent, TicketAnalyzerAgent>();
@@ -95,6 +120,7 @@ builder.Services.AddScoped<IncidentContextBuilder>();
 builder.Services.AddSingleton<InMemoryVectorStoreCache>();
 builder.Services.AddSingleton<IVectorStoreCacheInvalidator>(sp => sp.GetRequiredService<InMemoryVectorStoreCache>());
 builder.Services.AddScoped<IPoolSenseSqlConnectionFactory, PoolSenseSqlConnectionFactory>();
+builder.Services.AddScoped<IAuthUserRepository, AuthUserRepository>();
 builder.Services.AddScoped<IVectorSimilaritySearch, CosineVectorSimilaritySearch>();
 builder.Services.AddScoped<SqlServerVectorStore>();
 builder.Services.AddScoped<IVectorStore>(sp => sp.GetRequiredService<SqlServerVectorStore>());
@@ -119,6 +145,29 @@ builder.Services.AddSwaggerGen(c =>
         Title = "PoolSense API",
         Version = "v1",
         Description = "AI-powered pool maintenance assistant API."
+    });
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Use a PoolSense JWT bearer token or authenticate through /api/auth/login for the auth cookie."
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            []
+        }
     });
 });
 
@@ -152,6 +201,14 @@ builder.Services.AddScoped<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
 
 var app = builder.Build();
 var spaIndexPath = Path.Combine(app.Environment.WebRootPath ?? string.Empty, "index.html");
+var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("StartupSecurity");
+var authOptions = app.Services.GetRequiredService<IOptions<AuthOptions>>().Value;
+if (string.IsNullOrWhiteSpace(authOptions.JwtSecret) || authOptions.JwtSecret.Length < 32)
+{
+    startupLogger.LogWarning(
+        "Auth:JwtSecret is missing or too short. Configure a strong secret via environment-specific secret storage before production use.");
+}
+
 app.Logger.LogInformation(
     "PoolSense API starting on host {MachineName} as user {UserName}. Environment: {EnvironmentName}. ProcessId: {ProcessId}. ContentRoot: {ContentRoot}. OS: {OSDescription}.",
     Environment.MachineName,
@@ -212,6 +269,7 @@ if (Directory.Exists(app.Environment.WebRootPath))
     app.UseStaticFiles();
 }
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();

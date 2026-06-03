@@ -8,6 +8,7 @@
     <SpaRoot>..\PoolSense.UI\</SpaRoot>
     <SpaProxyServerUrl>http://localhost:4200</SpaProxyServerUrl>
     <SpaProxyLaunchCommand>npm run dev -- --host localhost</SpaProxyLaunchCommand>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -33,6 +34,9 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.73.0" />
     <PackageReference Include="Microsoft.SemanticKernel.Connectors.OpenAI" Version="1.73.0" />
+    <PackageReference Include="System.DirectoryServices.Protocols" Version="8.0.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.12.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.4" />
   </ItemGroup>
 
   <Target Name="PublishSpaAssets" AfterTargets="ComputeFilesToPublish">

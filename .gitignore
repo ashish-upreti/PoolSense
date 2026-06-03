@@ -71,6 +71,7 @@ $RECYCLE.BIN/
 # ── Local configuration and secrets ──────────────────────────
 PoolSense.Api/appsettings.json
 PoolSense.Api/appsettings.Development.json
+PoolSense.Api/artifacts/auth-state/
 **/appsettings.Local.json
 **/appsettings.*.local.json
 secrets.json

@@ -1,5 +1,72 @@
 <div class="workspace-layout">
-  <div class="app-shell" [class.app-shell-sidebar-collapsed]="isSidebarCollapsed">
+  <section *ngIf="isSessionLoading" class="auth-screen" aria-live="polite">
+    <div class="auth-card auth-card-compact">
+      <div class="sidebar-brand-mark" aria-hidden="true">PS</div>
+      <div>
+        <p class="panel-kicker">PoolSense</p>
+        <h1 class="brand-title"><span class="brand-title-primary">Signing</span><span class="brand-title-accent">In</span></h1>
+      </div>
+      <p class="workspace-copy">Checking your session...</p>
+    </div>
+  </section>
+
+  <section *ngIf="!isSessionLoading && !currentUser" class="auth-screen">
+    <form class="auth-card" (ngSubmit)="handleLoginSubmit()">
+      <div class="auth-card-header">
+        <div class="sidebar-brand-mark" aria-hidden="true">PS</div>
+        <button type="button" class="theme-toggle" (click)="toggleTheme()" [attr.aria-label]="isDark ? 'Switch to light theme' : 'Switch to dark theme'" [attr.title]="isDark ? 'Switch to light theme' : 'Switch to dark theme'">
+          <span class="theme-toggle-icon" aria-hidden="true">
+            <svg *ngIf="isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2"></path>
+              <path d="M12 20v2"></path>
+              <path d="M4.93 4.93l1.41 1.41"></path>
+              <path d="M17.66 17.66l1.41 1.41"></path>
+              <path d="M2 12h2"></path>
+              <path d="M20 12h2"></path>
+              <path d="M4.93 19.07l1.41-1.41"></path>
+              <path d="M17.66 6.34l1.41-1.41"></path>
+            </svg>
+            <svg *ngIf="!isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"></path>
+            </svg>
+          </span>
+        </button>
+      </div>
+
+      <div>
+        <p class="panel-kicker">Intel Active Directory</p>
+        <h1 class="brand-title"><span class="brand-title-primary">Pool</span><span class="brand-title-accent">Sense</span></h1>
+        <p class="workspace-copy">Detect. Diagnose. Resolve.</p>
+      </div>
+
+      <div class="auth-form-grid">
+        <label class="field-group field-group-full">
+          <span class="field-label">Username</span>
+          <input class="field-input" type="text" name="loginUsername" [(ngModel)]="loginForm.username" autocomplete="username" [disabled]="isLoginSubmitting" />
+        </label>
+
+        <label class="field-group field-group-full">
+          <span class="field-label">Password</span>
+          <input class="field-input" type="password" name="loginPassword" [(ngModel)]="loginForm.password" autocomplete="current-password" [disabled]="isLoginSubmitting" />
+        </label>
+      </div>
+
+      <label class="toggle-card auth-remember-option">
+        <input type="checkbox" name="loginRememberMe" [(ngModel)]="loginForm.rememberMe" [disabled]="isLoginSubmitting" />
+        <span><strong>Remember Me</strong><small>Keep this browser session active for the configured extended duration.</small></span>
+      </label>
+
+      <p *ngIf="loginError" class="error-banner">{{ loginError }}</p>
+
+      <div class="composer-footer auth-actions">
+        <p class="helper-text">Use your corporate username, UPN, or domain-qualified account.</p>
+        <button type="submit" class="send-button" [disabled]="isLoginSubmitting">{{ isLoginSubmitting ? 'Signing In...' : 'Sign In' }}</button>
+      </div>
+    </form>
+  </section>
+
+  <div *ngIf="!isSessionLoading && currentUser" class="app-shell" [class.app-shell-sidebar-collapsed]="isSidebarCollapsed">
     <aside class="project-panel sidebar-panel" [class.sidebar-panel-collapsed]="isSidebarCollapsed" [attr.aria-label]="isSidebarCollapsed ? 'Primary navigation collapsed' : 'Primary navigation'">
       <div class="project-panel-header sidebar-brand">
         <div *ngIf="!isSidebarCollapsed" class="sidebar-brand-copy">
@@ -73,12 +140,17 @@
       <div *ngIf="!isSidebarCollapsed" class="sidebar-summary">
         <div class="workspace-banner">
           <span class="workspace-dot"></span>
+          <span>{{ currentUserDisplayName }}</span>
+        </div>
+        <div class="workspace-banner">
+          <span class="workspace-dot"></span>
           <span>{{ projects.length }} configured application{{ projects.length === 1 ? '' : 's' }}</span>
         </div>
         <div class="workspace-banner">
           <span class="workspace-dot"></span>
           <span>{{ appSettings.ticketAutomation.email.deliveryMode }} · {{ appSettings.ticketAutomation.pollIntervalSeconds }}s polling</span>
         </div>
+        <button type="button" class="feedback-button feedback-button-secondary" (click)="handleLogout()">Sign Out</button>
       </div>
     </aside>
 
@@ -115,10 +187,6 @@
           </button>
         </div>
       </header>
-
-      <div class="prompt-strip" aria-label="Suggested prompts">
-        <button *ngFor="let prompt of quickPrompts" type="button" class="prompt-chip" (click)="handleSend(prompt)" [disabled]="isLoading">{{ prompt }}</button>
-      </div>
 
       <div *ngIf="groups.length > 0" class="group-selector" role="group" aria-label="Application group filter">
         <p class="group-selector-label">Search scope</p>
@@ -200,6 +268,9 @@
       </div>
 
       <form class="composer" (ngSubmit)="handleSend()">
+        <div class="prompt-strip" aria-label="Suggested prompts">
+          <button *ngFor="let prompt of quickPrompts" type="button" class="prompt-chip" (click)="handleSend(prompt)" [disabled]="isLoading">{{ prompt }}</button>
+        </div>
         <label class="sr-only" for="incident-input">Describe your issue</label>
         <textarea id="incident-input" class="composer-input" name="incident-input" [(ngModel)]="input" (keydown)="handleComposerKeydown($event)" placeholder="Describe your issue... (Enter to send, Shift+Enter for new line)" rows="3" [disabled]="isLoading"></textarea>
         <div class="composer-footer">

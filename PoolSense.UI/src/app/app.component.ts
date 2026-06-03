@@ -3,6 +3,7 @@ import { Component, OnInit, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import {
   ApplicationFeedbackRequest,
+  AuthenticatedUser,
   ApiService,
   IngestionStatus,
   ProjectConfig,
@@ -111,6 +112,15 @@ export class AppComponent implements OnInit {
   readonly allGroupValue = '__all__'
   readonly appSettings = environment
 
+  currentUser: AuthenticatedUser | null = null
+  isSessionLoading = true
+  loginForm = {
+    username: '',
+    password: '',
+    rememberMe: false,
+  }
+  isLoginSubmitting = false
+  loginError = ''
   messages: ChatMessage[] = []
   insights: TicketWorkflowResult | null = null
   isLoading = false
@@ -137,8 +147,11 @@ export class AppComponent implements OnInit {
 
   ngOnInit() {
     this.applyTheme()
-    void this.loadProjectGroups()
-    void this.loadProjectWorkspace()
+    void this.initializeSession()
+  }
+
+  get currentUserDisplayName() {
+    return this.currentUser?.displayName || this.currentUser?.username || 'Signed in'
   }
 
   get isAllGroupsSelected() {
@@ -229,6 +242,50 @@ export class AppComponent implements OnInit {
     }
   }
 
+  async handleLoginSubmit() {
+    const username = this.loginForm.username.trim()
+    const password = this.loginForm.password
+
+    if (!username || !password || this.isLoginSubmitting) {
+      this.loginError = 'Username and password are required.'
+      return
+    }
+
+    this.loginError = ''
+    this.isLoginSubmitting = true
+
+    try {
+      const loginResult = await this.api.login(username, password, this.loginForm.rememberMe)
+      this.currentUser = loginResult.user
+      this.loginForm = {
+        username: '',
+        password: '',
+        rememberMe: false,
+      }
+      this.applyAuthenticatedUserToFeedbackForm(loginResult.user)
+      await this.loadAuthenticatedWorkspace()
+    } catch (requestError) {
+      this.loginError = requestError instanceof Error ? requestError.message : 'Unable to sign in.'
+    } finally {
+      this.isLoginSubmitting = false
+    }
+  }
+
+  async handleLogout() {
+    await this.api.logout()
+    this.currentUser = null
+    this.messages = []
+    this.insights = null
+    this.projects = []
+    this.ingestionStatuses = []
+    this.groups = []
+    this.selectedGroupIds = []
+    this.error = ''
+    this.projectError = ''
+    this.projectNotice = ''
+    this.feedbackStateByMessageId = {}
+  }
+
   handleComposerKeydown(event: KeyboardEvent) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -266,6 +323,11 @@ export class AppComponent implements OnInit {
   }
 
   async loadProjectWorkspace(refreshIngestionTotals = false) {
+    if (!this.currentUser) {
+      this.isProjectLoading = false
+      return
+    }
+
     this.isProjectLoading = true
 
     try {
@@ -343,8 +405,8 @@ export class AppComponent implements OnInit {
 
   async handleApplicationFeedbackSubmit() {
     const payload: ApplicationFeedbackRequest = {
-      userName: this.applicationFeedbackForm.userName.trim(),
-      userEmail: this.applicationFeedbackForm.userEmail.trim(),
+      userName: (this.applicationFeedbackForm.userName || this.currentUser?.displayName || this.currentUser?.username || '').trim(),
+      userEmail: (this.applicationFeedbackForm.userEmail || this.currentUser?.email || '').trim(),
       feedbackType: this.applicationFeedbackForm.feedbackType.trim(),
       message: this.applicationFeedbackForm.message.trim(),
     }
@@ -468,6 +530,11 @@ export class AppComponent implements OnInit {
   }
 
   private async loadProjectGroups() {
+    if (!this.currentUser) {
+      this.groups = []
+      return
+    }
+
     try {
       this.groups = await this.api.getProjectGroups()
     } catch {
@@ -478,6 +545,35 @@ export class AppComponent implements OnInit {
   private resetProjectForm() {
     this.editingProjectId = null
     this.projectForm = createDefaultProjectForm()
+  }
+
+  private async initializeSession() {
+    this.isSessionLoading = true
+
+    try {
+      this.currentUser = await this.api.getSession()
+      if (this.currentUser) {
+        this.applyAuthenticatedUserToFeedbackForm(this.currentUser)
+        await this.loadAuthenticatedWorkspace()
+      }
+    } catch (requestError) {
+      this.loginError = requestError instanceof Error ? requestError.message : 'Unable to validate your session.'
+      this.currentUser = null
+    } finally {
+      this.isSessionLoading = false
+    }
+  }
+
+  private async loadAuthenticatedWorkspace() {
+    await Promise.all([this.loadProjectGroups(), this.loadProjectWorkspace()])
+  }
+
+  private applyAuthenticatedUserToFeedbackForm(user: AuthenticatedUser) {
+    this.applicationFeedbackForm = {
+      ...this.applicationFeedbackForm,
+      userName: this.applicationFeedbackForm.userName || user.displayName || user.username,
+      userEmail: this.applicationFeedbackForm.userEmail || user.email,
+    }
   }
 
   private applyTheme() {

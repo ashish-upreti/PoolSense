@@ -5,6 +5,45 @@
   padding: 1.25rem;
 }
 
+.auth-screen {
+  min-height: calc(100vh - 2.5rem);
+  display: grid;
+  place-items: center;
+}
+
+.auth-card {
+  width: min(100%, 28rem);
+  display: grid;
+  gap: 1.1rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 32px;
+  background: var(--panel-bg);
+  box-shadow: var(--shadow-lg);
+}
+
+.auth-card-compact {
+  place-items: center;
+  text-align: center;
+}
+
+.auth-card-header,
+.auth-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.auth-form-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.auth-remember-option {
+  align-items: flex-start;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: minmax(232px, 0.58fr) minmax(0, 1.7fr) minmax(330px, 0.96fr);
@@ -1178,7 +1217,8 @@
 
     .project-panel,
     .workspace-chat,
-    .insight-panel {
+    .insight-panel,
+    .auth-card {
       padding: 1rem;
     }
 
@@ -1193,6 +1233,8 @@
     .workspace-actions,
     .settings-banner-group,
     .composer-footer,
+    .auth-card-header,
+    .auth-actions,
     .incident-meta,
     .toggle-card {
       flex-direction: column;
