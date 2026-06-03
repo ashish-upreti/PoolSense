@@ -88,6 +88,38 @@ function createFeedbackState(selectedTicketId = ''): FeedbackState {
   }
 }
 
+function trimUserValue(value: string | null | undefined) {
+  return value?.trim() ?? ''
+}
+
+function getAuthenticatedUserName(user: AuthenticatedUser) {
+  return trimUserValue(user.displayName) || trimUserValue(user.username) || trimUserValue(user.authPrincipal)
+}
+
+function getAuthenticatedUserEmail(user: AuthenticatedUser) {
+  const explicitEmail = trimUserValue(user.email)
+  if (explicitEmail) {
+    return explicitEmail
+  }
+
+  const principal = trimUserValue(user.authPrincipal)
+  if (principal.includes('@')) {
+    return principal
+  }
+
+  const username = trimUserValue(user.username)
+  if (!username) {
+    return ''
+  }
+
+  if (username.includes('@')) {
+    return username
+  }
+
+  const cleanUsername = username.split('\\').filter(Boolean).pop() ?? username
+  return `${cleanUsername}@intel.com`
+}
+
 function getDefaultFeedbackTicketId(similarIncidents: SimilarIncident[]) {
   return similarIncidents.find((incident) => incident.ticketId.trim().length > 0)?.ticketId ?? ''
 }
@@ -424,6 +456,9 @@ export class AppComponent implements OnInit {
       await this.api.submitApplicationFeedback(payload)
       this.applicationFeedbackNotice = 'Feedback submitted successfully.'
       this.applicationFeedbackForm = createDefaultApplicationFeedbackForm()
+      if (this.currentUser) {
+        this.applyAuthenticatedUserToFeedbackForm(this.currentUser)
+      }
     } catch (requestError) {
       this.applicationFeedbackError = requestError instanceof Error ? requestError.message : 'Unable to submit application feedback.'
     } finally {
@@ -571,8 +606,8 @@ export class AppComponent implements OnInit {
   private applyAuthenticatedUserToFeedbackForm(user: AuthenticatedUser) {
     this.applicationFeedbackForm = {
       ...this.applicationFeedbackForm,
-      userName: this.applicationFeedbackForm.userName || user.displayName || user.username,
-      userEmail: this.applicationFeedbackForm.userEmail || user.email,
+      userName: this.applicationFeedbackForm.userName.trim() || getAuthenticatedUserName(user),
+      userEmail: this.applicationFeedbackForm.userEmail.trim() || getAuthenticatedUserEmail(user),
     }
   }
 

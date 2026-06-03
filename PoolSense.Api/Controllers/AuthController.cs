@@ -1,6 +1,7 @@
 using System.DirectoryServices.Protocols;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -315,15 +316,35 @@ public sealed class AuthController : ControllerBase
             });
         }
 
+        var username = GetClaimValue(principal, "username");
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            username = GetClaimValue(principal, ClaimTypes.NameIdentifier);
+        }
+
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            username = GetClaimValue(principal, ClaimTypes.Name);
+        }
+
+        var authPrincipal = GetClaimValue(principal, "authPrincipal");
+        if (string.IsNullOrWhiteSpace(authPrincipal))
+        {
+            authPrincipal = username;
+        }
+
+        var displayName = GetClaimValue(principal, "displayName");
+        var email = GetSessionEmail(principal, username, authPrincipal);
+
         return Ok(new
         {
             success = true,
             user = new
             {
-                username = principal.FindFirst("username")?.Value ?? string.Empty,
-                authPrincipal = principal.FindFirst("authPrincipal")?.Value ?? string.Empty,
-                displayName = principal.FindFirst("displayName")?.Value ?? string.Empty,
-                email = principal.FindFirst("email")?.Value ?? string.Empty,
+                username,
+                authPrincipal,
+                displayName = string.IsNullOrWhiteSpace(displayName) ? username : displayName,
+                email,
                 groups = Array.Empty<string>(),
                 isAdmin = bool.TryParse(principal.FindFirst("isAdmin")?.Value, out var isAdmin) && isAdmin
             }
@@ -431,6 +452,42 @@ public sealed class AuthController : ControllerBase
         }
 
         return userPayload;
+    }
+
+    private static string GetClaimValue(ClaimsPrincipal principal, string claimType)
+    {
+        return principal.FindFirst(claimType)?.Value?.Trim() ?? string.Empty;
+    }
+
+    private static string GetSessionEmail(ClaimsPrincipal principal, string username, string authPrincipal)
+    {
+        var email = GetClaimValue(principal, "email");
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            return email;
+        }
+
+        email = GetClaimValue(principal, ClaimTypes.Email);
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            return email;
+        }
+
+        if (authPrincipal.Contains('@'))
+        {
+            return authPrincipal;
+        }
+
+        if (username.Contains('@'))
+        {
+            return username;
+        }
+
+        var cleanUsername = username.Contains('\\')
+            ? username.Split('\\', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? string.Empty
+            : username;
+
+        return string.IsNullOrWhiteSpace(cleanUsername) ? string.Empty : $"{cleanUsername}@intel.com";
     }
 
     private static bool IsConnectivityFailure(LdapException exception)
