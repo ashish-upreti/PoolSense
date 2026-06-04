@@ -162,7 +162,7 @@ export class AppComponent implements OnInit {
   selectedGroupIds: string[] = []
   activeSection: AppSection = 'main'
   isSidebarCollapsed = true
-  isDark = localStorage.getItem('theme') !== 'light'
+  isDark = localStorage.getItem('theme') === 'dark'
   projects: ProjectConfig[] = []
   ingestionStatuses: IngestionStatus[] = []
   projectForm = createDefaultProjectForm()
