@@ -130,6 +130,8 @@ builder.Services.AddScoped<IFailurePatternRepository, FailurePatternRepository>(
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
 builder.Services.AddScoped<IIngestionStatusRepository, IngestionStatusRepository>();
 builder.Services.AddScoped<IProcessedSourceEventRepository, ProcessedSourceEventRepository>();
+builder.Services.AddScoped<ITicketAutomationSettingsRepository, TicketAutomationSettingsRepository>();
+builder.Services.AddScoped<ITicketAutomationSettingsProvider, TicketAutomationSettingsProvider>();
 
 builder.Services.AddScoped<SqlTicketConnector>();
 builder.Services.AddHttpClient<ApiTicketConnector>();

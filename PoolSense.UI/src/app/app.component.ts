@@ -10,6 +10,8 @@ import {
   ProjectConfigInput,
   ProjectGroup,
   SimilarIncident,
+  TicketAutomationSettings,
+  TicketAutomationSettingsInput,
   TicketWorkflowResult,
 } from './api.service'
 import { environment } from '../environments/environment'
@@ -49,8 +51,26 @@ type TelemetryDatum = {
 type AppSection = 'main' | 'projectConfig' | 'applicationFeedback'
 
 type ApplicationFeedbackForm = ApplicationFeedbackRequest
+type TicketAutomationSettingsForm = TicketAutomationSettingsInput
 
 const quickPrompts = ['VG item missing', 'Data load job failed', 'UI error']
+
+const defaultTicketAutomationSettings: TicketAutomationSettings = {
+  pollingEnabled: environment.ticketAutomation.pollingEnabled,
+  pollIntervalSeconds: environment.ticketAutomation.pollIntervalSeconds,
+  closedStatusName: environment.ticketAutomation.closedStatusName,
+  newStatusName: environment.ticketAutomation.newStatusName,
+  similaritySearchLimit: environment.ticketAutomation.similaritySearchLimit,
+  email: {
+    recipient: '',
+    fromAddress: environment.ticketAutomation.email.fromAddress,
+    deliveryMode: environment.ticketAutomation.email.deliveryMode,
+    smtpHost: environment.ticketAutomation.email.smtpHost,
+    port: environment.ticketAutomation.email.port,
+    timeoutMs: environment.ticketAutomation.email.timeoutMs,
+    databaseMailProfile: environment.ticketAutomation.email.databaseMailProfile,
+  },
+}
 
 const defaultProjectForm: ProjectConfigInput = {
   projectId: '',
@@ -65,6 +85,13 @@ const defaultProjectForm: ProjectConfigInput = {
 
 function createDefaultProjectForm(): ProjectConfigInput {
   return { ...defaultProjectForm }
+}
+
+function createTicketAutomationSettingsForm(settings: TicketAutomationSettings = defaultTicketAutomationSettings): TicketAutomationSettingsForm {
+  return {
+    pollingEnabled: settings.pollingEnabled,
+    pollIntervalSeconds: settings.pollIntervalSeconds,
+  }
 }
 
 function createDefaultApplicationFeedbackForm(): ApplicationFeedbackForm {
@@ -142,6 +169,7 @@ export class AppComponent implements OnInit {
 
   readonly quickPrompts = quickPrompts
   readonly allGroupValue = '__all__'
+  readonly appVersion = environment.appVersion
   readonly appSettings = environment
 
   currentUser: AuthenticatedUser | null = null
@@ -175,6 +203,9 @@ export class AppComponent implements OnInit {
   applicationFeedbackError = ''
   applicationFeedbackNotice = ''
   isApplicationFeedbackSaving = false
+  ticketAutomationSettings = defaultTicketAutomationSettings
+  ticketAutomationForm = createTicketAutomationSettingsForm()
+  isTicketAutomationSaving = false
   feedbackStateByMessageId: Record<number, FeedbackState> = {}
 
   ngOnInit() {
@@ -363,17 +394,47 @@ export class AppComponent implements OnInit {
     this.isProjectLoading = true
 
     try {
-      const [loadedProjects, loadedStatuses] = await Promise.all([
+      const [loadedProjects, loadedStatuses, loadedTicketAutomationSettings] = await Promise.all([
         this.api.getProjects(),
         this.api.getIngestionStatuses(refreshIngestionTotals),
+        this.api.getTicketAutomationSettings(),
       ])
 
       this.projects = loadedProjects
       this.ingestionStatuses = loadedStatuses
+      this.ticketAutomationSettings = loadedTicketAutomationSettings
+      this.ticketAutomationForm = createTicketAutomationSettingsForm(loadedTicketAutomationSettings)
     } catch (requestError) {
       this.projectError = requestError instanceof Error ? requestError.message : 'Unable to load application configuration data.'
     } finally {
       this.isProjectLoading = false
+    }
+  }
+
+  async handleTicketAutomationSubmit() {
+    const payload: TicketAutomationSettingsInput = {
+      pollingEnabled: this.ticketAutomationForm.pollingEnabled,
+      pollIntervalSeconds: Number(this.ticketAutomationForm.pollIntervalSeconds),
+    }
+
+    if (!Number.isFinite(payload.pollIntervalSeconds) || payload.pollIntervalSeconds < 10 || payload.pollIntervalSeconds > 3600) {
+      this.projectError = 'Poll interval must be between 10 and 3600 seconds.'
+      this.projectNotice = ''
+      return
+    }
+
+    this.projectError = ''
+    this.projectNotice = ''
+    this.isTicketAutomationSaving = true
+
+    try {
+      this.ticketAutomationSettings = await this.api.updateTicketAutomationSettings(payload)
+      this.ticketAutomationForm = createTicketAutomationSettingsForm(this.ticketAutomationSettings)
+      this.projectNotice = 'Updated application-level polling settings.'
+    } catch (requestError) {
+      this.projectError = requestError instanceof Error ? requestError.message : 'Unable to save the application-level polling settings.'
+    } finally {
+      this.isTicketAutomationSaving = false
     }
   }
 

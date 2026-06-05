@@ -58,6 +58,28 @@ export interface ProjectConfigInput {
   applicationFilter: string
 }
 
+export interface TicketAutomationSettings {
+  pollingEnabled: boolean
+  pollIntervalSeconds: number
+  closedStatusName: string
+  newStatusName: string
+  similaritySearchLimit: number
+  email: {
+    recipient: string
+    fromAddress: string
+    deliveryMode: string
+    smtpHost: string
+    port: number
+    timeoutMs: number
+    databaseMailProfile: string
+  }
+}
+
+export interface TicketAutomationSettingsInput {
+  pollingEnabled: boolean
+  pollIntervalSeconds: number
+}
+
 export interface IngestionStatus {
   projectId: string
   ingested: number
@@ -172,6 +194,35 @@ export class ApiService {
     }
 
     return (await response.json()) as ProjectConfig[]
+  }
+
+  async getTicketAutomationSettings(): Promise<TicketAutomationSettings> {
+    const response = await fetch(this.apiUrl('/settings/ticket-automation'), {
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      throw new Error(await this.readErrorMessage(response, 'Unable to load application-level polling settings.'))
+    }
+
+    return (await response.json()) as TicketAutomationSettings
+  }
+
+  async updateTicketAutomationSettings(settings: TicketAutomationSettingsInput): Promise<TicketAutomationSettings> {
+    const response = await fetch(this.apiUrl('/settings/ticket-automation'), {
+      method: 'PUT',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(settings),
+    })
+
+    if (!response.ok) {
+      throw new Error(await this.readErrorMessage(response, 'Unable to update application-level polling settings.'))
+    }
+
+    return (await response.json()) as TicketAutomationSettings
   }
 
   async createProject(project: ProjectConfigInput): Promise<ProjectConfig> {

@@ -13,18 +13,15 @@ public class BackgroundTicketPollingService : BackgroundService
     private const string NewRecommendationKind = "NewRecommendation";
 
     private readonly IServiceScopeFactory _serviceScopeFactory;
-    private readonly IOptionsMonitor<TicketAutomationSettings> _settingsMonitor;
     private readonly IOptionsMonitor<AiSettings> _aiSettingsMonitor;
     private readonly ILogger<BackgroundTicketPollingService> _logger;
 
     public BackgroundTicketPollingService(
         IServiceScopeFactory serviceScopeFactory,
-        IOptionsMonitor<TicketAutomationSettings> settingsMonitor,
         IOptionsMonitor<AiSettings> aiSettingsMonitor,
         ILogger<BackgroundTicketPollingService> logger)
     {
         _serviceScopeFactory = serviceScopeFactory;
-        _settingsMonitor = settingsMonitor;
         _aiSettingsMonitor = aiSettingsMonitor;
         _logger = logger;
     }
@@ -33,11 +30,11 @@ public class BackgroundTicketPollingService : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var settings = _settingsMonitor.CurrentValue;
-            var delay = TimeSpan.FromSeconds(Math.Max(10, settings.PollIntervalSeconds));
-
             try
             {
+                var settings = await GetSettingsAsync(stoppingToken);
+                var delay = TimeSpan.FromSeconds(Math.Max(10, settings.PollIntervalSeconds));
+
                 if (!settings.PollingEnabled)
                 {
                     _logger.LogInformation("Polling is paused (PollingEnabled=false). Waiting {DelaySeconds} seconds before the next check.", delay.TotalSeconds);
@@ -72,10 +69,18 @@ public class BackgroundTicketPollingService : BackgroundService
             && !string.IsNullOrWhiteSpace(aiSettings.Models.Embeddings);
     }
 
+    private async Task<TicketAutomationSettings> GetSettingsAsync(CancellationToken cancellationToken)
+    {
+        using var scope = _serviceScopeFactory.CreateScope();
+        var settingsProvider = scope.ServiceProvider.GetRequiredService<ITicketAutomationSettingsProvider>();
+        return await settingsProvider.GetAsync(cancellationToken);
+    }
+
     private async Task PollOnceAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceScopeFactory.CreateScope();
-        var settings = _settingsMonitor.CurrentValue;
+        var settingsProvider = scope.ServiceProvider.GetRequiredService<ITicketAutomationSettingsProvider>();
+        var settings = await settingsProvider.GetAsync(cancellationToken);
         var projectRepository = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
         var connector = scope.ServiceProvider.GetRequiredService<SqlTicketConnector>();
         var processedSourceEventRepository = scope.ServiceProvider.GetRequiredService<IProcessedSourceEventRepository>();

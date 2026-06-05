@@ -1,9 +1,10 @@
 export const environment = {
   production: true,
+  appVersion: 'V1.0',
   apiBaseUrl: '/api',
   ticketAutomation: {
     pollingEnabled: true,
-    pollIntervalSeconds: 60,
+    pollIntervalSeconds: 30,
     closedStatusName: 'Closed',
     newStatusName: 'New',
     sourceDatabaseName: 'PoolProd',

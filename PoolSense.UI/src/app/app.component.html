@@ -38,6 +38,7 @@
         <p class="panel-kicker">Intel Active Directory</p>
         <h1 class="brand-title"><span class="brand-title-primary">Pool</span><span class="brand-title-accent">Sense</span></h1>
         <p class="workspace-copy">Detect. Diagnose. Resolve.</p>
+        <p class="helper-text">Version {{ appVersion }}</p>
       </div>
 
       <div class="auth-form-grid">
@@ -148,7 +149,7 @@
         </div>
         <div class="workspace-banner">
           <span class="workspace-dot"></span>
-          <span>{{ appSettings.ticketAutomation.email.deliveryMode }} · {{ appSettings.ticketAutomation.pollIntervalSeconds }}s polling</span>
+          <span>{{ ticketAutomationSettings.email.deliveryMode }} · {{ ticketAutomationSettings.pollIntervalSeconds }}s polling · {{ ticketAutomationSettings.pollingEnabled ? 'Enabled' : 'Paused' }}</span>
         </div>
         <button type="button" class="feedback-button feedback-button-secondary" (click)="handleLogout()">Sign Out</button>
       </div>
@@ -161,6 +162,7 @@
           <p class="panel-kicker">FSMS</p>
           <h1 class="brand-title"><span class="brand-title-primary">Pool</span><span class="brand-title-accent">Sense</span></h1>
           <p class="workspace-copy">Detect. Diagnose. Resolve.</p>
+          <p class="helper-text">Version {{ appVersion }}</p>
         </div>
         <div class="workspace-actions">
           <div class="workspace-banner">
@@ -403,7 +405,7 @@
             </div>
             <div class="workspace-banner">
               <span class="workspace-dot"></span>
-              <span>{{ appSettings.ticketAutomation.email.deliveryMode }} · {{ appSettings.ticketAutomation.pollIntervalSeconds }}s polling · {{ appSettings.ticketAutomation.sourceDatabaseName }}</span>
+              <span>{{ ticketAutomationSettings.email.deliveryMode }} · {{ ticketAutomationSettings.pollIntervalSeconds }}s polling · {{ ticketAutomationSettings.pollingEnabled ? 'Enabled' : 'Paused' }} · {{ appSettings.ticketAutomation.sourceDatabaseName }}</span>
             </div>
           </div>
         </div>
@@ -412,6 +414,42 @@
         <p *ngIf="projectNotice" class="project-feedback-banner project-feedback-banner-success">{{ projectNotice }}</p>
 
         <section class="project-studio">
+          <form class="project-form-card" (ngSubmit)="handleTicketAutomationSubmit()">
+            <div class="card-heading-row project-toolbar">
+              <div>
+                <p class="panel-kicker">Application Level</p>
+                <h3>Master polling configuration</h3>
+              </div>
+            </div>
+
+            <div class="project-form-grid">
+              <label class="field-group">
+                <span class="field-label">Poll Interval Seconds</span>
+                <input class="field-input" type="number" name="masterPollIntervalSeconds" min="10" max="3600" [(ngModel)]="ticketAutomationForm.pollIntervalSeconds" [disabled]="isTicketAutomationSaving" />
+                <span class="field-note">Allowed range: 10 to 3600 seconds.</span>
+              </label>
+
+              <div class="field-group">
+                <span class="field-label">Read-only context</span>
+                <div class="toggle-card">
+                  <span><strong>{{ ticketAutomationSettings.email.deliveryMode }}</strong><small>{{ appSettings.ticketAutomation.sourceDatabaseName }} · Closed={{ ticketAutomationSettings.closedStatusName }} · New={{ ticketAutomationSettings.newStatusName }}</small></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="toggle-row">
+              <label class="toggle-card">
+                <input type="checkbox" name="masterPollingEnabled" [(ngModel)]="ticketAutomationForm.pollingEnabled" [disabled]="isTicketAutomationSaving" />
+                <span><strong>Master Polling Enabled</strong><small>Pause or resume background polling for all applications.</small></span>
+              </label>
+            </div>
+
+            <div class="composer-footer">
+              <p class="helper-text">This controls the application-wide polling loop. Per-application Pooling Enabled below still gates each application individually.</p>
+              <button type="submit" class="send-button" [disabled]="isTicketAutomationSaving">{{ isTicketAutomationSaving ? 'Saving...' : 'Save Master Settings' }}</button>
+            </div>
+          </form>
+
           <div class="project-studio-grid">
             <form class="project-form-card" (ngSubmit)="handleProjectSubmit()">
               <div class="card-heading-row project-toolbar">

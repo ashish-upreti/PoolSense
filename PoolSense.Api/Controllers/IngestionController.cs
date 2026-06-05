@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using PoolSense.Api.Configuration;
 using PoolSense.Api.Connectors;
 using PoolSense.Api.Data;
 using PoolSense.Api.Models;
+using PoolSense.Api.Services;
 
 namespace PoolSense.Api.Controllers;
 
@@ -17,20 +17,20 @@ public class IngestionController : ControllerBase
     private readonly IProjectRepository _projectRepository;
     private readonly IProcessedSourceEventRepository _processedSourceEventRepository;
     private readonly SqlTicketConnector _sqlTicketConnector;
-    private readonly TicketAutomationSettings _settings;
+    private readonly ITicketAutomationSettingsProvider _settingsProvider;
 
     public IngestionController(
         IIngestionStatusRepository ingestionStatusRepository,
         IProjectRepository projectRepository,
         IProcessedSourceEventRepository processedSourceEventRepository,
         SqlTicketConnector sqlTicketConnector,
-        IOptions<TicketAutomationSettings> settings)
+        ITicketAutomationSettingsProvider settingsProvider)
     {
         _ingestionStatusRepository = ingestionStatusRepository;
         _projectRepository = projectRepository;
         _processedSourceEventRepository = processedSourceEventRepository;
         _sqlTicketConnector = sqlTicketConnector;
-        _settings = settings.Value;
+        _settingsProvider = settingsProvider;
     }
 
     [HttpGet("status")]
@@ -132,7 +132,8 @@ public class IngestionController : ControllerBase
             return currentStatus;
         }
 
-        var closedTickets = await _sqlTicketConnector.GetTicketsByStatusAsync(project, _settings.ClosedStatusName, cancellationToken);
+        var settings = await _settingsProvider.GetAsync(cancellationToken);
+        var closedTickets = await _sqlTicketConnector.GetTicketsByStatusAsync(project, settings.ClosedStatusName, cancellationToken);
         var totalTickets = closedTickets.Count;
         var processedSourceEventIds = closedTickets
             .Select(ticket => ticket.SourceEventId)

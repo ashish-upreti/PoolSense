@@ -78,6 +78,19 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'dbo.ticket_automation_settings', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ticket_automation_settings (
+        settings_key nvarchar(64) NOT NULL CONSTRAINT PK_ticket_automation_settings PRIMARY KEY,
+        polling_enabled bit NOT NULL CONSTRAINT DF_ticket_automation_settings_polling_enabled DEFAULT 1,
+        poll_interval_seconds int NOT NULL CONSTRAINT DF_ticket_automation_settings_poll_interval_seconds DEFAULT 30,
+        created_at datetime2(7) NOT NULL CONSTRAINT DF_ticket_automation_settings_created_at DEFAULT SYSUTCDATETIME(),
+        updated_at datetime2(7) NOT NULL CONSTRAINT DF_ticket_automation_settings_updated_at DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT CK_ticket_automation_settings_poll_interval_seconds CHECK (poll_interval_seconds BETWEEN 10 AND 3600)
+    );
+END;
+GO
+
 IF OBJECT_ID(N'dbo.ingestion_status', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.ingestion_status (
