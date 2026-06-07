@@ -41,7 +41,7 @@
 
   <Target Name="PublishSpaAssets" AfterTargets="ComputeFilesToPublish">
     <ItemGroup>
-      <DistFiles Include="$(SpaRoot)dist\**" />
+      <DistFiles Include="$(SpaRoot)dist\poolsense.ui\browser\**" />
       <ResolvedFileToPublish Include="@(DistFiles->'%(FullPath)')" Exclude="@(ResolvedFileToPublish)">
         <RelativePath>wwwroot\%(RecursiveDir)%(FileName)%(Extension)</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

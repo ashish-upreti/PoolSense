@@ -113,7 +113,11 @@ internal static class RecommendationEmailContent
 {
     internal static string BuildSubject(TicketRequest ticket)
     {
-        return $"PoolSense recommendation for IssueID {ticket.SourceEventId}";
+        var issueId = string.IsNullOrWhiteSpace(ticket.SourceEventId)
+            ? (string.IsNullOrWhiteSpace(ticket.TicketId) ? "Unknown" : ticket.TicketId.Trim())
+            : ticket.SourceEventId.Trim();
+
+        return $"{issueId} – PoolSense Recommendation";
     }
 
     internal static string BuildBody(TicketRequest ticket, TicketWorkflowResult workflowResult)

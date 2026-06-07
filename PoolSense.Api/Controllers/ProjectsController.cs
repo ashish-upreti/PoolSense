@@ -39,6 +39,54 @@ public class ProjectsController : ControllerBase
     }
 
     /// <summary>
+    /// Request payload used by external applications to create or update project settings by application name.
+    /// </summary>
+    public sealed class ExternalProjectSettingsUpsertRequest
+    {
+        /// <summary>
+        /// Application name to store as both project_name and application_filter.
+        /// </summary>
+        /// <example>AT MPS Capacity Response</example>
+        public string ApplicationName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Semicolon-separated Lifeguard recipient email addresses.
+        /// </summary>
+        /// <example>lifeguard1@intel.com; lifeguard2@intel.com</example>
+        public string EmailRecipients { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Compatibility input accepted from external callers.
+        /// The persisted send_email value is normalized from PoolingEnabled for this API.
+        /// </summary>
+        /// <example>true</example>
+        public bool SendEmail { get; set; }
+
+        /// <summary>
+        /// Enables or disables both send_email and pooling_enabled for this API.
+        /// </summary>
+        /// <example>true</example>
+        public bool PoolingEnabled { get; set; }
+    }
+
+    /// <summary>
+    /// Response payload returned for project configuration endpoints in this controller.
+    /// </summary>
+    public sealed class ProjectConfigResponse
+    {
+        public int Id { get; set; }
+        public string ProjectId { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int KnowledgeLookbackYears { get; set; }
+        public int SimilaritySearchLimit { get; set; }
+        public bool SendEmail { get; set; }
+        public bool PoolingEnabled { get; set; }
+        public string EmailRecipients { get; set; } = string.Empty;
+        public string ApplicationFilter { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+    }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="ProjectsController"/> class.
     /// </summary>
     /// <param name="projectRepository">The repository used to manage project registrations.</param>
@@ -247,6 +295,100 @@ public class ProjectsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Creates or updates one project configuration for an external application based on application name.
+    /// </summary>
+    /// <remarks>
+    /// Sample request:
+    ///
+    ///     PUT /api/projects/external-settings/by-application
+    ///     {
+    ///       "applicationName": "AT MPS Capacity Response",
+    ///       "emailRecipients": "lifeguard1@intel.com; lifeguard2@intel.com",
+    ///       "sendEmail": true,
+    ///       "poolingEnabled": true
+    ///     }
+    ///
+    /// The application name is stored as both project_name and application_filter.
+    /// If application_filter already exists, the matching row is updated.
+    /// If it does not exist, a new project_configs row is created.
+    /// For this API, both send_email and pooling_enabled are persisted from the PoolingEnabled input.
+    /// </remarks>
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(ProjectConfigResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status500InternalServerError)]
+    [HttpPost("external-settings/by-application")]
+    [HttpPut("external-settings/by-application")]
+    public async Task<IActionResult> UpsertExternalProjectSettingsByApplication(
+        [FromBody] ExternalProjectSettingsUpsertRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest("External project settings request is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ApplicationName))
+        {
+            ModelState.AddModelError(nameof(ExternalProjectSettingsUpsertRequest.ApplicationName), "ApplicationName is required.");
+        }
+
+        if (!TryNormalizeEmailRecipients(request.EmailRecipients, out var normalizedRecipients, out var errorMessage))
+        {
+            ModelState.AddModelError(nameof(ExternalProjectSettingsUpsertRequest.EmailRecipients), errorMessage);
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var normalizedApplicationName = request.ApplicationName.Trim();
+
+        try
+        {
+            var existingProject = await _projectRepository.GetProjectByApplicationFilterAsync(normalizedApplicationName, cancellationToken);
+
+            if (existingProject is not null)
+            {
+                existingProject.ProjectName = normalizedApplicationName;
+                existingProject.ApplicationFilter = normalizedApplicationName;
+                existingProject.EmailRecipients = normalizedRecipients;
+                existingProject.SendEmail = request.PoolingEnabled;
+                existingProject.PoolingEnabled = request.PoolingEnabled;
+
+                var updatedProject = await _projectRepository.UpdateProjectAsync(existingProject, cancellationToken);
+                return updatedProject is null
+                    ? StatusCode(500, $"Project with ApplicationName '{request.ApplicationName}' could not be updated.")
+                    : Ok(ToResponse(updatedProject));
+            }
+
+            var projectId = await CreateUniqueProjectIdAsync(normalizedApplicationName, cancellationToken);
+            var newProject = new ProjectConfig
+            {
+                ProjectId = projectId,
+                ProjectName = normalizedApplicationName,
+                ApplicationFilter = normalizedApplicationName,
+                EmailRecipients = normalizedRecipients,
+                SendEmail = request.PoolingEnabled,
+                PoolingEnabled = request.PoolingEnabled,
+                KnowledgeLookbackYears = 2,
+                SimilaritySearchLimit = 5,
+                TicketSourceType = "sql",
+                ConnectionString = string.Empty,
+                KnowledgeSources = []
+            };
+
+            var createdProject = await _projectRepository.CreateProjectAsync(newProject, cancellationToken);
+            return Ok(ToResponse(createdProject));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"An error occurred while saving external project settings for ApplicationName '{request.ApplicationName}': {ex.Message}");
+        }
+    }
+
     private static string CreateProjectId(string projectName)
     {
         var normalized = new string(projectName
@@ -259,6 +401,25 @@ public class ProjectsController : ControllerBase
         return string.IsNullOrWhiteSpace(normalized)
             ? $"project-{Guid.NewGuid():N}"[..15]
             : normalized;
+    }
+
+    private async Task<string> CreateUniqueProjectIdAsync(string projectName, CancellationToken cancellationToken)
+    {
+        var baseProjectId = CreateProjectId(projectName);
+        var candidateProjectId = baseProjectId;
+
+        for (var suffix = 1; suffix <= 100; suffix++)
+        {
+            var existingProject = await _projectRepository.GetProjectByIdAsync(candidateProjectId, cancellationToken);
+            if (existingProject is null)
+            {
+                return candidateProjectId;
+            }
+
+            candidateProjectId = $"{baseProjectId}-{suffix}";
+        }
+
+        return $"project-{Guid.NewGuid():N}"[..15];
     }
 
     /// <summary>
@@ -340,20 +501,20 @@ public class ProjectsController : ControllerBase
         };
     }
 
-    private static object ToResponse(ProjectConfig project)
+    private static ProjectConfigResponse ToResponse(ProjectConfig project)
     {
-        return new
+        return new ProjectConfigResponse
         {
-            id = project.Id,
-            projectId = project.ProjectId,
-            projectName = project.ProjectName,
-            knowledgeLookbackYears = project.KnowledgeLookbackYears,
-            similaritySearchLimit = project.SimilaritySearchLimit,
-            sendEmail = project.SendEmail,
-            poolingEnabled = project.PoolingEnabled,
-            emailRecipients = project.EmailRecipients,
-            applicationFilter = project.ApplicationFilter,
-            createdAt = project.CreatedAt
+            Id = project.Id,
+            ProjectId = project.ProjectId,
+            ProjectName = project.ProjectName,
+            KnowledgeLookbackYears = project.KnowledgeLookbackYears,
+            SimilaritySearchLimit = project.SimilaritySearchLimit,
+            SendEmail = project.SendEmail,
+            PoolingEnabled = project.PoolingEnabled,
+            EmailRecipients = project.EmailRecipients,
+            ApplicationFilter = project.ApplicationFilter,
+            CreatedAt = project.CreatedAt
         };
     }
 

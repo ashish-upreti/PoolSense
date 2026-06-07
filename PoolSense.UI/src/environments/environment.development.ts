@@ -1,6 +1,6 @@
 export const environment = {
   production: false,
-  appVersion: 'V1.0',
+  appVersion: 'V1.2',
   apiBaseUrl: '/api',
   ticketAutomation: {
     pollingEnabled: true,

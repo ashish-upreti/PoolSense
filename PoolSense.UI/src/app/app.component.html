@@ -38,7 +38,7 @@
         <p class="panel-kicker">Intel Active Directory</p>
         <h1 class="brand-title"><span class="brand-title-primary">Pool</span><span class="brand-title-accent">Sense</span></h1>
         <p class="workspace-copy">Detect. Diagnose. Resolve.</p>
-        <p class="helper-text">Version {{ appVersion }}</p>
+        <p class="helper-text">{{ appVersion }}</p>
       </div>
 
       <div class="auth-form-grid">
@@ -162,7 +162,7 @@
           <p class="panel-kicker">FSMS</p>
           <h1 class="brand-title"><span class="brand-title-primary">Pool</span><span class="brand-title-accent">Sense</span></h1>
           <p class="workspace-copy">Detect. Diagnose. Resolve.</p>
-          <p class="helper-text">Version {{ appVersion }}</p>
+          <p class="helper-text">{{ appVersion }}</p>
         </div>
         <div class="workspace-actions">
           <div class="workspace-banner">
@@ -422,26 +422,27 @@
               </div>
             </div>
 
-            <div class="project-form-grid">
-              <label class="field-group">
+            <div class="project-form-grid application-level-grid">
+              <label class="field-group application-level-item">
                 <span class="field-label">Poll Interval Seconds</span>
                 <input class="field-input" type="number" name="masterPollIntervalSeconds" min="10" max="3600" [(ngModel)]="ticketAutomationForm.pollIntervalSeconds" [disabled]="isTicketAutomationSaving" />
                 <span class="field-note">Allowed range: 10 to 3600 seconds.</span>
               </label>
 
-              <div class="field-group">
+              <div class="field-group application-level-item">
+                <span class="field-label">Pooling Enabled</span>
+                <label class="toggle-card application-level-toggle">
+                  <input type="checkbox" name="masterPollingEnabled" [(ngModel)]="ticketAutomationForm.pollingEnabled" [disabled]="isTicketAutomationSaving" />
+                  <span><strong>Master Polling Enabled</strong><small>Pause or resume background polling for all applications.</small></span>
+                </label>
+              </div>
+
+              <div class="field-group application-level-item">
                 <span class="field-label">Read-only context</span>
-                <div class="toggle-card">
+                <div class="toggle-card application-level-context">
                   <span><strong>{{ ticketAutomationSettings.email.deliveryMode }}</strong><small>{{ appSettings.ticketAutomation.sourceDatabaseName }} · Closed={{ ticketAutomationSettings.closedStatusName }} · New={{ ticketAutomationSettings.newStatusName }}</small></span>
                 </div>
               </div>
-            </div>
-
-            <div class="toggle-row">
-              <label class="toggle-card">
-                <input type="checkbox" name="masterPollingEnabled" [(ngModel)]="ticketAutomationForm.pollingEnabled" [disabled]="isTicketAutomationSaving" />
-                <span><strong>Master Polling Enabled</strong><small>Pause or resume background polling for all applications.</small></span>
-              </label>
             </div>
 
             <div class="composer-footer">
