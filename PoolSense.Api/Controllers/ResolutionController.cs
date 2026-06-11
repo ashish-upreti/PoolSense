@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using PoolSense.Api.Models;
 using PoolSense.Api.Orchestration;
 using PoolSense.Application.Models;
+using System.Security.Authentication;
 
 namespace PoolSense.Api.Controllers;
 
@@ -45,7 +46,29 @@ public class ResolutionController : ControllerBase
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"An error occurred while processing the ticket: {ex.Message}");
+            return StatusCode(500, $"An error occurred while processing the ticket: {GetClientErrorMessage(ex)}");
         }
+    }
+
+    private static string GetClientErrorMessage(Exception exception)
+    {
+        var innermostException = GetInnermostException(exception);
+        if (innermostException is AuthenticationException)
+        {
+            return $"The AI service TLS certificate could not be validated by this server. Inner error: {innermostException.Message}";
+        }
+
+        return exception.Message;
+    }
+
+    private static Exception GetInnermostException(Exception exception)
+    {
+        var current = exception;
+        while (current.InnerException is not null)
+        {
+            current = current.InnerException;
+        }
+
+        return current;
     }
 }

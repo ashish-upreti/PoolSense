@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using PoolSense.Api.Models;
 using PoolSense.Api.Services;
 
@@ -9,10 +11,17 @@ namespace PoolSense.Api.Controllers;
 public sealed class SettingsController : ControllerBase
 {
     private readonly ITicketAutomationSettingsProvider _settingsProvider;
+    private readonly IConfiguration _configuration;
+    private readonly IWebHostEnvironment _environment;
 
-    public SettingsController(ITicketAutomationSettingsProvider settingsProvider)
+    public SettingsController(
+        ITicketAutomationSettingsProvider settingsProvider,
+        IConfiguration configuration,
+        IWebHostEnvironment environment)
     {
         _settingsProvider = settingsProvider;
+        _configuration = configuration;
+        _environment = environment;
     }
 
     [HttpGet("ticket-automation")]
@@ -21,12 +30,19 @@ public sealed class SettingsController : ControllerBase
         try
         {
             var settings = await _settingsProvider.GetAsync(cancellationToken);
-            return Ok(ToResponse(settings));
+            return Ok(ToResponse(settings, GetDeploymentInfo()));
         }
         catch (Exception ex)
         {
             return StatusCode(500, $"An error occurred while retrieving ticket automation settings: {ex.Message}");
         }
+    }
+
+    [AllowAnonymous]
+    [HttpGet("deployment")]
+    public IActionResult GetDeployment()
+    {
+        return Ok(GetDeploymentInfo());
     }
 
     [HttpPut("ticket-automation")]
@@ -49,7 +65,7 @@ public sealed class SettingsController : ControllerBase
             var effectiveSettings = await _settingsProvider.GetAsync(cancellationToken);
             effectiveSettings.PollingEnabled = savedSettings.PollingEnabled;
             effectiveSettings.PollIntervalSeconds = savedSettings.PollIntervalSeconds;
-            return Ok(ToResponse(effectiveSettings));
+            return Ok(ToResponse(effectiveSettings, GetDeploymentInfo()));
         }
         catch (Exception ex)
         {
@@ -57,10 +73,41 @@ public sealed class SettingsController : ControllerBase
         }
     }
 
-    private static object ToResponse(Configuration.TicketAutomationSettings settings)
+    private object GetDeploymentInfo()
+    {
+        var environmentName = _environment.EnvironmentName;
+        return new
+        {
+            environmentName,
+            environmentLabel = _environment.IsDevelopment() ? "DEV" : "PROD",
+            machineName = Environment.MachineName,
+            poolSenseDatabaseName = GetDatabaseName(_configuration.GetConnectionString("PoolSenseSqlServer")),
+            ticketSourceDatabaseName = GetDatabaseName(_configuration.GetConnectionString("TicketSourceSqlServer"))
+        };
+    }
+
+    private static string GetDatabaseName(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return new SqlConnectionStringBuilder(connectionString).InitialCatalog;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static object ToResponse(Configuration.TicketAutomationSettings settings, object deploymentInfo)
     {
         return new
         {
+            deployment = deploymentInfo,
             pollingEnabled = settings.PollingEnabled,
             pollIntervalSeconds = settings.PollIntervalSeconds,
             closedStatusName = settings.ClosedStatusName,

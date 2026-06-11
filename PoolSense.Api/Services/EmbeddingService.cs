@@ -53,21 +53,23 @@ public class EmbeddingService : IEmbeddingService
     /// <returns>The embedding vector.</returns>
     public async Task<float[]> GenerateEmbedding(string text)
     {
-        _logger.LogInformation("Generating embedding for text length {TextLength}.", text?.Length ?? 0);
+        ArgumentNullException.ThrowIfNull(text);
+
+        _logger.LogInformation("Generating embedding for text length {TextLength}.", text.Length);
         var stopwatch = Stopwatch.StartNew();
         var options = new EmbeddingGenerationOptions { Dimensions = 1536 };
         try
         {
             var embedding = await SemanticKernelRetryHelper.ExecuteWithDeploymentRetryAsync(() => _embeddingGenerator.GenerateAsync(text, options));
             var vector = embedding.Vector.ToArray();
-            await TryLogUsageAsync(text ?? string.Empty, embedding, vector.Length, stopwatch, success: true, errorMessage: string.Empty);
+            await TryLogUsageAsync(text, embedding, vector.Length, stopwatch, success: true, errorMessage: string.Empty);
             _logger.LogInformation("Embedding generated with vector size {VectorSize}.", vector.Length);
             return vector;
         }
         catch (Exception ex)
         {
             await TryLogUsageAsync(
-                text ?? string.Empty,
+                text,
                 metadata: null,
                 vectorDimensions: null,
                 stopwatch,

@@ -5,6 +5,7 @@ import {
   ApplicationFeedbackRequest,
   AuthenticatedUser,
   ApiService,
+  DeploymentInfo,
   IngestionStatus,
   ProjectConfig,
   ProjectConfigInput,
@@ -205,6 +206,7 @@ export class AppComponent implements OnInit {
   isApplicationFeedbackSaving = false
   ticketAutomationSettings = defaultTicketAutomationSettings
   ticketAutomationForm = createTicketAutomationSettingsForm()
+  deploymentInfo: DeploymentInfo | null = null
   isTicketAutomationSaving = false
   feedbackStateByMessageId: Record<number, FeedbackState> = {}
 
@@ -227,6 +229,29 @@ export class AppComponent implements OnInit {
 
   get statusByProjectId() {
     return new Map(this.ingestionStatuses.map((status) => [status.projectId, status]))
+  }
+
+  get deploymentLabel() {
+    return this.resolvedDeploymentInfo?.environmentLabel || (this.appSettings.production ? 'PROD' : 'DEV')
+  }
+
+  get deploymentContextLabel() {
+    const deployment = this.resolvedDeploymentInfo
+    if (!deployment) {
+      return this.appSettings.ticketAutomation.sourceDatabaseName
+    }
+
+    return [deployment.poolSenseDatabaseName || deployment.ticketSourceDatabaseName]
+      .filter((value) => value && value.trim().length > 0)
+      .join(' · ')
+  }
+
+  get ticketSourceDatabaseName() {
+    return this.resolvedDeploymentInfo?.ticketSourceDatabaseName || this.appSettings.ticketAutomation.sourceDatabaseName
+  }
+
+  private get resolvedDeploymentInfo() {
+    return this.ticketAutomationSettings.deployment ?? this.deploymentInfo
   }
 
   get confidence() {
@@ -403,6 +428,7 @@ export class AppComponent implements OnInit {
       this.projects = loadedProjects
       this.ingestionStatuses = loadedStatuses
       this.ticketAutomationSettings = loadedTicketAutomationSettings
+      this.deploymentInfo = loadedTicketAutomationSettings.deployment ?? this.deploymentInfo
       this.ticketAutomationForm = createTicketAutomationSettingsForm(loadedTicketAutomationSettings)
     } catch (requestError) {
       this.projectError = requestError instanceof Error ? requestError.message : 'Unable to load application configuration data.'
@@ -647,6 +673,7 @@ export class AppComponent implements OnInit {
     this.isSessionLoading = true
 
     try {
+      this.deploymentInfo = await this.api.getDeploymentInfo()
       this.currentUser = await this.api.getSession()
       if (this.currentUser) {
         this.applyAuthenticatedUserToFeedbackForm(this.currentUser)

@@ -38,7 +38,7 @@
         <p class="panel-kicker">Intel Active Directory</p>
         <h1 class="brand-title"><span class="brand-title-primary">Pool</span><span class="brand-title-accent">Sense</span></h1>
         <p class="workspace-copy">Detect. Diagnose. Resolve.</p>
-        <p class="helper-text">{{ appVersion }}</p>
+        <p class="helper-text">{{ appVersion }} · {{ deploymentLabel }}</p>
       </div>
 
       <div class="auth-form-grid">
@@ -149,7 +149,7 @@
         </div>
         <div class="workspace-banner">
           <span class="workspace-dot"></span>
-          <span>{{ ticketAutomationSettings.email.deliveryMode }} · {{ ticketAutomationSettings.pollIntervalSeconds }}s polling · {{ ticketAutomationSettings.pollingEnabled ? 'Enabled' : 'Paused' }}</span>
+          <span>{{ deploymentLabel }} · {{ ticketAutomationSettings.email.deliveryMode }} · {{ ticketAutomationSettings.pollIntervalSeconds }}s polling · {{ ticketAutomationSettings.pollingEnabled ? 'Enabled' : 'Paused' }}</span>
         </div>
         <button type="button" class="feedback-button feedback-button-secondary" (click)="handleLogout()">Sign Out</button>
       </div>
@@ -162,7 +162,7 @@
           <p class="panel-kicker">FSMS</p>
           <h1 class="brand-title"><span class="brand-title-primary">Pool</span><span class="brand-title-accent">Sense</span></h1>
           <p class="workspace-copy">Detect. Diagnose. Resolve.</p>
-          <p class="helper-text">{{ appVersion }}</p>
+          <p class="helper-text">{{ appVersion }} · {{ deploymentLabel }} · {{ deploymentContextLabel }}</p>
         </div>
         <div class="workspace-actions">
           <div class="workspace-banner">
@@ -405,7 +405,7 @@
             </div>
             <div class="workspace-banner">
               <span class="workspace-dot"></span>
-              <span>{{ ticketAutomationSettings.email.deliveryMode }} · {{ ticketAutomationSettings.pollIntervalSeconds }}s polling · {{ ticketAutomationSettings.pollingEnabled ? 'Enabled' : 'Paused' }} · {{ appSettings.ticketAutomation.sourceDatabaseName }}</span>
+              <span>{{ deploymentLabel }} · {{ ticketAutomationSettings.email.deliveryMode }} · {{ ticketAutomationSettings.pollIntervalSeconds }}s polling · {{ ticketAutomationSettings.pollingEnabled ? 'Enabled' : 'Paused' }} · {{ ticketSourceDatabaseName }}</span>
             </div>
           </div>
         </div>
@@ -440,7 +440,7 @@
               <div class="field-group application-level-item">
                 <span class="field-label">Read-only context</span>
                 <div class="toggle-card application-level-context">
-                  <span><strong>{{ ticketAutomationSettings.email.deliveryMode }}</strong><small>{{ appSettings.ticketAutomation.sourceDatabaseName }} · Closed={{ ticketAutomationSettings.closedStatusName }} · New={{ ticketAutomationSettings.newStatusName }}</small></span>
+                  <span><strong>{{ ticketAutomationSettings.email.deliveryMode }}</strong><small>{{ deploymentLabel }} · {{ ticketSourceDatabaseName }} · Closed={{ ticketAutomationSettings.closedStatusName }} · New={{ ticketAutomationSettings.newStatusName }}</small></span>
                 </div>
               </div>
             </div>

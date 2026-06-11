@@ -200,18 +200,22 @@ public sealed class ActiveDirectoryAuthService : IActiveDirectoryAuthService
 
     private bool CheckGroupAccess(IReadOnlyList<string> userGroups)
     {
+        var allowedGroups = _options.AllowedGroups
+            .Where(group => !string.IsNullOrWhiteSpace(group))
+            .ToArray();
+
+        if (allowedGroups.Length == 0)
+        {
+            return true;
+        }
+
         if (userGroups.Count == 0)
         {
             return false;
         }
 
-        foreach (var allowedGroup in _options.AllowedGroups)
+        foreach (var allowedGroup in allowedGroups)
         {
-            if (string.IsNullOrWhiteSpace(allowedGroup))
-            {
-                continue;
-            }
-
             foreach (var userGroup in userGroups)
             {
                 if (string.Equals(userGroup, allowedGroup, StringComparison.OrdinalIgnoreCase)

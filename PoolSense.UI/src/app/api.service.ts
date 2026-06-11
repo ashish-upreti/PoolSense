@@ -59,6 +59,7 @@ export interface ProjectConfigInput {
 }
 
 export interface TicketAutomationSettings {
+  deployment?: DeploymentInfo
   pollingEnabled: boolean
   pollIntervalSeconds: number
   closedStatusName: string
@@ -73,6 +74,14 @@ export interface TicketAutomationSettings {
     timeoutMs: number
     databaseMailProfile: string
   }
+}
+
+export interface DeploymentInfo {
+  environmentName: string
+  environmentLabel: string
+  machineName: string
+  poolSenseDatabaseName: string
+  ticketSourceDatabaseName: string
 }
 
 export interface TicketAutomationSettingsInput {
@@ -206,6 +215,18 @@ export class ApiService {
     }
 
     return (await response.json()) as TicketAutomationSettings
+  }
+
+  async getDeploymentInfo(): Promise<DeploymentInfo | null> {
+    const response = await fetch(this.apiUrl('/settings/deployment'), {
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    return (await response.json()) as DeploymentInfo
   }
 
   async updateTicketAutomationSettings(settings: TicketAutomationSettingsInput): Promise<TicketAutomationSettings> {
