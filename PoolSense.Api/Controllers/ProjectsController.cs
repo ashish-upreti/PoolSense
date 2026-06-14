@@ -13,6 +13,7 @@ namespace PoolSense.Api.Controllers;
 public class ProjectsController : ControllerBase
 {
     private readonly IProjectRepository _projectRepository;
+    private readonly ITicketSourceApplicationRepository _ticketSourceApplicationRepository;
 
     /// <summary>
     /// Request payload used to update email delivery settings for one application mapping.
@@ -90,9 +91,13 @@ public class ProjectsController : ControllerBase
     /// Initializes a new instance of the <see cref="ProjectsController"/> class.
     /// </summary>
     /// <param name="projectRepository">The repository used to manage project registrations.</param>
-    public ProjectsController(IProjectRepository projectRepository)
+    /// <param name="ticketSourceApplicationRepository">The repository used to write back the PoolSense flag to tbl_Application.</param>
+    public ProjectsController(
+        IProjectRepository projectRepository,
+        ITicketSourceApplicationRepository ticketSourceApplicationRepository)
     {
         _projectRepository = projectRepository;
+        _ticketSourceApplicationRepository = ticketSourceApplicationRepository;
     }
 
     /// <summary>
@@ -212,9 +217,14 @@ public class ProjectsController : ControllerBase
                 : request.ApplicationFilter.Trim();
 
             var savedProject = await _projectRepository.UpdateProjectAsync(updatedProject, cancellationToken);
-            return savedProject is null
-                ? NotFound($"Project '{projectId}' was not found.")
-                : Ok(ToResponse(savedProject));
+            if (savedProject is null)
+                return NotFound($"Project '{projectId}' was not found.");
+
+            if (!string.IsNullOrWhiteSpace(savedProject.ApplicationFilter))
+                await _ticketSourceApplicationRepository.UpdatePoolSenseFlagAsync(
+                    savedProject.ApplicationFilter, savedProject.PoolingEnabled, cancellationToken);
+
+            return Ok(ToResponse(savedProject));
         }
         catch (Exception ex)
         {
@@ -359,9 +369,14 @@ public class ProjectsController : ControllerBase
                 existingProject.PoolingEnabled = request.PoolingEnabled;
 
                 var updatedProject = await _projectRepository.UpdateProjectAsync(existingProject, cancellationToken);
-                return updatedProject is null
-                    ? StatusCode(500, $"Project with ApplicationName '{request.ApplicationName}' could not be updated.")
-                    : Ok(ToResponse(updatedProject));
+                if (updatedProject is null)
+                    return StatusCode(500, $"Project with ApplicationName '{request.ApplicationName}' could not be updated.");
+
+                if (!string.IsNullOrWhiteSpace(updatedProject.ApplicationFilter))
+                    await _ticketSourceApplicationRepository.UpdatePoolSenseFlagAsync(
+                        updatedProject.ApplicationFilter, updatedProject.PoolingEnabled, cancellationToken);
+
+                return Ok(ToResponse(updatedProject));
             }
 
             var projectId = await CreateUniqueProjectIdAsync(normalizedApplicationName, cancellationToken);
@@ -381,6 +396,11 @@ public class ProjectsController : ControllerBase
             };
 
             var createdProject = await _projectRepository.CreateProjectAsync(newProject, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(createdProject.ApplicationFilter))
+                await _ticketSourceApplicationRepository.UpdatePoolSenseFlagAsync(
+                    createdProject.ApplicationFilter, createdProject.PoolingEnabled, cancellationToken);
+
             return Ok(ToResponse(createdProject));
         }
         catch (Exception ex)

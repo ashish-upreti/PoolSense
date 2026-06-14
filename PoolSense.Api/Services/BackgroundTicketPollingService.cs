@@ -79,6 +79,11 @@ public class BackgroundTicketPollingService : BackgroundService
     private async Task PollOnceAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceScopeFactory.CreateScope();
+
+        // Sync PoolSense flag from tbl_Application into project_configs before processing tickets.
+        var applicationSyncService = scope.ServiceProvider.GetRequiredService<IApplicationSyncService>();
+        await applicationSyncService.SyncApplicationsAsync(cancellationToken);
+
         var settingsProvider = scope.ServiceProvider.GetRequiredService<ITicketAutomationSettingsProvider>();
         var settings = await settingsProvider.GetAsync(cancellationToken);
         var projectRepository = scope.ServiceProvider.GetRequiredService<IProjectRepository>();

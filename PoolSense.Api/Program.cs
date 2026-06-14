@@ -170,12 +170,14 @@ builder.Services.AddScoped<ITicketKnowledgeEmbeddingStore>(sp => sp.GetRequiredS
 builder.Services.AddScoped<IFeedbackRepository, FeedbackRepository>();
 builder.Services.AddScoped<IFailurePatternRepository, FailurePatternRepository>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
+builder.Services.AddScoped<ITicketSourceApplicationRepository, TicketSourceApplicationRepository>();
 builder.Services.AddScoped<IIngestionStatusRepository, IngestionStatusRepository>();
 builder.Services.AddScoped<IProcessedSourceEventRepository, ProcessedSourceEventRepository>();
 builder.Services.AddScoped<ITicketAutomationSettingsRepository, TicketAutomationSettingsRepository>();
 builder.Services.AddScoped<ITicketAutomationSettingsProvider, TicketAutomationSettingsProvider>();
 
 builder.Services.AddScoped<SqlTicketConnector>();
+builder.Services.AddScoped<IApplicationSyncService, ApplicationSyncService>();
 builder.Services.AddHttpClient<ApiTicketConnector>();
 builder.Services.AddHttpClient("AzureOpenAI")
     .ConfigurePrimaryHttpMessageHandler(sp =>

@@ -240,7 +240,8 @@ public class ProjectRepository : IProjectRepository
         command.Parameters.AddWithValue("@poolingEnabled", projectConfig.PoolingEnabled);
         command.Parameters.AddWithValue("@emailRecipients", projectConfig.EmailRecipients ?? string.Empty);
         command.Parameters.AddWithValue("@ticketSourceType", projectConfig.TicketSourceType ?? "sql");
-        command.Parameters.AddWithValue("@connectionString", projectConfig.ConnectionString ?? string.Empty);
+        command.Parameters.AddWithValue("@connectionString",
+            string.IsNullOrEmpty(projectConfig.ConnectionString) ? DBNull.Value : (object)projectConfig.ConnectionString);
         command.Parameters.AddWithValue("@knowledgeSources", JsonSerializer.Serialize(projectConfig.KnowledgeSources ?? []));
         command.Parameters.AddWithValue("@applicationFilter", projectConfig.ApplicationFilter ?? string.Empty);
     }
