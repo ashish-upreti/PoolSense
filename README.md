@@ -85,8 +85,6 @@ Install these before running locally:
 
 The API reads settings from [PoolSense.Api/appsettings.json](PoolSense.Api/appsettings.json), [PoolSense.Api/appsettings.Development.json](PoolSense.Api/appsettings.Development.json), user secrets, and environment variables.
 
-Use [PoolSense.Api/appsettings.example.json](PoolSense.Api/appsettings.example.json) as the checked-in baseline template.
-
 ### Important Configuration Sections
 
 - `AiSettings`
