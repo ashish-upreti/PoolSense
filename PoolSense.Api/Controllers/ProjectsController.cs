@@ -14,6 +14,7 @@ public class ProjectsController : ControllerBase
 {
     private readonly IProjectRepository _projectRepository;
     private readonly ITicketSourceApplicationRepository _ticketSourceApplicationRepository;
+    private readonly ILogger<ProjectsController> _logger;
 
     /// <summary>
     /// Request payload used to update email delivery settings for one application mapping.
@@ -92,12 +93,15 @@ public class ProjectsController : ControllerBase
     /// </summary>
     /// <param name="projectRepository">The repository used to manage project registrations.</param>
     /// <param name="ticketSourceApplicationRepository">The repository used to write back the PoolSense flag to tbl_Application.</param>
+    /// <param name="logger">Logger for this controller.</param>
     public ProjectsController(
         IProjectRepository projectRepository,
-        ITicketSourceApplicationRepository ticketSourceApplicationRepository)
+        ITicketSourceApplicationRepository ticketSourceApplicationRepository,
+        ILogger<ProjectsController> logger)
     {
         _projectRepository = projectRepository;
         _ticketSourceApplicationRepository = ticketSourceApplicationRepository;
+        _logger = logger;
     }
 
     /// <summary>
@@ -220,9 +224,7 @@ public class ProjectsController : ControllerBase
             if (savedProject is null)
                 return NotFound($"Project '{projectId}' was not found.");
 
-            if (!string.IsNullOrWhiteSpace(savedProject.ApplicationFilter))
-                await _ticketSourceApplicationRepository.UpdatePoolSenseFlagAsync(
-                    savedProject.ApplicationFilter, savedProject.PoolingEnabled, cancellationToken);
+            await TryUpdateTicketSourcePoolSenseFlagAsync(savedProject.ApplicationFilter, savedProject.PoolingEnabled, cancellationToken);
 
             return Ok(ToResponse(savedProject));
         }
@@ -372,9 +374,7 @@ public class ProjectsController : ControllerBase
                 if (updatedProject is null)
                     return StatusCode(500, $"Project with ApplicationName '{request.ApplicationName}' could not be updated.");
 
-                if (!string.IsNullOrWhiteSpace(updatedProject.ApplicationFilter))
-                    await _ticketSourceApplicationRepository.UpdatePoolSenseFlagAsync(
-                        updatedProject.ApplicationFilter, updatedProject.PoolingEnabled, cancellationToken);
+                await TryUpdateTicketSourcePoolSenseFlagAsync(updatedProject.ApplicationFilter, updatedProject.PoolingEnabled, cancellationToken);
 
                 return Ok(ToResponse(updatedProject));
             }
@@ -397,9 +397,7 @@ public class ProjectsController : ControllerBase
 
             var createdProject = await _projectRepository.CreateProjectAsync(newProject, cancellationToken);
 
-            if (!string.IsNullOrWhiteSpace(createdProject.ApplicationFilter))
-                await _ticketSourceApplicationRepository.UpdatePoolSenseFlagAsync(
-                    createdProject.ApplicationFilter, createdProject.PoolingEnabled, cancellationToken);
+            await TryUpdateTicketSourcePoolSenseFlagAsync(createdProject.ApplicationFilter, createdProject.PoolingEnabled, cancellationToken);
 
             return Ok(ToResponse(createdProject));
         }
@@ -440,6 +438,25 @@ public class ProjectsController : ControllerBase
         }
 
         return $"project-{Guid.NewGuid():N}"[..15];
+    }
+
+    private async Task TryUpdateTicketSourcePoolSenseFlagAsync(string applicationFilter, bool poolingEnabled, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(applicationFilter))
+        {
+            _logger.LogWarning("TicketSource PoolSense flag not updated: ApplicationFilter is empty.");
+            return;
+        }
+
+        try
+        {
+            await _ticketSourceApplicationRepository.UpdatePoolSenseFlagAsync(applicationFilter, poolingEnabled, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Log but do not propagate — project_configs is already saved successfully.
+            _logger.LogError(ex, "Failed to update PoolSense flag in tbl_Application for '{ApplicationFilter}'. The project_configs record was saved.", applicationFilter);
+        }
     }
 
     /// <summary>

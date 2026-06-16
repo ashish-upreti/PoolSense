@@ -15,6 +15,7 @@ At a high level, PoolSense does four things:
 - Similar-incident retrieval using stored embeddings and cosine similarity search over SQL Server-backed knowledge rows.
 - AI-generated root cause, resolution, reasoning, confidence, and failure-pattern enrichment.
 - Background polling of a SQL Server ticket source for new tickets and closed-ticket knowledge ingestion.
+- Application sync from `dbo.tbl_Application.PoolSense` into `dbo.project_configs` before each polling iteration.
 - Project-based application scoping through `project_configs` and application filters.
 - UI-based application administration for project rows, search scope, ingestion progress, and email settings.
 - Dedicated application feedback capture with submitter name, email, and stored comments for the overall product.
@@ -22,6 +23,7 @@ At a high level, PoolSense does four things:
 - Operational insight endpoints for failures, systems, components, and timelines.
 - Recommendation email delivery through SMTP or SQL Server Database Mail.
 - External API support for toggling `send_email` and updating semicolon-separated Lifeguard email recipients by `application_filter`.
+- Bidirectional PoolSense flag updates: disabling or enabling a project in the PoolSense UI writes `PoolSense = 0/1` back to the ticket-source `dbo.tbl_Application` row.
 - SQL Server-backed interaction logs, application logs, and LLM token usage tracking.
 
 ## Solution Layout
@@ -32,9 +34,7 @@ PoolSense/
 ├── README.md
 ├── database/
 │   ├── sqlserver-bootstrap.sql
-│   ├── testingSQL.sql
-│   ├── postgres-bootstrap.sql
-│   └── testingPGSQL.sql
+│   └── testingSQL.sql
 ├── PoolSense.Api/
 ├── PoolSense.Application/
 ├── PoolSense.Domain/
@@ -57,7 +57,7 @@ PoolSense/
   Present as solution layers and available for future domain/infrastructure expansion.
 
 - `database`
-  Contains bootstrap and smoke-test SQL scripts. The active persistence path in the application is SQL Server, and [database/sqlserver-bootstrap.sql](database/sqlserver-bootstrap.sql) is the relevant schema bootstrap script.
+  Contains SQL Server bootstrap and smoke-test scripts. The active persistence path in the application is SQL Server, and [database/sqlserver-bootstrap.sql](database/sqlserver-bootstrap.sql) is the relevant schema bootstrap script.
 
 ## Tech Stack
 
@@ -79,7 +79,7 @@ Install these before running locally:
 - Access to an Azure OpenAI-compatible endpoint for chat and embeddings
 - Access to SQL Server instances for:
   - `PoolSenseSqlServer` — PoolSense persistence, logging, project configuration, and Database Mail delivery when enabled
-  - `TicketSourceSqlServer` — source ticket database used by polling and ingestion
+  - `TicketSourceSqlServer` — source ticket database used by polling, ingestion, application sync, and PoolSense flag write-back
 
 ## Configuration
 
@@ -97,7 +97,10 @@ The API reads settings from [PoolSense.Api/appsettings.json](PoolSense.Api/appse
 
 - `ConnectionStrings`
   - `PoolSenseSqlServer` — PoolSense persistence database
-  - `TicketSourceSqlServer` — source ticket database used by the polling connector
+  - `TicketSourceSqlServer` — source ticket database used by polling plus `dbo.tbl_Application.PoolSense` updates
+
+- `ApplicationSync`
+  - `BaseRecipients` — semicolon-separated default recipients added only when a new project config is auto-created from `dbo.tbl_Application.PoolSense = 1`
 
 - `Cors`
   - `AllowedOrigins` — Angular or hosted UI origins allowed to send credentialed API requests
@@ -430,6 +433,24 @@ The final similar-ticket count comes from:
 
 Project configuration currently constrains `SimilaritySearchLimit` to `1..20`.
 
+## Application Sync And PoolSense Flag Behavior
+
+Before every polling iteration, [PoolSense.Api/Services/ApplicationSyncService.cs](PoolSense.Api/Services/ApplicationSyncService.cs) reads `dbo.tbl_Application` from `TicketSourceSqlServer` and synchronizes rows into `dbo.project_configs` in the PoolSense SQL Server database.
+
+Current behavior:
+
+- `PoolSense = 1` and no matching project config exists: create a `project_configs` row with `project_id`, `project_name`, and `application_filter` set to the application name.
+- New auto-created rows use default `knowledge_lookback_years = 2`, `similarity_search_limit = 5`, `send_email = true`, `pooling_enabled = true`, `ticket_source_type = sql`, and an empty `connection_string`.
+- Initial `email_recipients` for auto-created rows are built from:
+  - `ApplicationSync:BaseRecipients`
+  - `dbo.v_ApplicationLifeguards.EmailAddress` for the application
+  - `dbo.v_Application.DefaultEmailCC` for the application
+- `PoolSense = 1` and a matching config already exists: ensure `send_email = true` and `pooling_enabled = true`; existing recipients are not overwritten.
+- `PoolSense = 0` and a matching config exists: set `send_email = false` and `pooling_enabled = false`; rows are not deleted.
+- Updating a project through the PoolSense UI writes the saved `pooling_enabled` value back to `dbo.tbl_Application.PoolSense` using `application_filter` as the exact application match.
+
+The ticket-source login therefore needs read access to the ticket views/tables used by polling and application sync, plus update permission on `dbo.tbl_Application.PoolSense` if UI write-back is enabled.
+
 ### 7. How Similarity Feeds Resolution
 
 The final ranked similar incidents are passed to the resolution agent in order, highest similarity first.
@@ -480,10 +501,11 @@ This means the search embedding and the storage embedding are related but not id
 3. The API orchestrates ticket analysis, retrieval, resolution generation, and failure-pattern reasoning.
 4. Similar incidents and context are pulled from persisted knowledge in SQL Server.
 5. The UI renders the response and accepts operator feedback.
-6. Background polling continuously checks the ticket source for:
+6. Background polling first syncs `dbo.tbl_Application.PoolSense` into `dbo.project_configs`.
+7. Background polling continuously checks the ticket source for:
    - closed tickets to ingest as knowledge
    - new tickets to evaluate for recommendation email delivery
-7. Project configuration and ingestion status drive application scoping and operational behavior.
+8. Project configuration and ingestion status drive application scoping and operational behavior.
 
 ## Key Files
 
@@ -492,8 +514,10 @@ This means the search embedding and the storage embedding are related but not id
 | [PoolSense.Api/Program.cs](PoolSense.Api/Program.cs) | Service registration, Swagger, CORS, and app pipeline. |
 | [PoolSense.Api/Controllers](PoolSense.Api/Controllers) | HTTP endpoints for ticket workflow, projects, ingestion, feedback, and insights. |
 | [PoolSense.Api/Services/BackgroundTicketPollingService.cs](PoolSense.Api/Services/BackgroundTicketPollingService.cs) | Scheduled polling, ingestion, and recommendation-email workflow. |
+| [PoolSense.Api/Services/ApplicationSyncService.cs](PoolSense.Api/Services/ApplicationSyncService.cs) | Synchronizes `tbl_Application.PoolSense` into project configuration before polling. |
 | [PoolSense.Api/Services/DatabaseMailEmailService.cs](PoolSense.Api/Services/DatabaseMailEmailService.cs) | SQL Server Database Mail delivery via `PoolSenseSqlServer`. |
 | [PoolSense.Api/Data/ProjectRepository.cs](PoolSense.Api/Data/ProjectRepository.cs) | SQL Server persistence for `project_configs`. |
+| [PoolSense.Api/Data/TicketSourceApplicationRepository.cs](PoolSense.Api/Data/TicketSourceApplicationRepository.cs) | Writes project `pooling_enabled` changes back to `tbl_Application.PoolSense`. |
 | [PoolSense.UI/src/app/app.component.ts](PoolSense.UI/src/app/app.component.ts) | Angular UI state and interaction orchestration. |
 | [PoolSense.UI/src/app/app.component.html](PoolSense.UI/src/app/app.component.html) | Angular template for the operator console and project admin. |
 | [PoolSense.UI/src/app/api.service.ts](PoolSense.UI/src/app/api.service.ts) | Frontend fetch wrapper for PoolSense APIs. |
@@ -508,11 +532,11 @@ This means the search embedding and the storage embedding are related but not id
 - If project configuration does not load, confirm `dbo.project_configs` exists in the PoolSense database.
 - If ingestion status is empty or incorrect, confirm `dbo.ingestion_status` exists and the polling service is enabled.
 - If recommendation emails are not sent, verify project-level `Send Email`, semicolon-separated recipients, and the configured email delivery mode.
+- If disabling or enabling a project does not update `tbl_Application.PoolSense`, confirm `project_configs.application_filter` exactly matches `tbl_Application.Application`, and confirm the `TicketSourceSqlServer` login can update `dbo.tbl_Application.PoolSense`.
 - If `DeliveryMode = DatabaseMail`, verify the SQL Server Database Mail profile exists on `PoolSenseSqlServer` and is usable by the configured login.
 - If `dotnet build .\PoolSense.UI\PoolSense.UI.csproj` fails, confirm Node.js/npm are installed and frontend dependencies restore correctly.
 
 ## Notes
 
-- The active local UI dev server uses Angular, not React/Vite.
+- The active local UI dev server uses Angular.
 - The active persistence path is SQL Server.
-- The checked-in PostgreSQL scripts are no longer the primary runtime path for the current app configuration.

@@ -26,7 +26,7 @@ This document covers the most anticipated questions from senior management, tech
 ### Q: What is PoolSense?
 
 **A:** PoolSense is an AI-powered incident assistance system that automatically builds a knowledge base from historical closed tickets and uses it to recommend root causes and resolutions for 
-new incidents. It combines Azure OpenAI language models, vector-based similarity search (pgvector), and automated email recommendations to accelerate support triage and reduce dependence on 
+new incidents. It combines Azure OpenAI language models, SQL Server-backed embedding storage with cosine similarity search, and automated email recommendations to accelerate support triage and reduce dependence on 
 individual expert knowledge.
 
 ### Q: What problem does PoolSense solve?
@@ -105,7 +105,7 @@ This eliminates the manual investigation phase for known or similar issues and p
 
 **Flow 1 — Closed Ticket Knowledge Creation**
 ```
-SQL Source → Background Polling → AI Analysis → Embedding Generation → PostgreSQL Knowledge Base
+SQL Source → Background Polling → AI Analysis → Embedding Generation → SQL Server Knowledge Base
 ```
 Historical closed tickets are continuously polled, analyzed by AI agents, enriched with embeddings, and stored as structured knowledge. This builds the foundation for all downstream recommendations.
 
@@ -119,7 +119,7 @@ When a new ticket appears, the system searches the knowledge base, generates a r
 ```
 User enters problem → API processes query → Similarity Search → AI Resolution → UI displays results
 ```
-Any team member can open the React UI, describe an issue, and receive AI-generated suggestions along with similar historical incidents, confidence scores, and failure pattern metadata.
+Any team member can open the Angular UI, describe an issue, and receive AI-generated suggestions along with similar historical incidents, confidence scores, and failure pattern metadata.
 
 ### Q: What does the email recommendation look like?
 
@@ -147,16 +147,16 @@ Any team member can open the React UI, describe an issue, and receive AI-generat
 1. AI agents extract a structured problem statement, root cause, and resolution.
 2. A query variant generator creates 5 alternative search phrasings.
 3. An embedding is generated from the combined enriched text.
-4. The knowledge entry and failure pattern are persisted to PostgreSQL.
+4. The knowledge entry and failure pattern are persisted to the PoolSense SQL Server database.
 
 This means the knowledge base grows automatically as more tickets are closed — no manual curation required.
 
 ### Q: Can teams use this independently?
 
-**A:** Yes. PoolSense supports **multi-tenant project groups** via the `ProjectGroups` configuration. Each group has:
+**A:** Yes. PoolSense supports **multi-tenant project groups** via `project_configs`. Each configured project has:
 
-- A `GroupId` and `DisplayName` for UI selection.
-- An `ApplicationFilter` that scopes knowledge and search to specific application names (supports exact match and SQL LIKE patterns).
+- A `project_id` and `project_name` for UI selection.
+- An `application_filter` that scopes knowledge and search to specific application names (supports exact match and SQL LIKE patterns).
 
 Teams see only their own knowledge base while sharing the same platform infrastructure.
 
@@ -173,11 +173,11 @@ Teams see only their own knowledge base while sharing the same platform infrastr
 | **Backend API** | ASP.NET Core (.NET 9) | REST API, orchestration, hosted services |
 | **AI Orchestration** | Microsoft Semantic Kernel 1.73 | Agent coordination, prompt management |
 | **LLM** | Azure OpenAI (GPT chat + text-embedding-3-large) | Ticket analysis, resolution generation, embeddings |
-| **Knowledge Store** | PostgreSQL + pgvector | Vector similarity search, structured knowledge storage |
-| **Ticket Source** | SQL Server (read-only polling) | Source of historical and new ticket data |
-| **Frontend** | React 19 + Vite 8 + TypeScript 5 | Interactive operator workspace |
-| **Visualization** | Recharts | Telemetry and confidence charts |
-| **Email** | System.Net.Mail / SMTP | Automated recommendation delivery |
+| **Knowledge Store** | SQL Server | Structured knowledge, embeddings as JSON arrays, feedback, logs, project configs, and ingestion tracking |
+| **Ticket Source** | SQL Server | Source of historical/new ticket data plus `tbl_Application.PoolSense` application enablement flag |
+| **Frontend** | Angular 18 + TypeScript 5 | Interactive operator workspace |
+| **Visualization** | Angular templates and CSS | Telemetry, confidence, and insight presentation |
+| **Email** | System.Net.Mail / SMTP or SQL Server Database Mail | Automated recommendation delivery |
 
 ### Q: What does the architecture look like?
 
@@ -186,21 +186,23 @@ Teams see only their own knowledge base while sharing the same platform infrastr
 ```
 ┌──────────────────┐       ┌─────────────────────────────────────────┐
 │  SQL Server      │       │  PoolSense.Api (.NET 9)                │
-│  (Ticket Source) │──────▶│                                         │
+│  Ticket Source   │──────▶│                                         │
+│  tbl_Application │◀──────│  Application Sync + Flag Write-back     │
 └──────────────────┘       │  ┌─────────────────────────────┐       │
                            │  │ Background Polling Service   │       │
                            │  └──────────┬──────────────────┘       │
                            │             │                           │
+┌──────────────────┐       │  ┌──────────▼──────────────────┐       │
+│  Angular UI      │──────▶│  │ Ticket Workflow Orchestrator │       │
+│  (PoolSense.UI)  │       │  └──────────┬──────────────────┘       │
+└──────────────────┘       │             │                           │
                            │  ┌──────────▼──────────────────┐       │
-┌──────────────────┐       │  │ Ticket Workflow Orchestrator │       │
-│  React UI        │──────▶│  └──────────┬──────────────────┘       │
-│  (PoolSense.UI) │       │             │                           │
-└──────────────────┘       │  ┌──────────▼──────────────────┐       │
                            │  │ AI Agents (Semantic Kernel)  │       │
                            │  │  • TicketAnalyzerAgent       │       │
                            │  │  • ResolutionAgent           │       │
                            │  │  • FailurePatternAgent       │       │
                            │  │  • QueryVariantGenerator     │       │
+                           │  │  • JSON Sanitizer            │       │
                            │  └──────────┬──────────────────┘       │
                            │             │                           │
                            │  ┌──────────▼──────────┐               │
@@ -209,12 +211,13 @@ Teams see only their own knowledge base while sharing the same platform infrastr
                            │  └─────────────────────┘               │
                            │             │                           │
                            │  ┌──────────▼──────────┐               │
-                           │  │ PostgreSQL + pgvector│               │
-                           │  │ (Knowledge Base)     │               │
+                           │  │ SQL Server           │               │
+                           │  │ PoolSense Store      │               │
                            │  └─────────────────────┘               │
                            │             │                           │
                            │  ┌──────────▼──────────┐               │
-                           │  │ Email Service (SMTP) │               │
+                           │  │ Email Service        │               │
+                           │  │ SMTP / Database Mail │               │
                            │  └─────────────────────┘               │
                            └─────────────────────────────────────────┘
 ```
@@ -225,8 +228,8 @@ Teams see only their own knowledge base while sharing the same platform infrastr
 
 | Database | Role | Access |
 |----------|------|--------|
-| **PostgreSQL** (PoolSense) | Knowledge base, failure patterns, deduplication tracking, project configs, feedback logs, and interaction logs | Read/Write |
-| **SQL Server** (PoolProd) | Source ticket data (tbl_EventLog, tbl_Application, tbl_EventStatus, tbl_EventLifeguard) | Read-Only |
+| **SQL Server** (PoolSense) | Knowledge base, failure patterns, deduplication tracking, project configs, feedback logs, interaction logs, ingestion status, and token usage logs | Read/Write |
+| **SQL Server** (Ticket Source / PoolProd or Pool_Dev) | Source ticket data (`tbl_EventLog`, `tbl_Application`, `tbl_EventStatus`, `tbl_EventLifeguard`) plus `tbl_Application.PoolSense` enablement flag | Read for polling, update for `tbl_Application.PoolSense` |
 
 ### Q: What are the REST API endpoints?
 
@@ -279,11 +282,11 @@ Teams see only their own knowledge base while sharing the same platform infrastr
 **A:**
 
 1. The incoming problem description is converted into a 1536-dimensional embedding vector.
-2. PostgreSQL pgvector performs a cosine similarity search against all stored knowledge embeddings.
+2. Stored SQL Server knowledge rows with embeddings are loaded from cache and scored in application code with cosine similarity.
 3. Results are ranked by similarity (0–1 scale) and the top 5 are returned.
 4. Scoping filters (application name, knowledge year, project groups) narrow the search to relevant knowledge.
 
-The HNSW index on the embedding column enables fast approximate nearest-neighbor search even as the knowledge base scales.
+Embeddings are stored in SQL Server as serialized vectors. The current implementation uses in-memory cached retrieval rather than a SQL-side vector index.
 
 ### Q: What happens if the AI returns invalid or garbled output?
 
@@ -295,7 +298,7 @@ The HNSW index on the embedding column enables fast approximate nearest-neighbor
 
 ### Q: Can the AI model be swapped?
 
-**A:** Yes. The model names are configuration-driven (`AiSettings:Models:Chat` and `AiSettings:Models:Embeddings`). Any Azure OpenAI-compatible endpoint can be used. Switching embedding models requires updating the PostgreSQL vector column dimension and re-embedding existing knowledge.
+**A:** Yes. The model names are configuration-driven (`AiSettings:Models:Chat` and `AiSettings:Models:Embeddings`). Any Azure OpenAI-compatible endpoint can be used. Switching embedding models requires re-embedding existing knowledge and validating that stored embedding dimensions still match the configured model.
 
 ---
 
@@ -316,7 +319,7 @@ The HNSW index on the embedding column enables fast approximate nearest-neighbor
 
 ### Q: Does PoolSense modify the source ticket system?
 
-**A:** No. PoolSense has **read-only access** to the SQL Server ticket source. It only reads from `tbl_EventLog`, `tbl_Application`, `tbl_EventStatus`, and `tbl_EventLifeguard`. All writes go to the separate PostgreSQL knowledge database.
+**A:** PoolSense does not modify tickets or event-log records. It reads ticket history and status data from the SQL Server ticket source. The one intentional write-back is to `dbo.tbl_Application.PoolSense`: when a project is enabled or disabled from the PoolSense UI, the API writes `PoolSense = 1` or `PoolSense = 0` for the matching application. Before each polling iteration, PoolSense also reads that flag to create, enable, or disable `project_configs` rows in the PoolSense SQL Server database. No rows are deleted from either database as part of this sync.
 
 ### Q: How are secrets managed?
 
@@ -340,10 +343,11 @@ The HNSW index on the embedding column enables fast approximate nearest-neighbor
 
 | Category | Features |
 |----------|----------|
-| **Knowledge Flow** | SQL ticket polling, AI analysis, knowledge enrichment, embedding generation, pgvector storage, failure pattern extraction |
+| **Knowledge Flow** | SQL ticket polling, AI analysis, knowledge enrichment, embedding generation, SQL Server storage, failure pattern extraction |
 | **Recommendation Flow** | New ticket detection, similarity search, AI-generated resolution, email delivery via SMTP, feedback-weighted ranking |
-| **User Experience** | React UI for incident queries, confidence scoring, similar incident display, failure pattern visualization, project group filtering, thumbs up/down feedback, and optional comments |
-| **Platform** | .NET 9 API, Semantic Kernel orchestration, PostgreSQL bootstrap, integrated frontend build, interaction logging, and feedback persistence |
+| **User Experience** | Angular UI for incident queries, confidence scoring, similar incident display, failure pattern visualization, project group filtering, thumbs up/down feedback, and optional comments |
+| **Application Administration** | Project configuration UI, `tbl_Application.PoolSense` sync, PoolSense flag write-back, per-application pooling/email toggles, and initial recipient enrichment from Lifeguard/default CC data |
+| **Platform** | .NET 9 API, Semantic Kernel orchestration, SQL Server bootstrap, integrated Angular frontend build, interaction logging, and feedback persistence |
 
 ### Q: What are the known limitations?
 
@@ -393,7 +397,7 @@ The HNSW index on the embedding column enables fast approximate nearest-neighbor
 │                          │                               │
 │                          ▼                               │
 │  ┌──────────────────────────────────────────────────────┐│
-│  │  PostgreSQL + pgvector (Knowledge Base)              ││
+│  │  SQL Server Knowledge Store                          ││
 │  │  ticket_knowledge + wiki_knowledge + doc_knowledge   ││
 │  └──────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────┘
@@ -409,7 +413,7 @@ The HNSW index on the embedding column enables fast approximate nearest-neighbor
 | **On-demand crawling** | When the LLM's confidence is below a threshold, autonomously trigger a targeted crawl for relevant wiki pages |
 | **Content extraction** | Parse HTML/wiki markup into clean text, respecting page structure (headings, code blocks, tables) |
 | **Chunking** | Split large wiki pages into semantically meaningful chunks suitable for embedding |
-| **Embedding & storage** | Generate embeddings for each chunk and store alongside ticket knowledge in pgvector |
+| **Embedding & storage** | Generate embeddings for each chunk and store alongside ticket knowledge in SQL Server |
 | **Source tracking** | Record source URL, crawl timestamp, and content hash for freshness detection |
 | **Incremental updates** | Only re-process pages whose content hash has changed since last crawl |
 | **Authentication** | Support OAuth, API tokens, and SSO for authenticated wiki access |
@@ -442,32 +446,29 @@ This creates an **autonomous knowledge retrieval loop** — the LLM decides when
 
 ### Q: What data model changes are needed?
 
-**A:** A new `wiki_knowledge` table (or extending the existing knowledge schema):
+**A:** A new SQL Server-backed `wiki_knowledge` table (or extending the existing knowledge schema):
 
 ```sql
-CREATE TABLE IF NOT EXISTS wiki_knowledge (
-    id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    source_url text NOT NULL,
-    source_platform text NOT NULL,        -- 'confluence', 'sharepoint', 'github', etc.
-    page_title text NOT NULL,
-    chunk_index integer NOT NULL DEFAULT 0,
-    content text NOT NULL,
-    embedding vector(1536) NOT NULL,
-    application text NOT NULL DEFAULT '',
-    project_id text NOT NULL DEFAULT '',
-    content_hash text NOT NULL,           -- For incremental update detection
-    last_crawled_at timestamptz NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE(source_url, chunk_index)
+CREATE TABLE dbo.wiki_knowledge (
+    id int IDENTITY(1,1) PRIMARY KEY,
+    source_url nvarchar(2048) NOT NULL,
+    source_platform nvarchar(100) NOT NULL,
+    page_title nvarchar(500) NOT NULL,
+    chunk_index int NOT NULL DEFAULT 0,
+    content nvarchar(max) NOT NULL,
+    embedding_json nvarchar(max) NOT NULL,
+    application nvarchar(255) NOT NULL DEFAULT '',
+    project_id nvarchar(255) NOT NULL DEFAULT '',
+    content_hash nvarchar(128) NOT NULL,
+    last_crawled_at datetime2 NOT NULL,
+    created_at datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_wiki_knowledge_source_chunk UNIQUE(source_url, chunk_index)
 );
-
-CREATE INDEX IF NOT EXISTS wiki_knowledge_embedding_cosine_idx
-    ON wiki_knowledge USING hnsw (embedding vector_cosine_ops);
 ```
 
 ### Q: How would the project configuration change?
 
-**A:** The existing `project_configs` table already has a `knowledge_sources text[]` column. This would be populated with wiki URLs and crawler configuration per project:
+**A:** The existing `project_configs` table already has a `knowledge_sources` JSON field. This would be populated with wiki URLs and crawler configuration per project:
 
 ```json
 {
@@ -498,7 +499,7 @@ CREATE INDEX IF NOT EXISTS wiki_knowledge_embedding_cosine_idx
 | **CI/CD Pipeline** | Automated build, test, and deployment (Azure DevOps / GitHub Actions) | High |
 | **Environment management** | Dev, staging, production environment separation | High |
 | **Database migrations** | Replace bootstrap SQL with EF Core migrations or Flyway | High |
-| **PostgreSQL hosting** | Managed PostgreSQL (Azure Database for PostgreSQL Flexible Server with pgvector) | High |
+| **SQL Server hosting** | Managed or enterprise SQL Server for PoolSense persistence and ticket-source integration | High |
 | **Health checks** | Liveness and readiness probes for orchestration | Medium |
 
 #### Security
@@ -551,7 +552,7 @@ CREATE INDEX IF NOT EXISTS wiki_knowledge_embedding_cosine_idx
 
 **A:** A basic feedback loop is already implemented in the POC:
 
-- Users can submit `Helpful` or `Not Helpful` feedback directly from the React UI.
+- Users can submit `Helpful` or `Not Helpful` feedback directly from the Angular UI.
 - Users can add an optional comment.
 - Users can indicate whether the suggested resolution was actually used.
 - Feedback is persisted in `feedback_logs`.
@@ -580,7 +581,7 @@ What is still missing for production is feedback governance: dashboards, reviewe
 |------|-------|-----------------|
 | **Backend Engineer (.NET/C#)** | 1–2 | Production hardening, auth, migrations, resilience, testing |
 | **AI/ML Engineer** | 1 | Prompt optimization, evaluation pipeline, embedding quality, crawler integration |
-| **Frontend Engineer (React/TS)** | 1 | Feedback UI, conversation history, polish, accessibility |
+| **Frontend Engineer (Angular/TS)** | 1 | Feedback UI, conversation history, polish, accessibility |
 | **DevOps / Platform Engineer** | 1 | CI/CD, containerization, Kubernetes/App Service, monitoring |
 | **QA Engineer** | 0.5 | Test strategy, automated test suites |
 | **Product Owner / Technical PM** | 0.5 | Backlog management, stakeholder alignment, KPI tracking |
@@ -605,7 +606,7 @@ What is still missing for production is feedback governance: dashboards, reviewe
 | Component | Estimated Monthly Cost | Notes |
 |-----------|----------------------|-------|
 | **Azure OpenAI** | $500–$3,000 | Depends on ticket volume and token usage |
-| **PostgreSQL (Managed)** | $200–$500 | Flexible Server with pgvector |
+| **SQL Server persistence** | $200–$800 | Managed SQL Server, shared enterprise SQL Server, or VM-hosted SQL Server depending on deployment model |
 | **Kubernetes / App Service** | $300–$800 | API + UI hosting |
 | **Container Registry** | $50–$100 | Image storage |
 | **Azure Key Vault** | $10–$50 | Secret management |
@@ -645,7 +646,7 @@ Month 8–10:  Autonomous knowledge retrieval, advanced features, optimization
 | **Cost escalation** | Azure OpenAI costs scale with volume | Token budget monitoring, caching, batch processing, embedding reuse |
 | **Adoption resistance** | Teams don't trust or use AI suggestions | Pilot with champions, demonstrate value with metrics, feedback loop |
 | **Knowledge staleness** | Old resolutions become irrelevant | Knowledge year scoping (already implemented), freshness scoring, TTL policies |
-| **Single point of failure** | PostgreSQL or AI service outage | High availability setup, read replicas, queue-based processing |
+| **Single point of failure** | SQL Server or AI service outage | High availability setup, replicas/failover, queue-based processing |
 | **Scope creep** | Feature requests derail production readiness | Clear phase gates, prioritized backlog, PM governance |
 
 ### Q: How do we ensure AI quality?
@@ -673,9 +674,10 @@ Month 8–10:  Autonomous knowledge retrieval, advanced features, optimization
 ├──────────────┬──────────────────────────────────────────────────────┤
 │ POC          │ ✅ SQL ticket polling                                │
 │ (Completed)  │ ✅ AI analysis + enrichment                         │
-│              │ ✅ pgvector similarity search                        │
+│              │ ✅ SQL Server-backed cosine similarity search        │
 │              │ ✅ Email recommendations                             │
-│              │ ✅ React operator UI                                 │
+│              │ ✅ Angular operator UI                               │
+│              │ ✅ PoolSense application flag sync                   │
 │              │ ✅ Multi-tenant project groups                       │
 │              │ ✅ Failure pattern insights                          │
 │              │ ✅ User feedback mechanism                           │

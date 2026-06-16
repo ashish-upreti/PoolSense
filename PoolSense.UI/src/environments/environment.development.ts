@@ -1,6 +1,6 @@
 export const environment = {
   production: false,
-  appVersion: 'V1.4',
+  appVersion: 'V1.2',
   apiBaseUrl: '/api',
   ticketAutomation: {
     pollingEnabled: true,
@@ -23,6 +23,6 @@ export const environment = {
     similaritySearchLimit: 5,
     sendEmail: true,
     poolingEnabled: true,
-    emailRecipients: 'ashish.upreti@intel.com',
+    emailRecipients: '',
   },
 }

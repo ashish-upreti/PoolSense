@@ -99,20 +99,23 @@ Include these components:
   - Query Variant Generator Agent
   - AI JSON Response Sanitizer
 - `Azure OpenAI chat + embeddings (text-embedding-3-large)`
-- `PostgreSQL + pgvector knowledge base`
+- `SQL Server PoolSense knowledge store`
 - `Email recommendation service (SMTP or SQL Server Database Mail)`
-- `React 19 Operator Workspace (PoolSense.UI)`
-  - ChatPanel (conversation + quick prompts)
-  - InsightPanel (telemetry charts + similar incidents + failure pattern details)
-  - GroupSelector (project group scoping)
+- `Angular 18 Operator Workspace (PoolSense.UI)`
+   - conversation workspace + quick prompts
+   - insights panel with confidence, similar incidents, and failure pattern details
+   - project group scoping
+   - project configuration and PoolSense flag controls
   - Dark/Light theme toggle
 
 Show these main flows:
 - SQL source feeds the background polling service (scoped by project groups)
+- before each polling iteration, `tbl_Application.PoolSense` is synchronized into `project_configs`
 - polling service sends tickets into the API workflow
 - 5 AI agents analyze, enrich, classify, and generate search variants for tickets
-- embeddings and normalized knowledge are stored in PostgreSQL with pgvector
-- similarity search reads from PostgreSQL (scoped by application and group)
+- embeddings and normalized knowledge are stored in SQL Server
+- similarity search uses cached SQL Server knowledge rows and in-memory cosine scoring (scoped by application and group)
+- UI project enable/disable changes write `PoolSense = 1/0` back to `tbl_Application`
 - new ticket recommendations are emailed (via SMTP or Database Mail)
 - UI users can query the same API and knowledge base through the operator workspace
 - insights API serves aggregated failure trends, component analytics, and incident timelines
@@ -132,18 +135,19 @@ Explain this implemented workflow step by step:
 3. Ticket Analyzer Agent extracts structured knowledge: problem, root cause, resolution, and keywords
 4. Query Variant Generator Agent produces 5 alternative search phrases for enriched retrieval
 5. Embeddings are generated from enriched content using Azure OpenAI text-embedding-3-large
-6. Similar historical context is retrieved via pgvector cosine similarity
+6. Similar historical context is retrieved via cached SQL Server knowledge rows and cosine similarity
 7. Failure Pattern Agent classifies each ticket into system, component, failure type, and resolution category
-8. Structured knowledge and failure patterns are stored in PostgreSQL with pgvector
+8. Structured knowledge and failure patterns are stored in SQL Server
 9. Processed source events are tracked for idempotent ingestion (prevents duplicates)
 
 Include a visual flow from:
-`SQL Source -> Polling Service -> Ticket Analyzer Agent -> Query Variant Generator -> Embedding -> pgvector Knowledge Base + Failure Patterns`
+`SQL Source -> Application Sync -> Polling Service -> Ticket Analyzer Agent -> Query Variant Generator -> Embedding -> SQL Server Knowledge Base + Failure Patterns`
 
 Emphasize:
 - this creates the reusable historical knowledge layer for the system
 - this is the foundation for all later recommendation and insight scenarios
 - multi-group awareness allows scoping ingestion by project group (application filter with LIKE pattern)
+- `tbl_Application.PoolSense` controls whether an application is enabled for PoolSense processing
 
 ## Slide 6 - Flow 2: New Ticket Email Recommendation
 
@@ -155,7 +159,7 @@ Explain the implemented workflow:
 1. Background service polls new tickets from the SQL source (configurable interval, default 60s)
 2. The API processes the incoming new ticket through the full orchestration pipeline
 3. Ticket Analyzer Agent extracts structured knowledge from the new ticket
-4. An embedding is generated and similar incidents are retrieved via pgvector cosine similarity
+4. An embedding is generated and similar incidents are retrieved via cached SQL Server knowledge rows and cosine similarity
 5. Resolution Agent generates a targeted root cause and resolution by selecting the best-matching historical incident
 6. Failure Pattern Agent classifies the incident
 7. Recommendation details are emailed to the lifeguard or configured recipient
@@ -180,7 +184,7 @@ Add a value statement:
 Create a slide called `Flow 3 - User Query Through UI` for `PoolSense`.
 
 Explain the implemented user-driven workflow:
-1. A user opens the split-screen operator workspace in the React UI
+1. A user opens the split-screen operator workspace in the Angular UI
 2. The user can select quick prompt chips (e.g. "VG item missing", "Data load job failed") or type a custom problem statement
 3. The user can optionally scope the search to specific project groups via the GroupSelector
 4. The UI calls the ASP.NET Core API with the problem and `selectedGroupIds`
@@ -197,7 +201,7 @@ Include the returned outputs:
 - similar incidents (ranked by match %, with links to external ticket system)
 - failure pattern details (system, component, failure type, resolution category)
 - reasoning (transparency into which historical incident informed the suggestion)
-- telemetry snapshot chart (confidence, average similarity, pattern fit via Recharts)
+- telemetry snapshot chart (confidence, average similarity, pattern fit in the Angular UI)
 
 Emphasize:
 - this uses the same historical knowledge generated in Flow 1
@@ -219,9 +223,10 @@ Group them into five categories.
 - Ticket Analyzer Agent for structured knowledge extraction (problem, root cause, resolution, keywords)
 - Query Variant Generator Agent for enriched retrieval (5 alternative search phrases)
 - embedding generation via Azure OpenAI text-embedding-3-large
-- PostgreSQL + pgvector storage with application and year scoping
+- SQL Server storage with application and year scoping
 - Failure Pattern Agent for classification (system, component, failure type, resolution category)
 - idempotent processing to prevent duplicate ingestion
+- application sync from `tbl_Application.PoolSense` into `project_configs`
 
 ### `Recommendation Flow`
 - background polling for new tickets (configurable interval)
@@ -232,7 +237,7 @@ Group them into five categories.
 
 ### `Insights and Analytics`
 - insights API with aggregated failure trends, top components, repeated systems, and monthly incident timeline
-- telemetry snapshot chart (confidence, similarity, pattern fit) via Recharts
+- telemetry snapshot chart (confidence, similarity, pattern fit) in the Angular UI
 - confidence meter and failure pattern card in the UI
 - reasoning transparency (shows which historical ticket informed the suggestion)
 
@@ -250,9 +255,10 @@ Group them into five categories.
 - .NET 9 ASP.NET Core API
 - 5 AI agents orchestrated via Microsoft Semantic Kernel
 - Azure OpenAI (chat + text-embedding-3-large)
-- PostgreSQL bootstrap script and local development setup
-- integrated React 19 + TypeScript + Vite frontend as SDK-style .NET project
+- SQL Server bootstrap script and local development setup
+- integrated Angular 18 + TypeScript frontend as SDK-style .NET project
 - multi-project and multi-group support (SQL LIKE pattern matching for application filters)
+- PoolSense UI enable/disable writes back to `tbl_Application.PoolSense`
 - configurable email delivery (SMTP or Database Mail)
 - user secrets support for local development
 
@@ -449,18 +455,20 @@ Create a complete 12-slide internal presentation for `PoolSense`, an AI-powered 
 The presentation must be aligned to these actual implemented POC workflows:
 1. closed tickets are continuously polled from a SQL source and converted into a reusable knowledge base
 2. new tickets are processed against that knowledge base and recommendation emails are sent
-3. users can submit a problem statement through a React UI and receive possible resolutions from the same knowledge base
+3. users can submit a problem statement through an Angular UI and receive possible resolutions from the same knowledge base
 
 The system includes:
 - SQL ticket polling with multi-group awareness and lookback year filtering
 - ASP.NET Core API on .NET 9
 - 5 Semantic Kernel AI agents (Ticket Analyzer, Resolution, Failure Pattern, Query Variant Generator, JSON Sanitizer)
 - Azure OpenAI chat and text-embedding-3-large
-- PostgreSQL with pgvector for cosine similarity search
+- SQL Server persistence with cached cosine similarity search over stored embeddings
 - failure pattern extraction and aggregated insights API
 - email recommendation workflow (SMTP or SQL Server Database Mail)
-- React 19 / TypeScript / Vite split-screen operator workspace
-- Recharts-based telemetry dashboard
+- Angular 18 / TypeScript split-screen operator workspace
+- Angular/CSS-based telemetry dashboard
+- application sync from `tbl_Application.PoolSense` into `project_configs`
+- UI project enable/disable write-back to `tbl_Application.PoolSense`
 - dark/light theme, GroupSelector, quick prompt chips
 - idempotent ticket processing and event tracking
 

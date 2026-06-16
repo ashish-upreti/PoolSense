@@ -30,6 +30,9 @@ public class ApplicationSyncService : IApplicationSyncService
         _logger = logger;
     }
 
+    private IEnumerable<string> GetBaseRecipients()
+        => SplitEmails(_configuration["ApplicationSync:BaseRecipients"] ?? string.Empty);
+
     public async Task SyncApplicationsAsync(CancellationToken cancellationToken = default)
     {
         var ticketSourceConnectionString = GetTicketSourceConnectionString();
@@ -45,6 +48,9 @@ public class ApplicationSyncService : IApplicationSyncService
             {
                 if (existing is null)
                 {
+                    var emailRecipients = await BuildEmailRecipientsAsync(
+                        ticketSourceConnectionString, application, cancellationToken);
+
                     var newProject = new ProjectConfig
                     {
                         ProjectId = application,
@@ -53,7 +59,7 @@ public class ApplicationSyncService : IApplicationSyncService
                         SimilaritySearchLimit = 5,
                         SendEmail = true,
                         PoolingEnabled = true,
-                        EmailRecipients = "ashish.upreti@intel.com",
+                        EmailRecipients = emailRecipients,
                         TicketSourceType = "sql",
                         ConnectionString = string.Empty,
                         KnowledgeSources = [],
@@ -61,7 +67,9 @@ public class ApplicationSyncService : IApplicationSyncService
                     };
 
                     await _projectRepository.CreateProjectAsync(newProject, cancellationToken);
-                    _logger.LogInformation("ApplicationSync: created project_configs entry for application '{Application}'.", application);
+                    _logger.LogInformation(
+                        "ApplicationSync: created project_configs for '{Application}' with recipients: {Recipients}.",
+                        application, emailRecipients);
                 }
                 else if (!existing.SendEmail || !existing.PoolingEnabled)
                 {
@@ -83,6 +91,74 @@ public class ApplicationSyncService : IApplicationSyncService
             }
         }
     }
+
+    /// <summary>
+    /// Builds the semicolon-separated recipient list for a newly registered application:
+    ///   - Base recipients (ashish.upreti, syed.nasir.mohamed)
+    ///   - All EmailAddress values from v_ApplicationLifeguards for the application
+    ///   - DefaultEmailCC from v_Application for the application (may itself be semicolon-separated)
+    /// Duplicates are removed (case-insensitive).
+    /// </summary>
+    private async Task<string> BuildEmailRecipientsAsync(
+        string connectionString, string application, CancellationToken cancellationToken)
+    {
+        var emails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var email in GetBaseRecipients())
+            emails.Add(email);
+
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        // 1. Lifeguard emails from v_ApplicationLifeguards
+        const string lifeguardSql = """
+            SELECT EmailAddress
+            FROM [dbo].[v_ApplicationLifeguards]
+            WHERE ApplicationName = @application
+              AND EmailAddress IS NOT NULL
+              AND EmailAddress <> '';
+            """;
+
+        await using (var cmd = new SqlCommand(lifeguardSql, connection))
+        {
+            cmd.Parameters.AddWithValue("@application", application);
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var raw = reader.GetString(0);
+                foreach (var part in SplitEmails(raw))
+                    emails.Add(part);
+            }
+        }
+
+        // 2. DefaultEmailCC from v_Application
+        const string ccSql = """
+            SELECT DefaultEmailCC
+            FROM [dbo].[v_Application]
+            WHERE Application = @application
+              AND DefaultEmailCC IS NOT NULL
+              AND DefaultEmailCC <> '';
+            """;
+
+        await using (var cmd = new SqlCommand(ccSql, connection))
+        {
+            cmd.Parameters.AddWithValue("@application", application);
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var raw = reader.GetString(0);
+                foreach (var part in SplitEmails(raw))
+                    emails.Add(part);
+            }
+        }
+
+        return string.Join(";", emails);
+    }
+
+    private static IEnumerable<string> SplitEmails(string raw)
+        => raw.Split([';', ','], StringSplitOptions.RemoveEmptyEntries)
+              .Select(e => e.Trim())
+              .Where(e => !string.IsNullOrWhiteSpace(e));
 
     private async Task<IReadOnlyList<(string Application, bool PoolSenseEnabled)>> GetApplicationsAsync(
         string connectionString, CancellationToken cancellationToken)
@@ -122,3 +198,4 @@ public class ApplicationSyncService : IApplicationSyncService
         return connectionString;
     }
 }
+

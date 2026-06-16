@@ -208,7 +208,7 @@
         <div *ngIf="messages.length === 0" class="empty-state">
           <p class="panel-kicker">Conversation</p>
           <h3>Describe an issue to start the investigation</h3>
-          <p>Engineers should be able to see the conversation, suggested fix, similar incidents, and system insights together on one screen.</p>
+          <p>Users should be able to see the conversation, suggested fix, similar incidents, and system insights together on one screen.</p>
         </div>
 
         <ng-container *ngFor="let message of messages; trackBy: trackMessage">
@@ -396,7 +396,7 @@
           <div>
             <p class="panel-kicker">Configuration</p>
             <h2>Application Configuration</h2>
-            <p class="workspace-copy">Persist application defaults in PostgreSQL and monitor ingestion progress per application.</p>
+            <p class="workspace-copy">Persist application defaults in SQL Server and monitor ingestion progress per application.</p>
           </div>
           <div class="settings-banner-group">
             <div class="workspace-banner">
@@ -469,8 +469,8 @@
 
                 <label class="field-group field-group-full">
                   <span class="field-label">Application Filter(Pool Application)</span>
-                  <input class="field-input" type="text" name="applicationFilter" [(ngModel)]="projectForm.applicationFilter" placeholder="%FSCO-FAB%" [disabled]="isProjectSaving" />
-                  <span class="field-note">Optional. Use an exact application name for one app, or use `%` wildcards to group multiple apps together.</span>
+                  <input class="field-input" type="text" name="applicationFilter" [(ngModel)]="projectForm.applicationFilter" placeholder="FSCO-FAB" [disabled]="isProjectSaving" />
+                  <span class="field-note">Use an exact application name for one app</span>
                 </label>
 
                 <label class="field-group">

@@ -136,23 +136,41 @@ public sealed class SessionPasswordStore : ISessionPasswordStore
     {
         lock (_syncRoot)
         {
-            var nowUtc = DateTimeOffset.UtcNow;
-            var persistedEntries = _entries
-                .Where(pair => pair.Value.ExpiresAtUtc > nowUtc)
-                .Select(pair => new PersistedEntry
+            try
+            {
+                var nowUtc = DateTimeOffset.UtcNow;
+                var persistedEntries = _entries
+                    .Where(pair => pair.Value.ExpiresAtUtc > nowUtc)
+                    .Select(pair => new PersistedEntry
+                    {
+                        Jti = pair.Key,
+                        ProtectedPassword = pair.Value.ProtectedPassword,
+                        ExpiresAtUtc = pair.Value.ExpiresAtUtc
+                    })
+                    .OrderBy(entry => entry.ExpiresAtUtc)
+                    .ToArray();
+
+                var json = JsonSerializer.Serialize(persistedEntries, PersistSerializerOptions);
+
+                var tempFilePath = _storeFilePath + ".tmp";
+                File.WriteAllText(tempFilePath, json);
+
+                try
                 {
-                    Jti = pair.Key,
-                    ProtectedPassword = pair.Value.ProtectedPassword,
-                    ExpiresAtUtc = pair.Value.ExpiresAtUtc
-                })
-                .OrderBy(entry => entry.ExpiresAtUtc)
-                .ToArray();
-
-            var json = JsonSerializer.Serialize(persistedEntries, PersistSerializerOptions);
-
-            var tempFilePath = _storeFilePath + ".tmp";
-            File.WriteAllText(tempFilePath, json);
-            File.Move(tempFilePath, _storeFilePath, true);
+                    File.Move(tempFilePath, _storeFilePath, overwrite: true);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Atomic move can fail on IIS if the app pool identity lacks replace-file permission.
+                    // Fall back to a direct write so that authentication is never blocked.
+                    File.WriteAllText(_storeFilePath, json);
+                    try { File.Delete(tempFilePath); } catch { /* best-effort cleanup */ }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist session password store to disk. Active sessions will be lost on restart.");
+            }
         }
     }
 
