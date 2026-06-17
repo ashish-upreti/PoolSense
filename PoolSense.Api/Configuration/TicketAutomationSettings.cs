@@ -24,12 +24,14 @@ public sealed class EmailDeliverySettings
     public string FromAddress { get; set; } = string.Empty;
     /// <summary>Controls which delivery mechanism is used. Default: Smtp.</summary>
     public EmailDeliveryMode DeliveryMode { get; set; } = EmailDeliveryMode.Smtp;
-    // ?? SMTP settings (used when DeliveryMode = Smtp) ??????????????????????
+    // SMTP settings used when DeliveryMode = Smtp.
     public string SmtpHost { get; set; } = string.Empty;
     public int Port { get; set; } = 25;
     /// <summary>SMTP connection/send timeout in milliseconds. Default: 30000 (30s).</summary>
     public int TimeoutMs { get; set; } = 30_000;
-    // ?? Database Mail settings (used when DeliveryMode = DatabaseMail) ?????
-    /// <summary>Database Mail profile name configured in msdb on the TicketSourceSqlServer.</summary>
+    // Database Mail settings used when DeliveryMode = DatabaseMail.
+    /// <summary>Database Mail profile name configured in msdb on the Database Mail SQL Server.</summary>
     public string DatabaseMailProfile { get; set; } = string.Empty;
+    /// <summary>Name of the configured connection string for the SQL Server instance that hosts Database Mail.</summary>
+    public string DatabaseMailConnectionName { get; set; } = "PoolSenseSqlServer";
 }

@@ -7,6 +7,10 @@ import {
   ApiService,
   DeploymentInfo,
   IngestionStatus,
+  PoolReport,
+  PoolRecommendationReportListItem,
+  PoolRecommendationReportListResponse,
+  PoolTroubleshootResponse,
   ProjectConfig,
   ProjectConfigInput,
   ProjectGroup,
@@ -33,6 +37,10 @@ type AssistantMessage = {
 
 type ChatMessage = UserMessage | AssistantMessage
 
+type PoolTroubleshootEntry = PoolTroubleshootResponse & {
+  id: number
+}
+
 type FeedbackState = {
   comment: string
   isSubmitting: boolean
@@ -49,12 +57,21 @@ type TelemetryDatum = {
   color: string
 }
 
-type AppSection = 'main' | 'projectConfig' | 'applicationFeedback'
+type AppSection = 'main' | 'poolRecommendations' | 'projectConfig' | 'applicationFeedback'
 
 type ApplicationFeedbackForm = ApplicationFeedbackRequest
 type TicketAutomationSettingsForm = TicketAutomationSettingsInput
+type PoolRecommendationEmailFilter = 'all' | 'sent' | 'notSent'
+type PoolRecommendationDateRange = '7' | '30' | '90' | 'all'
 
 const quickPrompts = ['VG item missing', 'Data load job failed', 'UI error']
+const poolTroubleshootPrompts = [
+  'First checks',
+  'Validation checklist',
+  'Compare similar incidents',
+  'Draft user update',
+  'Escalation summary',
+]
 
 const defaultTicketAutomationSettings: TicketAutomationSettings = {
   pollingEnabled: environment.ticketAutomation.pollingEnabled,
@@ -159,6 +176,32 @@ function buildProjectIdPreview(projectName: string) {
     .replace(/^-+|-+$/g, '')
 }
 
+function getInitialPoolReportId() {
+  const match = window.location.pathname.match(/^\/Pool\/([^/?#]+)/i)
+  if (!match?.[1]) {
+    return ''
+  }
+
+  try {
+    return decodeURIComponent(match[1]).trim()
+  } catch {
+    return match[1].trim()
+  }
+}
+
+function createDefaultPoolRecommendationResponse(): PoolRecommendationReportListResponse {
+  return {
+    items: [],
+    totalCount: 0,
+    page: 1,
+    pageSize: 25,
+  }
+}
+
+function formatDateInput(date: Date) {
+  return date.toISOString().slice(0, 10)
+}
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -169,6 +212,7 @@ export class AppComponent implements OnInit {
   private readonly api = inject(ApiService)
 
   readonly quickPrompts = quickPrompts
+  readonly poolTroubleshootPrompts = poolTroubleshootPrompts
   readonly allGroupValue = '__all__'
   readonly appVersion = environment.appVersion
   readonly appSettings = environment
@@ -208,6 +252,24 @@ export class AppComponent implements OnInit {
   ticketAutomationForm = createTicketAutomationSettingsForm()
   deploymentInfo: DeploymentInfo | null = null
   isTicketAutomationSaving = false
+  poolReport: PoolReport | null = null
+  poolReportSourceEventId = getInitialPoolReportId()
+  isPoolReportLoading = false
+  poolReportError = ''
+  poolTroubleshootQuestion = ''
+  poolTroubleshootEntries: PoolTroubleshootEntry[] = []
+  isPoolTroubleshootLoading = false
+  poolTroubleshootError = ''
+  poolRecommendationReports = createDefaultPoolRecommendationResponse()
+  poolRecommendationFilters = {
+    projectId: '',
+    searchTerm: '',
+    emailSent: 'all' as PoolRecommendationEmailFilter,
+    dateRange: '30' as PoolRecommendationDateRange,
+    pageSize: 25,
+  }
+  isPoolRecommendationLoading = false
+  poolRecommendationError = ''
   feedbackStateByMessageId: Record<number, FeedbackState> = {}
 
   ngOnInit() {
@@ -294,6 +356,24 @@ export class AppComponent implements OnInit {
     ]
   }
 
+  get poolRecommendationTotalPages() {
+    return Math.max(1, Math.ceil(this.poolRecommendationReports.totalCount / this.poolRecommendationReports.pageSize))
+  }
+
+  get poolRecommendationRangeLabel() {
+    if (this.poolRecommendationReports.totalCount === 0) {
+      return '0 reports'
+    }
+
+    const start = (this.poolRecommendationReports.page - 1) * this.poolRecommendationReports.pageSize + 1
+    const end = Math.min(this.poolRecommendationReports.totalCount, start + this.poolRecommendationReports.items.length - 1)
+    return `${start}-${end} of ${this.poolRecommendationReports.totalCount}`
+  }
+
+  get poolRecommendationProjectOptions() {
+    return this.projects.filter((project) => project.applicationFilter.trim().length > 0)
+  }
+
   async handleSend(rawMessage = this.input) {
     const message = rawMessage.trim()
 
@@ -352,6 +432,7 @@ export class AppComponent implements OnInit {
       }
       this.applyAuthenticatedUserToFeedbackForm(loginResult.user)
       await this.loadAuthenticatedWorkspace()
+      await this.loadInitialPoolReport()
     } catch (requestError) {
       this.loginError = requestError instanceof Error ? requestError.message : 'Unable to sign in.'
     } finally {
@@ -371,6 +452,17 @@ export class AppComponent implements OnInit {
     this.error = ''
     this.projectError = ''
     this.projectNotice = ''
+    this.poolReport = null
+    this.poolReportSourceEventId = getInitialPoolReportId()
+    this.poolReportError = ''
+    this.isPoolReportLoading = false
+    this.poolTroubleshootQuestion = ''
+    this.poolTroubleshootEntries = []
+    this.poolTroubleshootError = ''
+    this.isPoolTroubleshootLoading = false
+    this.poolRecommendationReports = createDefaultPoolRecommendationResponse()
+    this.poolRecommendationError = ''
+    this.isPoolRecommendationLoading = false
     this.feedbackStateByMessageId = {}
   }
 
@@ -381,6 +473,13 @@ export class AppComponent implements OnInit {
     }
   }
 
+  handlePoolTroubleshootKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      void this.handlePoolTroubleshootSubmit()
+    }
+  }
+
   toggleTheme() {
     this.isDark = !this.isDark
     this.applyTheme()
@@ -388,6 +487,9 @@ export class AppComponent implements OnInit {
 
   setActiveSection(section: AppSection) {
     this.activeSection = section
+    if (section === 'poolRecommendations' && this.currentUser) {
+      void this.loadPoolRecommendations()
+    }
   }
 
   toggleSidebar() {
@@ -651,6 +753,55 @@ export class AppComponent implements OnInit {
     return incident.ticketId
   }
 
+  trackPoolRecommendation(_index: number, report: PoolRecommendationReportListItem) {
+    return report.sourceEventId
+  }
+
+  async handlePoolRecommendationFilterChange() {
+    await this.loadPoolRecommendations(1)
+  }
+
+  async refreshPoolRecommendations() {
+    await this.loadPoolRecommendations(this.poolRecommendationReports.page)
+  }
+
+  async goToPoolRecommendationPage(page: number) {
+    await this.loadPoolRecommendations(Math.max(1, Math.min(page, this.poolRecommendationTotalPages)))
+  }
+
+  openPoolRecommendation(report: PoolRecommendationReportListItem) {
+    const reportUrl = report.reportUrl || `/Pool/${encodeURIComponent(report.sourceEventId)}`
+    window.history.pushState({}, '', reportUrl)
+    this.poolReportSourceEventId = report.sourceEventId
+    void this.loadPoolReport(report.sourceEventId)
+  }
+
+  formatPercent(value: number) {
+    return `${Math.round((Number.isFinite(value) ? value : 0) * 100)}%`
+  }
+
+  async handlePoolTroubleshootSubmit(rawQuestion = this.poolTroubleshootQuestion) {
+    const question = this.resolvePoolTroubleshootQuestion(rawQuestion)
+    const poolId = this.poolReport?.sourceEventId || this.poolReportSourceEventId
+
+    if (!poolId || !question || this.isPoolTroubleshootLoading) {
+      return
+    }
+
+    this.poolTroubleshootError = ''
+    this.isPoolTroubleshootLoading = true
+
+    try {
+      const response = await this.api.troubleshootPool(poolId, question)
+      this.poolTroubleshootEntries = [{ ...response, id: Date.now() }, ...this.poolTroubleshootEntries]
+      this.poolTroubleshootQuestion = ''
+    } catch (requestError) {
+      this.poolTroubleshootError = requestError instanceof Error ? requestError.message : 'Unable to troubleshoot this pool.'
+    } finally {
+      this.isPoolTroubleshootLoading = false
+    }
+  }
+
   private async loadProjectGroups() {
     if (!this.currentUser) {
       this.groups = []
@@ -678,6 +829,7 @@ export class AppComponent implements OnInit {
       if (this.currentUser) {
         this.applyAuthenticatedUserToFeedbackForm(this.currentUser)
         await this.loadAuthenticatedWorkspace()
+        await this.loadInitialPoolReport()
       }
     } catch (requestError) {
       this.loginError = requestError instanceof Error ? requestError.message : 'Unable to validate your session.'
@@ -689,6 +841,131 @@ export class AppComponent implements OnInit {
 
   private async loadAuthenticatedWorkspace() {
     await Promise.all([this.loadProjectGroups(), this.loadProjectWorkspace()])
+  }
+
+  private async loadPoolRecommendations(page = 1) {
+    if (!this.currentUser) {
+      return
+    }
+
+    this.isPoolRecommendationLoading = true
+    this.poolRecommendationError = ''
+
+    try {
+      this.poolRecommendationReports = await this.api.getPoolRecommendations(this.buildPoolRecommendationFilters(page))
+    } catch (requestError) {
+      this.poolRecommendationError = requestError instanceof Error ? requestError.message : 'Unable to load Pool Recommendations.'
+    } finally {
+      this.isPoolRecommendationLoading = false
+    }
+  }
+
+  private buildPoolRecommendationFilters(page: number) {
+    const dateRange = this.poolRecommendationFilters.dateRange
+    let from = ''
+    if (dateRange !== 'all') {
+      const fromDate = new Date()
+      fromDate.setDate(fromDate.getDate() - Number(dateRange))
+      from = formatDateInput(fromDate)
+    }
+
+    return {
+      projectId: this.poolRecommendationFilters.projectId || undefined,
+      searchTerm: this.poolRecommendationFilters.searchTerm.trim() || undefined,
+      emailSent:
+        this.poolRecommendationFilters.emailSent === 'sent'
+          ? true
+          : this.poolRecommendationFilters.emailSent === 'notSent'
+            ? false
+            : null,
+      from: from || undefined,
+      page,
+      pageSize: Number(this.poolRecommendationFilters.pageSize) || 25,
+    }
+  }
+
+  private async loadInitialPoolReport() {
+    const poolReportId = getInitialPoolReportId()
+    if (!poolReportId || !this.currentUser) {
+      return
+    }
+
+    this.poolReportSourceEventId = poolReportId
+    await this.loadPoolReport(poolReportId)
+  }
+
+  private async loadPoolReport(poolReportId: string) {
+    this.activeSection = 'main'
+    this.poolReport = null
+    this.poolReportError = ''
+    this.poolTroubleshootQuestion = ''
+    this.poolTroubleshootEntries = []
+    this.poolTroubleshootError = ''
+    this.isPoolReportLoading = true
+
+    try {
+      const report = await this.api.getPoolReport(poolReportId)
+      this.poolReport = report
+      this.poolReportSourceEventId = report.sourceEventId || poolReportId
+      this.applyPoolReportToWorkspace(report)
+    } catch (requestError) {
+      this.poolReportError = requestError instanceof Error ? requestError.message : 'Unable to load the PoolSense report.'
+    } finally {
+      this.isPoolReportLoading = false
+    }
+  }
+
+  private applyPoolReportToWorkspace(report: PoolReport) {
+    const result = report.workflowResult
+    const sourceEventId = report.sourceEventId || this.poolReportSourceEventId
+    const userMessage: UserMessage = {
+      id: Date.now(),
+      role: 'user',
+      text: `Pool ${sourceEventId}`,
+    }
+    const assistantMessage: AssistantMessage = {
+      id: userMessage.id + 1,
+      role: 'assistant',
+      text: result.suggestedResolution,
+      query: userMessage.text,
+      result,
+    }
+
+    this.feedbackStateByMessageId[assistantMessage.id] = createFeedbackState(
+      getDefaultFeedbackTicketId(result.similarIncidents),
+    )
+    this.messages = [userMessage, assistantMessage]
+    this.insights = result
+    this.input = ''
+  }
+
+  private resolvePoolTroubleshootQuestion(rawQuestion: string) {
+    const question = rawQuestion.trim()
+    if (!question) {
+      return ''
+    }
+
+    if (question === 'First checks') {
+      return 'What should I validate first for this pool?'
+    }
+
+    if (question === 'Validation checklist') {
+      return 'Create a step-by-step validation checklist for this pool.'
+    }
+
+    if (question === 'Compare similar incidents') {
+      return 'Which similar incidents are most relevant, and what should I reuse from them?'
+    }
+
+    if (question === 'Draft user update') {
+      return 'Draft a concise update I can send to the user for this pool.'
+    }
+
+    if (question === 'Escalation summary') {
+      return 'Create an escalation summary with symptoms, likely cause, evidence, and next asks.'
+    }
+
+    return question
   }
 
   private applyAuthenticatedUserToFeedbackForm(user: AuthenticatedUser) {

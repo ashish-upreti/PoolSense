@@ -101,6 +101,24 @@
           </span>
         </button>
 
+        <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'poolRecommendations'" (click)="setActiveSection('poolRecommendations')" [attr.aria-pressed]="activeSection === 'poolRecommendations'" aria-label="Open Pool Recommendations" [attr.title]="isSidebarCollapsed ? 'Pool Recommendations' : null">
+          <span class="sidebar-nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 6h13"></path>
+              <path d="M8 12h13"></path>
+              <path d="M8 18h13"></path>
+              <path d="M3 6h.01"></path>
+              <path d="M3 12h.01"></path>
+              <path d="M3 18h.01"></path>
+            </svg>
+          </span>
+          <span *ngIf="!isSidebarCollapsed" class="sidebar-nav-body">
+            <span class="sidebar-nav-kicker">Reports</span>
+            <span class="sidebar-nav-title">Pool Recommendations</span>
+            <span class="sidebar-nav-copy">Review emailed recommendations and open saved analysis reports.</span>
+          </span>
+        </button>
+
         <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'projectConfig'" (click)="setActiveSection('projectConfig')" [attr.aria-pressed]="activeSection === 'projectConfig'" aria-label="Open application configuration" [attr.title]="isSidebarCollapsed ? 'Application Configuration' : null">
           <span class="sidebar-nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -189,6 +207,49 @@
           </button>
         </div>
       </header>
+
+      <div *ngIf="poolReportSourceEventId || isPoolReportLoading || poolReport" class="workspace-banner">
+        <span class="workspace-dot"></span>
+        <span *ngIf="isPoolReportLoading">Loading report for pool {{ poolReportSourceEventId }}</span>
+        <span *ngIf="!isPoolReportLoading && poolReport">Pool report {{ poolReport.sourceEventId || poolReportSourceEventId }} · {{ poolReport.processedAt | date: 'medium' }}</span>
+        <span *ngIf="!isPoolReportLoading && !poolReport">Pool report {{ poolReportSourceEventId }}</span>
+      </div>
+      <p *ngIf="poolReportError" class="error-banner">{{ poolReportError }}</p>
+
+      <section *ngIf="poolReport" class="pool-troubleshoot-panel">
+        <div class="card-heading-row project-toolbar">
+          <div>
+            <p class="panel-kicker">Troubleshoot</p>
+            <h3>Pool {{ poolReport.sourceEventId }}</h3>
+          </div>
+          <span class="section-count data-mono">{{ poolTroubleshootEntries.length }}</span>
+        </div>
+
+        <div class="prompt-strip" aria-label="Troubleshooting prompts">
+          <button *ngFor="let prompt of poolTroubleshootPrompts" type="button" class="prompt-chip" (click)="handlePoolTroubleshootSubmit(prompt)" [disabled]="isPoolTroubleshootLoading">{{ prompt }}</button>
+        </div>
+
+        <label class="sr-only" for="pool-troubleshoot-input">Ask a follow-up about this pool</label>
+        <textarea id="pool-troubleshoot-input" class="composer-input pool-troubleshoot-input" name="pool-troubleshoot-input" [(ngModel)]="poolTroubleshootQuestion" (keydown)="handlePoolTroubleshootKeydown($event)" placeholder="Ask a follow-up about this pool..." rows="2" [disabled]="isPoolTroubleshootLoading"></textarea>
+
+        <div class="composer-footer">
+          <p class="helper-text">Answers use the saved recommendation, reasoning, failure pattern, and similar incidents.</p>
+          <button type="button" class="send-button" (click)="handlePoolTroubleshootSubmit()" [disabled]="isPoolTroubleshootLoading || !poolTroubleshootQuestion.trim()">{{ isPoolTroubleshootLoading ? 'Thinking...' : 'Troubleshoot' }}</button>
+        </div>
+
+        <p *ngIf="poolTroubleshootError" class="error-banner">{{ poolTroubleshootError }}</p>
+        <article *ngIf="isPoolTroubleshootLoading" class="pool-troubleshoot-answer">
+          <p class="message-label">PoolSense</p>
+          <p class="message-body">Working through the saved report...</p>
+        </article>
+        <div *ngIf="poolTroubleshootEntries.length > 0" class="pool-troubleshoot-history">
+          <article *ngFor="let entry of poolTroubleshootEntries" class="pool-troubleshoot-answer">
+            <p class="message-label">{{ entry.question }}</p>
+            <p class="message-body">{{ entry.answer }}</p>
+            <p class="helper-text">{{ entry.generatedAt | date: 'medium' }}</p>
+          </article>
+        </div>
+      </section>
 
       <div *ngIf="groups.length > 0" class="group-selector" role="group" aria-label="Application group filter">
         <p class="group-selector-label">Search scope</p>
@@ -390,6 +451,113 @@
     </ng-container>
 
     <ng-template #nonMainView>
+      <ng-container *ngIf="activeSection === 'poolRecommendations'; else nonPoolRecommendationView">
+      <section class="workspace-panel project-config-screen pool-recommendations-screen">
+        <div class="project-config-screen-header">
+          <div>
+            <p class="panel-kicker">Reports</p>
+            <h2>Pool Recommendations</h2>
+            <p class="workspace-copy">Review saved AI recommendations that were generated for new pools and open their analysis reports.</p>
+          </div>
+          <div class="settings-banner-group">
+            <div class="workspace-banner">
+              <span class="workspace-dot"></span>
+              <span>{{ poolRecommendationRangeLabel }}</span>
+            </div>
+            <button type="button" class="feedback-button feedback-button-secondary" (click)="refreshPoolRecommendations()" [disabled]="isPoolRecommendationLoading">Refresh</button>
+          </div>
+        </div>
+
+        <p *ngIf="poolRecommendationError" class="project-feedback-banner">{{ poolRecommendationError }}</p>
+
+        <section class="project-studio">
+          <div class="project-form-card pool-recommendation-filters">
+            <div class="project-form-grid pool-recommendation-filter-grid">
+              <label class="field-group">
+                <span class="field-label">Application</span>
+                <select class="field-input" name="poolRecommendationProject" [(ngModel)]="poolRecommendationFilters.projectId" (ngModelChange)="handlePoolRecommendationFilterChange()" [disabled]="isPoolRecommendationLoading">
+                  <option value="">All applications</option>
+                  <option *ngFor="let project of poolRecommendationProjectOptions" [value]="project.projectId">{{ project.projectName }}</option>
+                </select>
+              </label>
+
+              <label class="field-group">
+                <span class="field-label">Search</span>
+                <input class="field-input" type="search" name="poolRecommendationSearch" [(ngModel)]="poolRecommendationFilters.searchTerm" (keyup.enter)="handlePoolRecommendationFilterChange()" placeholder="Pool, application, summary" [disabled]="isPoolRecommendationLoading" />
+              </label>
+
+              <label class="field-group">
+                <span class="field-label">Email Status</span>
+                <select class="field-input" name="poolRecommendationEmailStatus" [(ngModel)]="poolRecommendationFilters.emailSent" (ngModelChange)="handlePoolRecommendationFilterChange()" [disabled]="isPoolRecommendationLoading">
+                  <option value="all">All</option>
+                  <option value="sent">Sent</option>
+                  <option value="notSent">Not Sent</option>
+                </select>
+              </label>
+
+              <label class="field-group">
+                <span class="field-label">Processed Date</span>
+                <select class="field-input" name="poolRecommendationDateRange" [(ngModel)]="poolRecommendationFilters.dateRange" (ngModelChange)="handlePoolRecommendationFilterChange()" [disabled]="isPoolRecommendationLoading">
+                  <option value="7">Last 7 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="90">Last 90 days</option>
+                  <option value="all">All time</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="composer-footer">
+              <p class="helper-text">Press Enter in search or change filters to refresh the report list.</p>
+              <button type="button" class="send-button" (click)="handlePoolRecommendationFilterChange()" [disabled]="isPoolRecommendationLoading">Apply Filters</button>
+            </div>
+          </div>
+
+          <div class="project-list-card pool-recommendation-list-card">
+            <div class="card-heading-row project-toolbar">
+              <div>
+                <p class="panel-kicker">NewRecommendation</p>
+                <h3>Saved recommendation reports</h3>
+              </div>
+              <span class="section-count data-mono">{{ poolRecommendationReports.totalCount }}</span>
+            </div>
+
+            <div *ngIf="isPoolRecommendationLoading" class="project-empty"><p class="empty-copy">Loading Pool Recommendations...</p></div>
+            <div *ngIf="!isPoolRecommendationLoading && poolRecommendationReports.items.length === 0" class="project-empty"><p class="empty-copy">No Pool Recommendations match the current filters.</p></div>
+
+            <div *ngIf="!isPoolRecommendationLoading && poolRecommendationReports.items.length > 0" class="pool-recommendation-list">
+              <article *ngFor="let report of poolRecommendationReports.items; trackBy: trackPoolRecommendation" class="pool-recommendation-row">
+                <button type="button" class="pool-recommendation-link" (click)="openPoolRecommendation(report)">
+                  <span class="data-mono">{{ report.sourceEventId }}</span>
+                  <small>Open report</small>
+                </button>
+                <div class="pool-recommendation-main">
+                  <div class="pool-recommendation-title-row">
+                    <p class="pool-recommendation-title">{{ report.application || report.projectName || 'Unknown application' }}</p>
+                    <span class="project-chip">{{ report.emailSent ? 'Sent' : 'Not Sent' }}</span>
+                    <span class="similarity-badge">{{ formatPercent(report.confidence) }}</span>
+                  </div>
+                  <p class="pool-recommendation-summary">{{ report.summary || 'No summary available.' }}</p>
+                  <div class="pool-recommendation-meta">
+                    <span>{{ report.projectName || report.projectId || 'Unmapped project' }}</span>
+                    <span>{{ report.similarIncidentCount }} similar incident{{ report.similarIncidentCount === 1 ? '' : 's' }}</span>
+                    <span>{{ report.processedAt | date: 'medium' }}</span>
+                    <span *ngIf="report.failureType">{{ report.failureType }}</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <div class="pool-recommendation-pagination" *ngIf="poolRecommendationReports.totalCount > poolRecommendationReports.pageSize">
+              <button type="button" class="feedback-button feedback-button-secondary" (click)="goToPoolRecommendationPage(poolRecommendationReports.page - 1)" [disabled]="isPoolRecommendationLoading || poolRecommendationReports.page <= 1">Previous</button>
+              <span class="helper-text">Page {{ poolRecommendationReports.page }} of {{ poolRecommendationTotalPages }}</span>
+              <button type="button" class="feedback-button feedback-button-secondary" (click)="goToPoolRecommendationPage(poolRecommendationReports.page + 1)" [disabled]="isPoolRecommendationLoading || poolRecommendationReports.page >= poolRecommendationTotalPages">Next</button>
+            </div>
+          </div>
+        </section>
+      </section>
+      </ng-container>
+
+      <ng-template #nonPoolRecommendationView>
       <ng-container *ngIf="activeSection === 'projectConfig'; else applicationFeedbackView">
       <section class="workspace-panel project-config-screen">
         <div class="project-config-screen-header">
@@ -624,6 +792,7 @@
           </div>
         </section>
       </section>
+    </ng-template>
     </ng-template>
   </div>
 

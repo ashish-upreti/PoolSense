@@ -111,6 +111,8 @@ internal static class RecommendationEmailRecipientResolver
 /// <summary>Shared email content builders used by both SMTP and Database Mail delivery services.</summary>
 internal static class RecommendationEmailContent
 {
+    private const string PoolSenseBaseUrl = "https://poolsense.intel.com";
+
     internal static string BuildSubject(TicketRequest ticket)
     {
         var issueId = string.IsNullOrWhiteSpace(ticket.SourceEventId)
@@ -162,10 +164,22 @@ internal static class RecommendationEmailContent
         }
         b.AppendLine("</table>");
 
-        b.AppendLine("<p style='margin:16px 0 0;'>Explore more in <a href='https://poolsense.intel.com/'>PoolSense</a>.</p>");
+        var poolSenseReportUrl = BuildPoolSenseReportUrl(ticket);
+        b.AppendLine($"<p style='margin:16px 0 0;'>Explore more in <a href='{H(poolSenseReportUrl)}'>PoolSense</a>.</p>");
 
         b.AppendLine("</body></html>");
         return b.ToString();
+    }
+
+    private static string BuildPoolSenseReportUrl(TicketRequest ticket)
+    {
+        var poolId = string.IsNullOrWhiteSpace(ticket.SourceEventId)
+            ? ticket.TicketId
+            : ticket.SourceEventId;
+
+        return string.IsNullOrWhiteSpace(poolId)
+            ? $"{PoolSenseBaseUrl}/"
+            : $"{PoolSenseBaseUrl}/Pool/{Uri.EscapeDataString(poolId.Trim())}";
     }
 
     // Writes a two-column metadata row: bold label | value

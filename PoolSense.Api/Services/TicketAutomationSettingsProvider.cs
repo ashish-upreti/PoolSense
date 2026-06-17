@@ -61,7 +61,8 @@ public sealed class TicketAutomationSettingsProvider : ITicketAutomationSettings
                 SmtpHost = source.Email.SmtpHost,
                 Port = source.Email.Port,
                 TimeoutMs = source.Email.TimeoutMs,
-                DatabaseMailProfile = source.Email.DatabaseMailProfile
+                DatabaseMailProfile = source.Email.DatabaseMailProfile,
+                DatabaseMailConnectionName = source.Email.DatabaseMailConnectionName
             }
         };
     }

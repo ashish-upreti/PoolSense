@@ -121,7 +121,8 @@ public sealed class SettingsController : ControllerBase
                 smtpHost = settings.Email.SmtpHost,
                 port = settings.Email.Port,
                 timeoutMs = settings.Email.TimeoutMs,
-                databaseMailProfile = settings.Email.DatabaseMailProfile
+                databaseMailProfile = settings.Email.DatabaseMailProfile,
+                databaseMailConnectionName = settings.Email.DatabaseMailConnectionName
             }
         };
     }

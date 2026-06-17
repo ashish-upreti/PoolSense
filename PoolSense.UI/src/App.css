@@ -1162,6 +1162,134 @@
     text-align: center;
   }
 
+  .pool-recommendations-screen .project-studio {
+    gap: 1rem;
+  }
+
+  .pool-recommendation-filter-grid {
+    grid-template-columns: minmax(180px, 0.9fr) minmax(240px, 1.3fr) minmax(150px, 0.7fr) minmax(150px, 0.7fr);
+  }
+
+  .pool-recommendation-list-card {
+    min-height: 0;
+  }
+
+  .pool-recommendation-list {
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  .pool-recommendation-row {
+    display: grid;
+    grid-template-columns: minmax(7.5rem, auto) minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--panel-subtle);
+  }
+
+  .pool-recommendation-link {
+    display: grid;
+    gap: 0.25rem;
+    justify-items: start;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid var(--accent-outline);
+    border-radius: 16px;
+    background: var(--accent-soft);
+    color: var(--heading-text);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .pool-recommendation-link span {
+    color: var(--heading-text);
+    font-size: 1rem;
+    font-weight: 800;
+  }
+
+  .pool-recommendation-link small {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .pool-recommendation-main {
+    min-width: 0;
+    display: grid;
+    gap: 0.55rem;
+  }
+
+  .pool-recommendation-title-row,
+  .pool-recommendation-meta,
+  .pool-recommendation-pagination {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+  }
+
+  .pool-recommendation-title {
+    margin: 0;
+    color: var(--heading-text);
+    font-size: 1rem;
+    font-weight: 800;
+  }
+
+  .pool-recommendation-summary {
+    margin: 0;
+    color: var(--text);
+    font-size: 0.95rem;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+
+  .pool-recommendation-meta {
+    color: var(--muted);
+    font-family: var(--mono-font);
+    font-size: 0.74rem;
+    line-height: 1.55;
+  }
+
+  .pool-recommendation-pagination {
+    justify-content: flex-end;
+    padding-top: 0.25rem;
+  }
+
+  .pool-troubleshoot-panel {
+    display: grid;
+    gap: 0.85rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    background: var(--panel-subtle);
+  }
+
+  .pool-troubleshoot-input {
+    min-height: 4.25rem;
+  }
+
+  .pool-troubleshoot-history {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .pool-troubleshoot-answer {
+    display: grid;
+    gap: 0.45rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: var(--bubble-bg);
+  }
+
+  .pool-troubleshoot-answer .message-body {
+    white-space: pre-wrap;
+  }
+
   @media (max-width: 1320px) {
     .app-shell {
       grid-template-columns: minmax(232px, 0.7fr) minmax(0, 1.2fr);
@@ -1177,6 +1305,10 @@
 
     .project-studio-grid {
       grid-template-columns: 1fr;
+    }
+
+    .pool-recommendation-filter-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .insight-panel {
@@ -1222,6 +1354,7 @@
     .assistant-summary,
     .system-grid,
     .project-form-grid,
+    .pool-recommendation-filter-grid,
     .toggle-row {
       grid-template-columns: 1fr;
     }
@@ -1260,5 +1393,13 @@
 
     .message-bubble-user {
       max-width: 100%;
+    }
+
+    .pool-recommendation-row {
+      grid-template-columns: 1fr;
+    }
+
+    .pool-recommendation-link {
+      justify-items: stretch;
     }
   }

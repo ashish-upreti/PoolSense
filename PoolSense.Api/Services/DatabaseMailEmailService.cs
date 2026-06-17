@@ -8,7 +8,7 @@ namespace PoolSense.Api.Services;
 
 /// <summary>
 /// Sends ticket recommendation emails via SQL Server Database Mail (msdb.dbo.sp_send_dbmail)
-/// on the PoolSenseSqlServer. Use this when the API host cannot reach the SMTP server directly.
+/// on the configured Database Mail SQL Server. Use this when the API host cannot reach the SMTP server directly.
 /// </summary>
 public class DatabaseMailEmailService : ITicketRecommendationEmailService
 {
@@ -53,9 +53,12 @@ public class DatabaseMailEmailService : ITicketRecommendationEmailService
             return false;
         }
 
-        var connectionString = _configuration.GetConnectionString("PoolSenseSqlServer")
+        var databaseMailConnectionName = string.IsNullOrWhiteSpace(email.DatabaseMailConnectionName)
+            ? "PoolSenseSqlServer"
+            : email.DatabaseMailConnectionName.Trim();
+        var connectionString = _configuration.GetConnectionString(databaseMailConnectionName)
             ?? throw new InvalidOperationException(
-            "ConnectionStrings:PoolSenseSqlServer is required for DatabaseMail delivery mode.");
+            $"ConnectionStrings:{databaseMailConnectionName} is required for DatabaseMail delivery mode.");
 
         var subject = RecommendationEmailContent.BuildSubject(ticket);
         var body = RecommendationEmailContent.BuildBody(ticket, workflowResult);
@@ -69,7 +72,7 @@ public class DatabaseMailEmailService : ITicketRecommendationEmailService
         };
 
         cmd.Parameters.AddWithValue("@profile_name", email.DatabaseMailProfile);
-    cmd.Parameters.AddWithValue("@recipients", recipients);
+        cmd.Parameters.AddWithValue("@recipients", recipients);
         cmd.Parameters.AddWithValue("@subject", subject);
         cmd.Parameters.AddWithValue("@body", body);
         cmd.Parameters.AddWithValue("@body_format", "HTML");
@@ -83,8 +86,8 @@ public class DatabaseMailEmailService : ITicketRecommendationEmailService
         await cmd.ExecuteNonQueryAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Sent recommendation email via Database Mail for source event {SourceEventId} to {Recipients} using profile '{Profile}'.",
-            ticket.SourceEventId, recipients, email.DatabaseMailProfile);
+            "Sent recommendation email via Database Mail for source event {SourceEventId} to {Recipients} using profile '{Profile}' on connection '{ConnectionName}'.",
+            ticket.SourceEventId, recipients, email.DatabaseMailProfile, databaseMailConnectionName);
 
         return true;
     }

@@ -29,6 +29,56 @@ export interface TicketWorkflowResult {
   failurePatternFrequency: number
 }
 
+export interface PoolReport {
+  sourceEventId: string
+  processingKind: string
+  processedAt: string
+  emailSent: boolean
+  emailRecipient: string
+  workflowResult: TicketWorkflowResult
+}
+
+export interface PoolRecommendationReportListItem {
+  sourceEventId: string
+  processingKind: string
+  processedAt: string
+  emailSent: boolean
+  emailRecipient: string
+  projectId: string
+  projectName: string
+  application: string
+  summary: string
+  confidence: number
+  similarIncidentCount: number
+  failureType: string
+  resolutionCategory: string
+  reportUrl: string
+}
+
+export interface PoolRecommendationReportListResponse {
+  items: PoolRecommendationReportListItem[]
+  totalCount: number
+  page: number
+  pageSize: number
+}
+
+export interface PoolRecommendationReportFilters {
+  projectId?: string
+  searchTerm?: string
+  emailSent?: boolean | null
+  from?: string
+  to?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface PoolTroubleshootResponse {
+  sourceEventId: string
+  question: string
+  answer: string
+  generatedAt: string
+}
+
 export interface ProjectGroup {
   groupId: string
   displayName: string
@@ -346,6 +396,57 @@ export class ApiService {
     }
 
     return (await response.json()) as TicketWorkflowResult
+  }
+
+  async getPoolReport(poolId: string): Promise<PoolReport> {
+    const response = await fetch(this.apiUrl(`/pool/${encodeURIComponent(poolId)}/report`), {
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      throw new Error(await this.readErrorMessage(response, `Unable to load PoolSense report for pool ${poolId}.`))
+    }
+
+    return (await response.json()) as PoolReport
+  }
+
+  async getPoolRecommendations(filters: PoolRecommendationReportFilters = {}): Promise<PoolRecommendationReportListResponse> {
+    const query = new URLSearchParams()
+    if (filters.projectId) query.set('projectId', filters.projectId)
+    if (filters.searchTerm) query.set('q', filters.searchTerm)
+    if (filters.emailSent !== undefined && filters.emailSent !== null) query.set('emailSent', String(filters.emailSent))
+    if (filters.from) query.set('from', filters.from)
+    if (filters.to) query.set('to', filters.to)
+    if (filters.page) query.set('page', String(filters.page))
+    if (filters.pageSize) query.set('pageSize', String(filters.pageSize))
+
+    const path = `/pool/reports${query.toString() ? `?${query.toString()}` : ''}`
+    const response = await fetch(this.apiUrl(path), {
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      throw new Error(await this.readErrorMessage(response, 'Unable to load Pool Recommendations.'))
+    }
+
+    return (await response.json()) as PoolRecommendationReportListResponse
+  }
+
+  async troubleshootPool(poolId: string, question: string): Promise<PoolTroubleshootResponse> {
+    const response = await fetch(this.apiUrl(`/pool/${encodeURIComponent(poolId)}/troubleshoot`), {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ question }),
+    })
+
+    if (!response.ok) {
+      throw new Error(await this.readErrorMessage(response, `Unable to troubleshoot pool ${poolId}.`))
+    }
+
+    return (await response.json()) as PoolTroubleshootResponse
   }
 
   private async encryptPassword(password: string): Promise<string | null> {
