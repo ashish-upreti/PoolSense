@@ -8,6 +8,7 @@ public interface IProcessedSourceEventRepository
 {
     Task<bool> HasBeenProcessedAsync(string sourceEventId, string processingKind, CancellationToken cancellationToken = default);
     Task<int> CountProcessedAsync(IReadOnlyCollection<string> sourceEventIds, string processingKind, CancellationToken cancellationToken = default);
+    Task<ProcessedSourceEventRecord?> GetLatestRecordAsync(string sourceEventId, CancellationToken cancellationToken = default);
     Task<ProcessedSourceEventRecord?> GetLatestReportAsync(string sourceEventId, CancellationToken cancellationToken = default);
     Task<PoolRecommendationReportListResult> GetRecommendationReportsAsync(PoolRecommendationReportQuery query, CancellationToken cancellationToken = default);
     Task MarkProcessedAsync(ProcessedSourceEventRecord record, CancellationToken cancellationToken = default);
@@ -169,6 +170,39 @@ public class ProcessedSourceEventRepository : IProcessedSourceEventRepository
             FROM dbo.processed_source_events
             WHERE source_event_id = @sourceEventId
               AND NULLIF(workflow_result, '') IS NOT NULL
+            ORDER BY CASE WHEN processing_kind = 'NewRecommendation' THEN 0 ELSE 1 END,
+                     processed_at DESC;
+            """;
+
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@sourceEventId", sourceEventId.Trim());
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken)
+            ? MapProcessedSourceEventRecord(reader)
+            : null;
+    }
+
+    public async Task<ProcessedSourceEventRecord?> GetLatestRecordAsync(string sourceEventId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sourceEventId))
+        {
+            return null;
+        }
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = """
+            SELECT TOP (1)
+                   source_event_id,
+                   processing_kind,
+                   processed_at,
+                   email_sent,
+                   email_recipient,
+                   workflow_result
+            FROM dbo.processed_source_events
+            WHERE source_event_id = @sourceEventId
             ORDER BY CASE WHEN processing_kind = 'NewRecommendation' THEN 0 ELSE 1 END,
                      processed_at DESC;
             """;

@@ -31,11 +31,15 @@ export interface TicketWorkflowResult {
 
 export interface PoolReport {
   sourceEventId: string
+  status: 'Ready' | 'Pending' | 'Processing'
+  isReady: boolean
+  message: string
+  retryAfterSeconds: number
   processingKind: string
-  processedAt: string
+  processedAt: string | null
   emailSent: boolean
   emailRecipient: string
-  workflowResult: TicketWorkflowResult
+  workflowResult: TicketWorkflowResult | null
 }
 
 export interface PoolRecommendationReportListItem {

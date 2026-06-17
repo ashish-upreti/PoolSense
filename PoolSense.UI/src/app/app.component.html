@@ -211,12 +211,28 @@
       <div *ngIf="poolReportSourceEventId || isPoolReportLoading || poolReport" class="workspace-banner">
         <span class="workspace-dot"></span>
         <span *ngIf="isPoolReportLoading">Loading report for pool {{ poolReportSourceEventId }}</span>
-        <span *ngIf="!isPoolReportLoading && poolReport">Pool report {{ poolReport.sourceEventId || poolReportSourceEventId }} · {{ poolReport.processedAt | date: 'medium' }}</span>
+        <span *ngIf="!isPoolReportLoading && poolReport && poolReport.isReady">Pool report {{ poolReport.sourceEventId || poolReportSourceEventId }} · {{ poolReport.processedAt | date: 'medium' }}</span>
+        <span *ngIf="!isPoolReportLoading && poolReport && !poolReport.isReady">Pool report {{ poolReport.sourceEventId || poolReportSourceEventId }} · {{ poolReport.status }}</span>
         <span *ngIf="!isPoolReportLoading && !poolReport">Pool report {{ poolReportSourceEventId }}</span>
       </div>
       <p *ngIf="poolReportError" class="error-banner">{{ poolReportError }}</p>
 
-      <section *ngIf="poolReport" class="pool-troubleshoot-panel">
+      <section *ngIf="poolReport && !poolReport.isReady" class="pool-troubleshoot-panel">
+        <div class="card-heading-row project-toolbar">
+          <div>
+            <p class="panel-kicker">{{ poolReport.status }}</p>
+            <h3>Recommendation is not ready yet</h3>
+          </div>
+          <span class="project-chip">Retry in {{ poolReport.retryAfterSeconds || 30 }}s</span>
+        </div>
+        <p class="workspace-copy">{{ poolReport.message || 'PoolSense is still preparing the recommendation for this pool. You can retry now or come back in a few minutes.' }}</p>
+        <div class="composer-footer">
+          <p class="helper-text">Keep this page open and retry, or use the same link again later.</p>
+          <button type="button" class="send-button" (click)="retryPoolReportLoad()" [disabled]="isPoolReportLoading">{{ isPoolReportLoading ? 'Checking...' : 'Retry' }}</button>
+        </div>
+      </section>
+
+      <section *ngIf="poolReport && poolReport.isReady" class="pool-troubleshoot-panel">
         <div class="card-heading-row project-toolbar">
           <div>
             <p class="panel-kicker">Troubleshoot</p>

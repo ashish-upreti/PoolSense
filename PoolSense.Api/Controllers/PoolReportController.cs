@@ -54,15 +54,31 @@ public sealed class PoolReportController : ControllerBase
             return BadRequest("Pool number is required.");
         }
 
-        var report = await _processedSourceEventRepository.GetLatestReportAsync(sourceEventId, cancellationToken);
-        if (report?.WorkflowResult is null)
+        var report = await _processedSourceEventRepository.GetLatestRecordAsync(sourceEventId, cancellationToken);
+        if (report is null)
         {
-            return NotFound($"No PoolSense report was found for pool {sourceEventId}.");
+            return Ok(PoolReportResponse.NotReady(
+                sourceEventId.Trim(),
+                PoolReportStatus.Pending,
+                "PoolSense is still preparing the recommendation for this pool. You can wait here and retry, or come back in a few minutes."));
+        }
+
+        if (report.WorkflowResult is null)
+        {
+            return Ok(PoolReportResponse.NotReady(
+                report.SourceEventId,
+                PoolReportStatus.Processing,
+                "PoolSense has started processing this pool, but the recommendation report is not ready yet. Please retry shortly.",
+                report));
         }
 
         return Ok(new PoolReportResponse
         {
             SourceEventId = report.SourceEventId,
+            Status = PoolReportStatus.Ready,
+            IsReady = true,
+            Message = "PoolSense recommendation report is ready.",
+            RetryAfterSeconds = 0,
             ProcessingKind = report.ProcessingKind,
             ProcessedAt = report.ProcessedAt,
             EmailSent = report.EmailSent,
@@ -140,12 +156,42 @@ public sealed class PoolReportController : ControllerBase
 
 public sealed class PoolReportResponse
 {
+    private const int DefaultRetryAfterSeconds = 30;
+
     public string SourceEventId { get; set; } = string.Empty;
+    public string Status { get; set; } = PoolReportStatus.Pending;
+    public bool IsReady { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public int RetryAfterSeconds { get; set; }
     public string ProcessingKind { get; set; } = string.Empty;
-    public DateTime ProcessedAt { get; set; }
+    public DateTime? ProcessedAt { get; set; }
     public bool EmailSent { get; set; }
     public string EmailRecipient { get; set; } = string.Empty;
-    public TicketWorkflowResult WorkflowResult { get; set; } = new();
+    public TicketWorkflowResult? WorkflowResult { get; set; }
+
+    public static PoolReportResponse NotReady(string sourceEventId, string status, string message, ProcessedSourceEventRecord? record = null)
+    {
+        return new PoolReportResponse
+        {
+            SourceEventId = sourceEventId,
+            Status = status,
+            IsReady = false,
+            Message = message,
+            RetryAfterSeconds = DefaultRetryAfterSeconds,
+            ProcessingKind = record?.ProcessingKind ?? string.Empty,
+            ProcessedAt = record?.ProcessedAt,
+            EmailSent = record?.EmailSent ?? false,
+            EmailRecipient = record?.EmailRecipient ?? string.Empty,
+            WorkflowResult = null
+        };
+    }
+}
+
+public static class PoolReportStatus
+{
+    public const string Ready = "Ready";
+    public const string Processing = "Processing";
+    public const string Pending = "Pending";
 }
 
 public sealed class PoolTroubleshootRequest

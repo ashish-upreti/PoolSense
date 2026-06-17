@@ -802,6 +802,13 @@ export class AppComponent implements OnInit {
     }
   }
 
+  retryPoolReportLoad() {
+    const poolId = this.poolReport?.sourceEventId || this.poolReportSourceEventId
+    if (poolId) {
+      void this.loadPoolReport(poolId)
+    }
+  }
+
   private async loadProjectGroups() {
     if (!this.currentUser) {
       this.groups = []
@@ -907,7 +914,12 @@ export class AppComponent implements OnInit {
       const report = await this.api.getPoolReport(poolReportId)
       this.poolReport = report
       this.poolReportSourceEventId = report.sourceEventId || poolReportId
-      this.applyPoolReportToWorkspace(report)
+      if (report.isReady && report.workflowResult) {
+        this.applyPoolReportToWorkspace(report)
+      } else {
+        this.messages = []
+        this.insights = null
+      }
     } catch (requestError) {
       this.poolReportError = requestError instanceof Error ? requestError.message : 'Unable to load the PoolSense report.'
     } finally {
@@ -917,6 +929,10 @@ export class AppComponent implements OnInit {
 
   private applyPoolReportToWorkspace(report: PoolReport) {
     const result = report.workflowResult
+    if (!result) {
+      return
+    }
+
     const sourceEventId = report.sourceEventId || this.poolReportSourceEventId
     const userMessage: UserMessage = {
       id: Date.now(),
