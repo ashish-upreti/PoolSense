@@ -35,6 +35,7 @@ public sealed class TicketAutomationSettingsProvider : ITicketAutomationSettings
 
         effectiveSettings.PollingEnabled = runtimeSettings.PollingEnabled;
         effectiveSettings.PollIntervalSeconds = runtimeSettings.PollIntervalSeconds;
+        effectiveSettings.PoolSenseEmail = runtimeSettings.PoolSenseEmail;
         return effectiveSettings;
     }
 
@@ -53,6 +54,7 @@ public sealed class TicketAutomationSettingsProvider : ITicketAutomationSettings
             ClosedStatusName = source.ClosedStatusName,
             NewStatusName = source.NewStatusName,
             SimilaritySearchLimit = source.SimilaritySearchLimit,
+            PoolSenseEmail = source.PoolSenseEmail,
             Email = new EmailDeliverySettings
             {
                 Recipient = source.Email.Recipient,

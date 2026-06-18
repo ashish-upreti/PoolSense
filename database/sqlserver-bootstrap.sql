@@ -84,11 +84,46 @@ BEGIN
         settings_key nvarchar(64) NOT NULL CONSTRAINT PK_ticket_automation_settings PRIMARY KEY,
         polling_enabled bit NOT NULL CONSTRAINT DF_ticket_automation_settings_polling_enabled DEFAULT 1,
         poll_interval_seconds int NOT NULL CONSTRAINT DF_ticket_automation_settings_poll_interval_seconds DEFAULT 30,
+        pool_sense_email bit NOT NULL CONSTRAINT DF_ticket_automation_settings_pool_sense_email DEFAULT 1,
         created_at datetime2(7) NOT NULL CONSTRAINT DF_ticket_automation_settings_created_at DEFAULT SYSUTCDATETIME(),
         updated_at datetime2(7) NOT NULL CONSTRAINT DF_ticket_automation_settings_updated_at DEFAULT SYSUTCDATETIME(),
         CONSTRAINT CK_ticket_automation_settings_poll_interval_seconds CHECK (poll_interval_seconds BETWEEN 10 AND 3600)
     );
 END;
+GO
+
+-- Add pool_sense_email to existing tables that pre-date this column.
+IF COL_LENGTH(N'dbo.ticket_automation_settings', N'pool_sense_email') IS NULL
+BEGIN
+    ALTER TABLE dbo.ticket_automation_settings
+        ADD pool_sense_email bit NOT NULL CONSTRAINT DF_ticket_automation_settings_pool_sense_email DEFAULT 1;
+END;
+GO
+
+IF OBJECT_ID(N'dbo.user_activity_logs', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.user_activity_logs (
+        id bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_user_activity_logs PRIMARY KEY,
+        created_at datetime2(7) NOT NULL CONSTRAINT DF_user_activity_logs_created_at DEFAULT SYSUTCDATETIME(),
+        user_name nvarchar(256) NOT NULL CONSTRAINT DF_user_activity_logs_user_name DEFAULT '',
+        action nvarchar(128) NOT NULL,
+        entity_type nvarchar(128) NOT NULL CONSTRAINT DF_user_activity_logs_entity_type DEFAULT '',
+        entity_id nvarchar(256) NOT NULL CONSTRAINT DF_user_activity_logs_entity_id DEFAULT '',
+        details nvarchar(max) NOT NULL CONSTRAINT DF_user_activity_logs_details DEFAULT '',
+        ip_address nvarchar(64) NOT NULL CONSTRAINT DF_user_activity_logs_ip_address DEFAULT '',
+        http_method nvarchar(16) NOT NULL CONSTRAINT DF_user_activity_logs_http_method DEFAULT '',
+        request_path nvarchar(512) NOT NULL CONSTRAINT DF_user_activity_logs_request_path DEFAULT '',
+        success bit NOT NULL CONSTRAINT DF_user_activity_logs_success DEFAULT 1
+    );
+END;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_user_activity_logs_created_at' AND object_id = OBJECT_ID(N'dbo.user_activity_logs'))
+    CREATE INDEX IX_user_activity_logs_created_at ON dbo.user_activity_logs (created_at DESC);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_user_activity_logs_user_name_created_at' AND object_id = OBJECT_ID(N'dbo.user_activity_logs'))
+    CREATE INDEX IX_user_activity_logs_user_name_created_at ON dbo.user_activity_logs (user_name, created_at DESC);
 GO
 
 IF OBJECT_ID(N'dbo.ingestion_status', N'U') IS NULL

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using PoolSense.Api.Logging;
 using PoolSense.Api.Models;
 using PoolSense.Api.Services;
 
@@ -13,15 +14,21 @@ public sealed class SettingsController : ControllerBase
     private readonly ITicketAutomationSettingsProvider _settingsProvider;
     private readonly IConfiguration _configuration;
     private readonly IWebHostEnvironment _environment;
+    private readonly IUserActivityAuditLogger _auditLogger;
+    private readonly ILogger<SettingsController> _logger;
 
     public SettingsController(
         ITicketAutomationSettingsProvider settingsProvider,
         IConfiguration configuration,
-        IWebHostEnvironment environment)
+        IWebHostEnvironment environment,
+        IUserActivityAuditLogger auditLogger,
+        ILogger<SettingsController> logger)
     {
         _settingsProvider = settingsProvider;
         _configuration = configuration;
         _environment = environment;
+        _auditLogger = auditLogger;
+        _logger = logger;
     }
 
     [HttpGet("ticket-automation")]
@@ -56,19 +63,32 @@ public sealed class SettingsController : ControllerBase
 
         try
         {
+            var before = await _settingsProvider.GetAsync(cancellationToken);
+
             var savedSettings = await _settingsProvider.UpdateAsync(new RuntimeTicketAutomationSettings
             {
                 PollingEnabled = request.PollingEnabled,
-                PollIntervalSeconds = request.PollIntervalSeconds
+                PollIntervalSeconds = request.PollIntervalSeconds,
+                PoolSenseEmail = request.PoolSenseEmail
             }, cancellationToken);
 
             var effectiveSettings = await _settingsProvider.GetAsync(cancellationToken);
             effectiveSettings.PollingEnabled = savedSettings.PollingEnabled;
             effectiveSettings.PollIntervalSeconds = savedSettings.PollIntervalSeconds;
+            effectiveSettings.PoolSenseEmail = savedSettings.PoolSenseEmail;
+
+            var details = $"pollingEnabled: {before.PollingEnabled} → {savedSettings.PollingEnabled}; " +
+                          $"pollIntervalSeconds: {before.PollIntervalSeconds} → {savedSettings.PollIntervalSeconds}; " +
+                          $"poolSenseEmail: {before.PoolSenseEmail} → {savedSettings.PoolSenseEmail}";
+            _logger.LogInformation("Ticket automation settings updated. {Details}", details);
+            await _auditLogger.LogAsync("UpdateTicketAutomationSettings", "TicketAutomationSettings", "master_polling", details, cancellationToken: cancellationToken);
+
             return Ok(ToResponse(effectiveSettings, GetDeploymentInfo()));
         }
         catch (Exception ex)
         {
+            await _auditLogger.LogAsync("UpdateTicketAutomationSettings", "TicketAutomationSettings", "master_polling",
+                $"Error: {ex.Message}", success: false, cancellationToken);
             return StatusCode(500, $"An error occurred while updating ticket automation settings: {ex.Message}");
         }
     }
@@ -110,6 +130,7 @@ public sealed class SettingsController : ControllerBase
             deployment = deploymentInfo,
             pollingEnabled = settings.PollingEnabled,
             pollIntervalSeconds = settings.PollIntervalSeconds,
+            poolSenseEmail = settings.PoolSenseEmail,
             closedStatusName = settings.ClosedStatusName,
             newStatusName = settings.NewStatusName,
             similaritySearchLimit = settings.SimilaritySearchLimit,

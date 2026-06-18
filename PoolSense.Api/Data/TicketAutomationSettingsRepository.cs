@@ -26,7 +26,8 @@ public sealed class TicketAutomationSettingsRepository : ITicketAutomationSettin
 
         const string sql = """
             SELECT TOP (1) polling_enabled,
-                           poll_interval_seconds
+                           poll_interval_seconds,
+                           pool_sense_email
             FROM dbo.ticket_automation_settings
             WHERE settings_key = @settingsKey;
             """;
@@ -43,7 +44,8 @@ public sealed class TicketAutomationSettingsRepository : ITicketAutomationSettin
         return new RuntimeTicketAutomationSettings
         {
             PollingEnabled = reader.IsDBNull(0) || reader.GetBoolean(0),
-            PollIntervalSeconds = reader.IsDBNull(1) ? 30 : reader.GetInt32(1)
+            PollIntervalSeconds = reader.IsDBNull(1) ? 30 : reader.GetInt32(1),
+            PoolSenseEmail = reader.IsDBNull(2) || reader.GetBoolean(2)
         };
     }
 
@@ -61,23 +63,26 @@ public sealed class TicketAutomationSettingsRepository : ITicketAutomationSettin
             WHEN MATCHED THEN
                 UPDATE SET polling_enabled = @pollingEnabled,
                            poll_interval_seconds = @pollIntervalSeconds,
+                           pool_sense_email = @poolSenseEmail,
                            updated_at = SYSUTCDATETIME()
             WHEN NOT MATCHED THEN
-                INSERT (settings_key, polling_enabled, poll_interval_seconds)
-                VALUES (@settingsKey, @pollingEnabled, @pollIntervalSeconds)
-            OUTPUT INSERTED.polling_enabled, INSERTED.poll_interval_seconds;
+                INSERT (settings_key, polling_enabled, poll_interval_seconds, pool_sense_email)
+                VALUES (@settingsKey, @pollingEnabled, @pollIntervalSeconds, @poolSenseEmail)
+            OUTPUT INSERTED.polling_enabled, INSERTED.poll_interval_seconds, INSERTED.pool_sense_email;
             """;
 
         await using var command = new SqlCommand(sql, connection);
         command.Parameters.AddWithValue("@settingsKey", SettingsKey);
         command.Parameters.AddWithValue("@pollingEnabled", settings.PollingEnabled);
         command.Parameters.AddWithValue("@pollIntervalSeconds", settings.PollIntervalSeconds);
+        command.Parameters.AddWithValue("@poolSenseEmail", settings.PoolSenseEmail);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (await reader.ReadAsync(cancellationToken))
         {
             settings.PollingEnabled = reader.IsDBNull(0) || reader.GetBoolean(0);
             settings.PollIntervalSeconds = reader.IsDBNull(1) ? settings.PollIntervalSeconds : reader.GetInt32(1);
+            settings.PoolSenseEmail = reader.IsDBNull(2) || reader.GetBoolean(2);
         }
 
         return settings;

@@ -116,6 +116,7 @@ export interface TicketAutomationSettings {
   deployment?: DeploymentInfo
   pollingEnabled: boolean
   pollIntervalSeconds: number
+  poolSenseEmail: boolean
   closedStatusName: string
   newStatusName: string
   similaritySearchLimit: number
@@ -141,6 +142,7 @@ export interface DeploymentInfo {
 export interface TicketAutomationSettingsInput {
   pollingEnabled: boolean
   pollIntervalSeconds: number
+  poolSenseEmail: boolean
 }
 
 export interface IngestionStatus {

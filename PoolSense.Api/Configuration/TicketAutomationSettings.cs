@@ -7,6 +7,8 @@ public sealed class TicketAutomationSettings
     public string ClosedStatusName { get; set; } = "Closed";
     public string NewStatusName { get; set; } = "New";
     public int SimilaritySearchLimit { get; set; } = 5;
+    /// <summary>Master email kill switch. When false, all outbound emails are suppressed regardless of per-application settings.</summary>
+    public bool PoolSenseEmail { get; set; } = true;
     public EmailDeliverySettings Email { get; set; } = new();
 }
 

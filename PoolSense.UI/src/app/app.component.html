@@ -622,6 +622,14 @@
               </div>
 
               <div class="field-group application-level-item">
+                <span class="field-label">PoolSense Email</span>
+                <label class="toggle-card application-level-toggle">
+                  <input type="checkbox" name="masterPoolSenseEmail" [(ngModel)]="ticketAutomationForm.poolSenseEmail" [disabled]="isTicketAutomationSaving" />
+                  <span><strong>PoolSense Email</strong><small>Master email kill switch. Uncheck to suppress all outbound emails regardless of per-application settings.</small></span>
+                </label>
+              </div>
+
+              <div class="field-group application-level-item">
                 <span class="field-label">Read-only context</span>
                 <div class="toggle-card application-level-context">
                   <span><strong>{{ ticketAutomationSettings.email.deliveryMode }}</strong><small>{{ deploymentLabel }} · {{ ticketSourceDatabaseName }} · Closed={{ ticketAutomationSettings.closedStatusName }} · New={{ ticketAutomationSettings.newStatusName }}</small></span>

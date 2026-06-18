@@ -132,7 +132,7 @@ public class BackgroundTicketPollingService : BackgroundService
 
             var newTickets = await connector.GetTicketsByStatusAsync(currentProject, settings.NewStatusName, cancellationToken);
             _logger.LogInformation("Project '{ProjectName}': fetched {NewCount} '{NewStatus}' tickets.", currentProject.ProjectName, newTickets.Count, settings.NewStatusName);
-            await ProcessNewTicketsAsync(currentProject, newTickets, processedSourceEventRepository, orchestrator, emailService, cancellationToken);
+            await ProcessNewTicketsAsync(currentProject, newTickets, processedSourceEventRepository, orchestrator, emailService, settings, cancellationToken);
         }
 
         _logger.LogInformation("Polling iteration completed.");
@@ -190,6 +190,7 @@ public class BackgroundTicketPollingService : BackgroundService
         IProcessedSourceEventRepository processedSourceEventRepository,
         ITicketWorkflowOrchestrator orchestrator,
         ITicketRecommendationEmailService emailService,
+        TicketAutomationSettings settings,
         CancellationToken cancellationToken)
     {
         var processedCount = 0;
@@ -220,7 +221,11 @@ public class BackgroundTicketPollingService : BackgroundService
             var emailSent = false;
             try
             {
-                if (project.SendEmail)
+                if (!settings.PoolSenseEmail)
+                {
+                    _logger.LogInformation("Email sending is disabled (PoolSenseEmail=false). Skipping email for ticket {TicketId}.", ticket.TicketId);
+                }
+                else if (project.SendEmail)
                 {
                     emailSent = await emailService.SendRecommendationAsync(project, ticket, workflowResult, cancellationToken);
                 }

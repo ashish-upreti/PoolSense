@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using PoolSense.Api.Agents;
 using PoolSense.Api.Data;
+using PoolSense.Api.Logging;
 using PoolSense.Api.Models;
 using PoolSense.Api.Services;
 using PoolSense.Application.Models;
@@ -25,6 +26,7 @@ public class KnowledgeController : ControllerBase
     private readonly IEmbeddingService _embeddingService;
     private readonly ISimilaritySearchService _similaritySearchService;
     private readonly IVectorStore _vectorStore;
+    private readonly IUserActivityAuditLogger _auditLogger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="KnowledgeController"/> class.
@@ -39,13 +41,15 @@ public class KnowledgeController : ControllerBase
         IKnowledgeEnrichmentService knowledgeEnrichmentService,
         IEmbeddingService embeddingService,
         ISimilaritySearchService similaritySearchService,
-        IVectorStore vectorStore)
+        IVectorStore vectorStore,
+        IUserActivityAuditLogger auditLogger)
     {
         _ticketAnalyzerAgent = ticketAnalyzerAgent;
         _knowledgeEnrichmentService = knowledgeEnrichmentService;
         _embeddingService = embeddingService;
         _similaritySearchService = similaritySearchService;
         _vectorStore = vectorStore;
+        _auditLogger = auditLogger;
     }
 
     /// <summary>
@@ -100,6 +104,9 @@ public class KnowledgeController : ControllerBase
 
             enrichedKnowledge.TicketKnowledge.Embedding = await _embeddingService.GenerateEmbedding(enrichedKnowledge.EmbeddingText);
             await _vectorStore.InsertTicketKnowledge(enrichedKnowledge.TicketKnowledge, cancellationToken);
+
+            await _auditLogger.LogAsync("StoreTicketKnowledge", "TicketKnowledge", ticketKnowledge.TicketId,
+                $"SourceEventId={ticketKnowledge.SourceEventId}; Application={ticketKnowledge.Application}; KnowledgeYear={ticketKnowledge.KnowledgeYear}", cancellationToken: cancellationToken);
 
             return Ok(enrichedKnowledge.TicketKnowledge);
         }

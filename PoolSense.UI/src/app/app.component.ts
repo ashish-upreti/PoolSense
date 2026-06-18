@@ -76,6 +76,7 @@ const poolTroubleshootPrompts = [
 const defaultTicketAutomationSettings: TicketAutomationSettings = {
   pollingEnabled: environment.ticketAutomation.pollingEnabled,
   pollIntervalSeconds: environment.ticketAutomation.pollIntervalSeconds,
+  poolSenseEmail: environment.ticketAutomation.poolSenseEmail,
   closedStatusName: environment.ticketAutomation.closedStatusName,
   newStatusName: environment.ticketAutomation.newStatusName,
   similaritySearchLimit: environment.ticketAutomation.similaritySearchLimit,
@@ -109,6 +110,7 @@ function createTicketAutomationSettingsForm(settings: TicketAutomationSettings =
   return {
     pollingEnabled: settings.pollingEnabled,
     pollIntervalSeconds: settings.pollIntervalSeconds,
+    poolSenseEmail: settings.poolSenseEmail,
   }
 }
 
@@ -543,6 +545,7 @@ export class AppComponent implements OnInit {
     const payload: TicketAutomationSettingsInput = {
       pollingEnabled: this.ticketAutomationForm.pollingEnabled,
       pollIntervalSeconds: Number(this.ticketAutomationForm.pollIntervalSeconds),
+      poolSenseEmail: this.ticketAutomationForm.poolSenseEmail,
     }
 
     if (!Number.isFinite(payload.pollIntervalSeconds) || payload.pollIntervalSeconds < 10 || payload.pollIntervalSeconds > 3600) {

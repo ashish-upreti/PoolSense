@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using PoolSense.Api.Data;
+using PoolSense.Api.Logging;
 using PoolSense.Api.Models;
 using System.Net.Mail;
 
@@ -15,6 +16,7 @@ public class ProjectsController : ControllerBase
     private readonly IProjectRepository _projectRepository;
     private readonly ITicketSourceApplicationRepository _ticketSourceApplicationRepository;
     private readonly ILogger<ProjectsController> _logger;
+    private readonly IUserActivityAuditLogger _auditLogger;
 
     /// <summary>
     /// Request payload used to update email delivery settings for one application mapping.
@@ -97,11 +99,13 @@ public class ProjectsController : ControllerBase
     public ProjectsController(
         IProjectRepository projectRepository,
         ITicketSourceApplicationRepository ticketSourceApplicationRepository,
-        ILogger<ProjectsController> logger)
+        ILogger<ProjectsController> logger,
+        IUserActivityAuditLogger auditLogger)
     {
         _projectRepository = projectRepository;
         _ticketSourceApplicationRepository = ticketSourceApplicationRepository;
         _logger = logger;
+        _auditLogger = auditLogger;
     }
 
     /// <summary>
@@ -138,6 +142,9 @@ public class ProjectsController : ControllerBase
                 : request.ApplicationFilter.Trim();
 
             var createdProject = await _projectRepository.CreateProjectAsync(project, cancellationToken);
+            _logger.LogInformation("Project created: {ProjectId} ({ProjectName}) by {User}.", createdProject.ProjectId, createdProject.ProjectName, User.Identity?.Name ?? "unknown");
+            await _auditLogger.LogAsync("CreateProject", "ProjectConfig", createdProject.ProjectId,
+                $"ProjectName={createdProject.ProjectName}; ApplicationFilter={createdProject.ApplicationFilter}; PoolingEnabled={createdProject.PoolingEnabled}; SendEmail={createdProject.SendEmail}", cancellationToken: cancellationToken);
             return CreatedAtAction(nameof(GetProjectById), new { projectId = createdProject.ProjectId }, ToResponse(createdProject));
         }
         catch (Exception ex)
@@ -226,6 +233,10 @@ public class ProjectsController : ControllerBase
 
             await TryUpdateTicketSourcePoolSenseFlagAsync(savedProject.ApplicationFilter, savedProject.PoolingEnabled, cancellationToken);
 
+            _logger.LogInformation("Project updated: {ProjectId} ({ProjectName}) by {User}.", savedProject.ProjectId, savedProject.ProjectName, User.Identity?.Name ?? "unknown");
+            await _auditLogger.LogAsync("UpdateProject", "ProjectConfig", savedProject.ProjectId,
+                $"ProjectName={savedProject.ProjectName}; ApplicationFilter={savedProject.ApplicationFilter}; PoolingEnabled={savedProject.PoolingEnabled}; SendEmail={savedProject.SendEmail}; EmailRecipients={savedProject.EmailRecipients}", cancellationToken: cancellationToken);
+
             return Ok(ToResponse(savedProject));
         }
         catch (Exception ex)
@@ -297,9 +308,14 @@ public class ProjectsController : ControllerBase
             existingProject.EmailRecipients = normalizedRecipients;
 
             var savedProject = await _projectRepository.UpdateProjectAsync(existingProject, cancellationToken);
-            return savedProject is null
-                ? NotFound($"Project with ApplicationFilter '{request.ApplicationFilter}' was not found.")
-                : Ok(ToResponse(savedProject));
+            if (savedProject is null)
+                return NotFound($"Project with ApplicationFilter '{request.ApplicationFilter}' was not found.");
+
+            _logger.LogInformation("Email settings updated for ApplicationFilter '{ApplicationFilter}' by {User}.", savedProject.ApplicationFilter, User.Identity?.Name ?? "unknown");
+            await _auditLogger.LogAsync("UpdateEmailSettings", "ProjectConfig", savedProject.ProjectId,
+                $"ApplicationFilter={savedProject.ApplicationFilter}; SendEmail={savedProject.SendEmail}; EmailRecipients={savedProject.EmailRecipients}", cancellationToken: cancellationToken);
+
+            return Ok(ToResponse(savedProject));
         }
         catch (Exception ex)
         {
@@ -376,6 +392,10 @@ public class ProjectsController : ControllerBase
 
                 await TryUpdateTicketSourcePoolSenseFlagAsync(updatedProject.ApplicationFilter, updatedProject.PoolingEnabled, cancellationToken);
 
+                _logger.LogInformation("External project settings updated: {ProjectId} ({ApplicationName}) by {User}.", updatedProject.ProjectId, updatedProject.ProjectName, User.Identity?.Name ?? "unknown");
+                await _auditLogger.LogAsync("UpsertExternalProjectSettings", "ProjectConfig", updatedProject.ProjectId,
+                    $"Action=Update; ApplicationName={updatedProject.ProjectName}; PoolingEnabled={updatedProject.PoolingEnabled}; SendEmail={updatedProject.SendEmail}; EmailRecipients={updatedProject.EmailRecipients}", cancellationToken: cancellationToken);
+
                 return Ok(ToResponse(updatedProject));
             }
 
@@ -398,6 +418,10 @@ public class ProjectsController : ControllerBase
             var createdProject = await _projectRepository.CreateProjectAsync(newProject, cancellationToken);
 
             await TryUpdateTicketSourcePoolSenseFlagAsync(createdProject.ApplicationFilter, createdProject.PoolingEnabled, cancellationToken);
+
+            _logger.LogInformation("External project settings created: {ProjectId} ({ApplicationName}) by {User}.", createdProject.ProjectId, createdProject.ProjectName, User.Identity?.Name ?? "unknown");
+            await _auditLogger.LogAsync("UpsertExternalProjectSettings", "ProjectConfig", createdProject.ProjectId,
+                $"Action=Create; ApplicationName={createdProject.ProjectName}; PoolingEnabled={createdProject.PoolingEnabled}; SendEmail={createdProject.SendEmail}; EmailRecipients={createdProject.EmailRecipients}", cancellationToken: cancellationToken);
 
             return Ok(ToResponse(createdProject));
         }

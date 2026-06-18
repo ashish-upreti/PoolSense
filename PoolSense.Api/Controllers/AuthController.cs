@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using PoolSense.Api.Contracts;
 using PoolSense.Api.Data;
+using PoolSense.Api.Logging;
 using PoolSense.Api.Options;
 using PoolSense.Api.Services;
 
@@ -26,6 +27,7 @@ public sealed class AuthController : ControllerBase
     private readonly IJwtTokenService _jwtTokenService;
     private readonly ISessionPasswordStore _sessionPasswordStore;
     private readonly IAuthUserRepository _authUserRepository;
+    private readonly IUserActivityAuditLogger _auditLogger;
 
     public AuthController(
         IOptions<ActiveDirectoryOptions> activeDirectoryOptions,
@@ -36,7 +38,8 @@ public sealed class AuthController : ControllerBase
         IActiveDirectoryAuthService activeDirectoryAuthService,
         IJwtTokenService jwtTokenService,
         ISessionPasswordStore sessionPasswordStore,
-        IAuthUserRepository authUserRepository)
+        IAuthUserRepository authUserRepository,
+        IUserActivityAuditLogger auditLogger)
     {
         _activeDirectoryOptions = activeDirectoryOptions.Value;
         _authOptions = authOptions.Value;
@@ -47,6 +50,7 @@ public sealed class AuthController : ControllerBase
         _jwtTokenService = jwtTokenService;
         _sessionPasswordStore = sessionPasswordStore;
         _authUserRepository = authUserRepository;
+        _auditLogger = auditLogger;
     }
 
     [HttpGet("pubkey")]
@@ -212,6 +216,10 @@ public sealed class AuthController : ControllerBase
 
         await RecordSuccessfulLoginAttemptAsync(authResult.User, clientAddress, cancellationToken);
 
+        await _auditLogger.LogAsync("SignIn", "AuthUser", authResult.User.Username,
+            $"AuthPrincipal={authResult.User.AuthPrincipal}; RememberMe={mutableRequest.RememberMe}; IsAdmin={authResult.User.IsAdmin ?? false}; IP={clientAddress}",
+            success: true, cancellationToken);
+
         _logger.LogInformation(
             "Login succeeded for user '{Username}' (principal '{AuthPrincipal}') from {ClientAddress}. RememberMe={RememberMe}, IsAdmin={IsAdmin}",
             authResult.User.Username,
@@ -229,12 +237,14 @@ public sealed class AuthController : ControllerBase
     }
 
     [HttpPost("logout")]
-    public IActionResult Logout()
+    public async Task<IActionResult> Logout(CancellationToken cancellationToken)
     {
         var token = _jwtTokenService.GetTokenFromRequest(Request);
+        string? resolvedUsername = null;
         if (!string.IsNullOrWhiteSpace(token))
         {
             var principal = _jwtTokenService.ValidateToken(token);
+            resolvedUsername = GetClaimValue(principal!, "username");
             var jti = principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value
                 ?? principal?.FindFirst("jti")?.Value;
             if (!string.IsNullOrWhiteSpace(jti))
@@ -253,6 +263,10 @@ public sealed class AuthController : ControllerBase
             SameSite = requireSecureCookie ? SameSiteMode.None : SameSiteMode.Lax,
             Path = "/"
         });
+
+        var clientAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        await _auditLogger.LogAsync("SignOut", "AuthUser", resolvedUsername ?? "unknown",
+            $"IP={clientAddress}", success: true, cancellationToken);
 
         return Ok(new
         {
@@ -428,6 +442,9 @@ public sealed class AuthController : ControllerBase
         try
         {
             await _authUserRepository.RecordFailedLoginAsync(username, statusCode, message, clientAddress, cancellationToken);
+            await _auditLogger.LogAsync("SignIn", "AuthUser", username ?? string.Empty,
+                $"Failed; StatusCode={statusCode}; Message={message}; IP={clientAddress}",
+                success: false, cancellationToken);
         }
         catch (Exception ex)
         {

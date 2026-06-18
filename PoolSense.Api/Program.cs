@@ -176,6 +176,9 @@ builder.Services.AddScoped<IProcessedSourceEventRepository, ProcessedSourceEvent
 builder.Services.AddScoped<ITicketAutomationSettingsRepository, TicketAutomationSettingsRepository>();
 builder.Services.AddScoped<ITicketAutomationSettingsProvider, TicketAutomationSettingsProvider>();
 
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IUserActivityAuditLogger, UserActivityAuditLogger>();
+
 builder.Services.AddScoped<SqlTicketConnector>();
 builder.Services.AddScoped<IApplicationSyncService, ApplicationSyncService>();
 builder.Services.AddHttpClient<ApiTicketConnector>();
