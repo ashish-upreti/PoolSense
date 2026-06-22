@@ -1,16 +1,18 @@
 # PoolSense Presentation Prompts
 
-Use the following prompts to generate a focused 1 of 12-slide presentation for the `PoolSense` proof of concept. These prompts are aligned to the actual implemented POC scope:
+Use the following prompts to generate a focused 1 of 12-slide presentation for `PoolSense`, a deployed AI-powered incident assistance platform. These prompts are aligned to the delivered v1 scope:
 
 1. Historical closed tickets are polled directly from a SQL source and converted into a reusable, vector-searchable knowledge base.
 2. New tickets trigger AI-based recommendations and email notifications (SMTP or SQL Server Database Mail).
 3. A split-screen operator workspace lets users enter a problem statement, scope searches by project group, and review resolutions alongside an analytics insight panel with telemetry charts.
 
+v1 knowledge source is pool ticket history. Future releases will add sources such as project wikis, SharePoint, and codebases.
+
 Each prompt can be pasted into a presentation-capable AI model to generate one slide at a time.
 
 Note: Attached document is for pool assist icon consistency. Create 1 slide at a time based on below slide context:
 
-## Slide 1 - Title and POC Objective
+## Slide 1 - Title and v1 Overview
 
 **Prompt**
 
@@ -18,25 +20,25 @@ Create a clean enterprise title slide for a presentation about `PoolSense`.
 
 Include:
 - Title: `PoolSense`
-- Subtitle: `AI-Powered Incident Assistance Proof of Concept`
-- Supporting line: `SQL Ticket Polling + AI Normalization + Similarity Search + Email Recommendations + Insights Dashboard + Operator Workspace`
+- Subtitle: `AI-Powered Incident Assistance — Initial Release (v1)`
+- Supporting line: `SQL Ticket Polling + AI Normalization + Similarity Search + Email Recommendations + Insights Dashboard + Operator Workspace + User Activity Audit Trail`
 - Presenter placeholder: `Prepared by: Ashish Upreti`
 
 Also show a short objective statement:
-- `Objective: Validate whether AI can transform historical ticket data into a reusable support knowledge base and assist both automated and user-driven incident resolution workflows with multi-group scoping, analytical insights, and transparent reasoning.`
+- `PoolSense is deployed and operational. v1 transforms pool ticket history into a reusable AI-powered knowledge base that assists both automated and user-driven incident resolution workflows with multi-group scoping, analytical insights, and transparent reasoning.`
 
 Style guidance:
 - modern corporate slide
 - blue, teal, and white palette
 - polished and executive-friendly
 
-## Slide 2 - POC Scope and Intended 3 Flows
+## Slide 2 - v1 Scope — 3 Delivered Workflows
 
 **Prompt**
 
-Create a slide called `POC Scope` for `PoolSense`.
+Create a slide called `v1 Scope` for `PoolSense`.
 
-Explain that the proof of concept was designed around 3 core flows:
+Explain that the initial release delivers 3 core workflows:
 
 1. `Closed ticket knowledge flow`
    - old closed tickets are continuously polled from a SQL source
@@ -57,7 +59,7 @@ Explain that the proof of concept was designed around 3 core flows:
    - returns possible resolution, related historical incidents, confidence scoring, failure pattern classification, and AI reasoning in the UI
    - an insight panel displays telemetry charts, similar incident details, and system context alongside the conversation
 
-Make it clear that these three flows are the primary POC value proposition.
+Make it clear that these three workflows are live and operational in v1.
 
 ## Slide 3 - Problem Statement and Why It Matters
 
@@ -86,7 +88,7 @@ Style:
 
 **Prompt**
 
-Create a technical architecture overview slide for `PoolSense` aligned to the actual POC implementation.
+Create a technical architecture overview slide for `PoolSense` aligned to the deployed v1 implementation.
 
 Include these components:
 - `SQL Ticket Source (SQL Server)`
@@ -210,11 +212,11 @@ Emphasize:
 - the split-screen design gives engineers conversation, evidence, and analytics on one screen
 - dark/light theme toggle persists user preference via localStorage
 
-## Slide 8 - Current POC Features Implemented
+## Slide 8 - Features Delivered in v1
 
 **Prompt**
 
-Create a slide listing the features currently implemented in the `PoolSense` POC.
+Create a slide listing the features delivered in `PoolSense` v1.
 
 Group them into five categories.
 
@@ -260,39 +262,37 @@ Group them into five categories.
 - multi-project and multi-group support (SQL LIKE pattern matching for application filters)
 - PoolSense UI enable/disable writes back to `tbl_Application.PoolSense`
 - configurable email delivery (SMTP or Database Mail)
+- **PoolSense Email master kill switch** — single toggle in Master Settings to suppress all outbound emails across all applications
+- **User activity audit trail** — all configuration changes, knowledge store writes, sign-in, and sign-out events recorded to `dbo.user_activity_logs` with user name, action, entity, details, and IP address
 - user secrets support for local development
 
-Make the slide look like a mature and credible proof of concept.
+Make the slide reflect a mature, deployed v1 platform. v1 knowledge source is pool ticket history; additional sources are on the roadmap.
 
-## Slide 9 - Gaps, Risks, and Recommended Next Steps
+## Slide 9 - Current Limitations and v2 Roadmap
 
 **Prompt**
 
-Create a slide called `Current Gaps and Recommended Next Steps` for `PoolSense`.
+Create a slide called `Current Limitations and v2 Roadmap` for `PoolSense`.
 
-Include realistic POC gaps:
-- production hardening is still needed (error handling, circuit breakers, retry policies)
-- database availability and environment setup need stabilization
-- schema migrations and versioning are not yet production-grade (bootstrap script only)
-- AI resilience and output validation are still being improved (JSON sanitizer handles some edge cases)
-- observability, alerting, and monitoring need to be expanded (no structured logging or APM yet)
-- security and secret management should be hardened (user-secrets supported but not enforced)
-- broader pilot measurement and governance are still required
+Include realistic v1 limitations:
+- production hardening improvements still in progress (error handling, circuit breakers, retry policies)
+- schema migrations and versioning are managed via bootstrap script; formal migration tooling is a v2 item
+- AI resilience and output validation are being improved incrementally (JSON sanitizer handles edge cases)
+- observability is partially in place (structured application run logs and user activity audit trail active; APM integration still needed)
+- knowledge source is currently limited to pool ticket history — wikis, SharePoint, and codebases are planned for v2
 - UI currently supports one concurrent conversation per session
-- no user authentication or role-based access control yet
 
-Then include a `Recommended Next Steps` section:
-- stabilize infrastructure and connectivity
-- productionize configuration and secrets
-- add authentication and role-based access control
-- define measurable pilot KPIs (triage time reduction, resolution accuracy, knowledge reuse rate)
-- pilot with one or two operational teams using project group scoping
+Then include a `v2 Roadmap` section:
+- expand knowledge sources: integrate project wikis and SharePoint via NYRA APIs
+- connect directly to the production DBAS system for real-time ticket ingestion
+- add codebase as a knowledge source for deeper root cause context
 - expand dashboards, analytics, and evaluation loops
-- add structured logging, health checks, and APM integration
-- investigate feedback loops (thumbs up/down on suggestions) to improve AI quality over time
+- add APM integration and health check endpoints
+- improve feedback loops to tune AI recommendation quality over time
+- role-based access control for multi-team deployments
 
 End with:
-- `These gaps are expected at the POC stage and are addressed in the proposed pilot scope (Slide 12).`
+- `v1 is live. The roadmap is clear. These items are prioritized for the next release cycle.`
 
 ## Slide 10 - Business Value and Closing
 
@@ -311,26 +311,27 @@ Include a short summary of value:
 - foundation for future support automation and operational intelligence
 
 Then include a conclusion statement:
-- `PoolSense has successfully demonstrated all 3 intended POC workflows:`
-  - `building a reusable knowledge base from closed SQL tickets using 5 specialized AI agents`
+- `PoolSense v1 is live and has delivered all 3 core workflows in production:`
+  - `building a reusable knowledge base from pool ticket history using 5 specialized AI agents`
   - `proactively recommending resolutions for new tickets via email (SMTP or Database Mail)`
   - `supporting user queries through a split-screen operator workspace with group-scoped search, telemetry charts, and reasoning transparency`
+- `Additional platform controls delivered: PoolSense Email master kill switch and a full user activity audit trail for compliance and traceability.`
 
 End with a clear leadership message:
-- `The POC has validated the core concept. See Slide 12 for the formal project ask.`
+- `v1 is operational. See Slide 12 for what comes next.`
 
 Style:
 - polished
 - executive
 - simple and strong
 
-## Slide 11 - Future Scope: Expanding the Knowledge Hub
+## Slide 11 - Roadmap: Expanding the Knowledge Hub
 
 **Prompt**
 
-Create a slide called `Future Scope - Expanding the Knowledge Hub` for `PoolSense`.
+Create a slide called `Roadmap — Expanding the Knowledge Hub` for `PoolSense`.
 
-Explain that the current POC builds its knowledge base exclusively from historical SQL ticket data. The next phase envisions integrating additional knowledge sources to dramatically improve resolution quality and coverage.
+Explain that v1 builds its knowledge base from pool ticket history. The next phase integrates additional knowledge sources to improve resolution quality and coverage.
 
 Include these planned knowledge hub integrations:
 
@@ -346,8 +347,8 @@ Include these planned knowledge hub integrations:
 - combine database context with ticket history for more precise root cause identification
 
 ### `Direct Production DBAS Integration`
-- the current POC sources ticket data from a SQL Server backup of the production DBAS system
-- a future integration would connect directly to the production DBAS system in real time to collect live pool data
+- v1 sources ticket data from a SQL Server backup of the production DBAS system
+- the next release will connect directly to the production DBAS system in real time
 - this eliminates the lag between production events and knowledge base updates
 - enables near-real-time ticket ingestion, status tracking, and incident correlation against the authoritative source
 
@@ -357,105 +358,108 @@ Include these planned knowledge hub integrations:
 - weight and rank results across sources based on relevance and recency
 
 Include a value statement:
-- `By expanding beyond ticket history to include wikis, SharePoint, and live project databases, PoolSense evolves from incident assistance into a comprehensive operational knowledge platform.`
+- `v1 delivers pool ticket history as the knowledge foundation. By expanding to wikis, SharePoint, and live project databases, PoolSense evolves into a comprehensive operational knowledge platform.`
 
 Style:
 - forward-looking but grounded
 - show a clear path from current POC to expanded capability
 - keep it realistic and achievable
 
-## Slide 12 - The Ask
+## Slide 12 - What's Next
 
 **Prompt**
 
-Create a closing ask slide called `The Ask` for `PoolSense`.
+Create a closing slide called `What's Next` for `PoolSense`.
 
-This slide is a direct request to leadership to convert the POC into a formally allocated project.
+This slide presents the path forward now that v1 is live.
 
 Include these sections:
 
-### `What We Are Asking For`
-- formal project allocation to move PoolSense from POC to a production-ready pilot
-- dedicated team of 2–3 resources
-- a 2–3 month timeline to deliver a scoped pilot release
+### `Where We Are`
+- PoolSense v1 is deployed and operational
+- 3 core workflows are live: knowledge ingestion, email recommendations, and operator workspace
+- v1 knowledge source is pool ticket history
 
-### `Proposed Scope for Pilot Phase`
-- production-harden the existing 3 core workflows (knowledge ingestion, email recommendations, operator workspace)
-- connect directly to the production DBAS system (replace current SQL Server backup source)
+### `v2 Scope`
+- connect directly to the production DBAS system (replace SQL Server backup source)
 - integrate SharePoint / project wiki as an additional knowledge source
-- add authentication, role-based access, lifeguard support
-- implement structured observability (logging, health checks, alerting)
-- deploy to a shared environment accessible to pilot teams
+- add codebase as a knowledge source for deeper root cause context
+- expand insights dashboard and feedback loops
+- APM integration and health check endpoints
+- role-based access control for multi-team deployments
 
-### `Suggested Timeline`
-- Month 1: infrastructure hardening, production DBAS integration, authentication, and deployment pipeline
-- Month 2: SharePoint/wiki knowledge integration, expanded insights dashboard, feedback loops
-- Month 3: pilot rollout with 1–2 operational teams, KPI measurement, evaluation, and iteration
+### `Proposed Timeline`
+- Month 1: production DBAS integration and deployment pipeline improvements
+- Month 2: SharePoint/wiki knowledge integration and expanded insights
+- Month 3: codebase integration, feedback loop improvements, and broader team rollout
 
 ### `Expected Outcomes`
-- measurable reduction in triage time for participating teams
-- validated AI recommendation accuracy through pilot feedback
-- production-ready platform for broader organizational rollout
-- clear business case data for full-scale investment decision
+- higher recommendation accuracy with richer knowledge sources
+- broader team adoption across operational domains
+- measurable reduction in triage time with multi-source evidence
+- clear evaluation data for ongoing investment decisions
 
 End with a strong closing statement:
-- `We are requesting project allocation for a 2–3 month pilot with 2–3 dedicated resources to transition PoolSense from a validated POC into a production-ready operational tool.`
+- `v1 is live. The foundation is proven. v2 expands the knowledge hub to make PoolSense indispensable across teams.`
 
 Style:
-- confident and direct
+- confident and forward-looking
 - executive-friendly
-- action-oriented — make it easy for leadership to say yes
+- build on proven momentum
 
-## Slide 12 (Alternative) - What Would Be Needed to Take This Further
+## Slide 12 (Alternative) - Expanding PoolSense
 
 **Prompt**
 
-Create a closing slide called `What Would Be Needed to Take This Further` for `PoolSense`.
+Create a closing slide called `Expanding PoolSense` for a presentation.
 
-Frame this as a collaborative, forward-looking conversation with leadership — not a formal demand. The tone should be exploratory and opportunity-focused.
+Frame this as a collaborative, forward-looking conversation — building on what is already live.
 
 Include these sections:
 
 ### `Where We Are Today`
-- PoolSense has completed a working proof of concept with 3 validated workflows
-- the system is functional but not yet production-hardened or team-deployed
-- we have a clear picture of what the next phase would require
+- PoolSense v1 is deployed and operational with 3 live workflows
+- pool ticket history is the current knowledge source
+- the platform is functional and in active use
 
-### `What the Next Phase Would Look Like`
-- a small, focused team (2–3 engineers) working for 2–3 months
-- scope limited to production-hardening, one additional knowledge source (SharePoint or DBAS), and a pilot with 1–2 teams
-- measurable outcomes defined upfront so we can evaluate ROI objectively
+### `What the Next Phase Looks Like`
+- expand the knowledge hub: add wikis, SharePoint, and codebase as sources
+- connect to the production DBAS system directly for real-time ingestion
+- broaden team access with role-based controls
+- measurable outcomes defined upfront to evaluate ROI objectively
 
 ### `What We Would Need to Move Forward`
-- alignment on priority: is this the right time to invest in this direction?
-- a conversation about resourcing: even part-time support from existing team members could accelerate progress
-- agreement on a pilot team to validate against real workflows
-- a low-risk, time-boxed commitment — 2–3 months with a defined evaluation checkpoint
+- alignment on priority for v2 knowledge source integrations
+- resourcing conversation: part-time support from existing team members could accelerate progress
+- agreement on which teams to onboard next
+- a time-boxed commitment with a defined evaluation checkpoint
 
 ### `What Success Looks Like`
 - engineers spend less time manually triaging repeat incidents
-- recommendations from PoolSense are reliable enough to be trusted in daily operations
+- recommendations become more accurate as knowledge sources expand
 - organizational knowledge is captured and reused rather than lost between tickets
-- a clear signal on whether to scale or stop — no open-ended commitment
+- a clear, data-driven signal on next investment
 
 End with an open, collaborative closing statement:
-- `We are not asking for a large commitment — just enough runway to find out if this is worth scaling. We believe the POC has already answered the hardest question: yes, this is technically feasible.`
+- `v1 has answered the hardest question: yes, this works. The ask is simply to keep building on what is already proven.`
 
 Style:
 - calm, confident, and collaborative
-- leadership-friendly without pressure
+- leadership-friendly
 - invite a conversation rather than demand a decision
 
 ## Optional Prompt - Generate the Full 12-Slide Deck
 
 **Prompt**
 
-Create a complete 12-slide internal presentation for `PoolSense`, an AI-powered incident assistance proof of concept.
+Create a complete 12-slide internal presentation for `PoolSense`, a deployed AI-powered incident assistance platform (v1).
 
-The presentation must be aligned to these actual implemented POC workflows:
+The presentation must be aligned to these delivered v1 workflows:
 1. closed tickets are continuously polled from a SQL source and converted into a reusable knowledge base
 2. new tickets are processed against that knowledge base and recommendation emails are sent
 3. users can submit a problem statement through an Angular UI and receive possible resolutions from the same knowledge base
+
+v1 knowledge source is pool ticket history. v2 will add wikis, SharePoint, and codebases.
 
 The system includes:
 - SQL ticket polling with multi-group awareness and lookback year filtering

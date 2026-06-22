@@ -49,7 +49,7 @@ BEGIN
         processing_kind nvarchar(128) NOT NULL,
         processed_at datetime2(7) NOT NULL CONSTRAINT DF_processed_source_events_processed_at DEFAULT SYSUTCDATETIME(),
         email_sent bit NOT NULL CONSTRAINT DF_processed_source_events_email_sent DEFAULT 0,
-        email_recipient nvarchar(512) NOT NULL CONSTRAINT DF_processed_source_events_email_recipient DEFAULT '',
+        email_recipient nvarchar(max) NOT NULL CONSTRAINT DF_processed_source_events_email_recipient DEFAULT '',
         workflow_result nvarchar(max) NOT NULL CONSTRAINT DF_processed_source_events_workflow_result DEFAULT '',
         CONSTRAINT PK_processed_source_events PRIMARY KEY (source_event_id, processing_kind)
     );
@@ -89,6 +89,20 @@ BEGIN
         updated_at datetime2(7) NOT NULL CONSTRAINT DF_ticket_automation_settings_updated_at DEFAULT SYSUTCDATETIME(),
         CONSTRAINT CK_ticket_automation_settings_poll_interval_seconds CHECK (poll_interval_seconds BETWEEN 10 AND 3600)
     );
+END;
+GO
+
+-- Widen email_recipient from nvarchar(512) to nvarchar(max) on existing databases.
+IF COL_LENGTH(N'dbo.processed_source_events', N'email_recipient') < 2048
+BEGIN
+    ALTER TABLE dbo.processed_source_events
+        DROP CONSTRAINT DF_processed_source_events_email_recipient;
+
+    ALTER TABLE dbo.processed_source_events
+        ALTER COLUMN email_recipient nvarchar(max) NOT NULL;
+
+    ALTER TABLE dbo.processed_source_events
+        ADD CONSTRAINT DF_processed_source_events_email_recipient DEFAULT '' FOR email_recipient;
 END;
 GO
 

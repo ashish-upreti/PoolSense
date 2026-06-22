@@ -1,6 +1,8 @@
 # PoolSense
 
-PoolSense is a .NET 9 incident-assistance platform with an ASP.NET Core API, an Angular 18 operator console, Azure OpenAI-backed orchestration, and SQL Server persistence for knowledge, project configuration, ingestion tracking, feedback, telemetry, and operational logging.
+PoolSense is a deployed .NET 9 incident-assistance platform with an ASP.NET Core API, an Angular 18 operator console, Azure OpenAI-backed orchestration, and SQL Server persistence for knowledge, project configuration, ingestion tracking, feedback, telemetry, and operational logging.
+
+The initial release (v1) uses pool ticket history as its knowledge source. Future versions will expand to additional sources such as project wikis, SharePoint, and codebases.
 
 At a high level, PoolSense does four things:
 
@@ -18,6 +20,8 @@ At a high level, PoolSense does four things:
 - Application sync from `dbo.tbl_Application.PoolSense` into `dbo.project_configs` before each polling iteration.
 - Project-based application scoping through `project_configs` and application filters.
 - UI-based application administration for project rows, search scope, ingestion progress, and email settings.
+- Master email kill switch (`PoolSenseEmail`) in application configuration suppresses all outbound emails when disabled, regardless of per-application settings.
+- User activity audit trail capturing configuration changes, knowledge store operations, and sign-in/sign-out events in `dbo.user_activity_logs`.
 - Dedicated application feedback capture with submitter name, email, and stored comments for the overall product.
 - Feedback capture with helpful / not helpful rating, selected primary incident, optional comment, and usage signal.
 - Operational insight endpoints for failures, systems, components, and timelines.
@@ -124,6 +128,7 @@ The API reads settings from [PoolSense.Api/appsettings.json](PoolSense.Api/appse
   - `ClosedStatusName`
   - `NewStatusName`
   - `SimilaritySearchLimit`
+  - `PoolSenseEmail` — master email kill switch; set to `false` to suppress all outbound emails
   - `Email.Recipient`
   - `Email.FromAddress`
   - `Email.DeliveryMode` (`Smtp` or `DatabaseMail`)
@@ -259,6 +264,12 @@ Use the `Application Configuration` section in the left navigation rail to:
 - set semicolon-separated email recipients
 - review ingestion progress and refresh status
 
+**Master Settings** (application-wide, applied before per-application controls):
+
+- **Master Polling Enabled** — pause or resume background polling for all applications
+- **PoolSense Email** — master email kill switch; uncheck to suppress all outbound emails regardless of per-application `Send Email` settings
+- **Poll Interval Seconds** — configurable polling cadence (10–3600 seconds)
+
 ### Application Feedback Workspace
 
 Use the `Application Feedback` section in the left navigation rail to:
@@ -304,6 +315,8 @@ AT MPS Capacity Response
 | `PUT /api/projects/{projectId}` | Update one project by id. |
 | `GET /api/projects/groups` | Return project groups for UI search scoping. |
 | `PATCH /api/projects/email-settings/by-application` | Update `send_email` and `email_recipients` by exact `application_filter`. |
+| `GET /api/settings/ticket-automation` | Retrieve current master polling and email settings. |
+| `PUT /api/settings/ticket-automation` | Update master polling enabled, poll interval, and PoolSense Email kill switch. |
 | `GET /api/ingestion/status` | Get ingestion status for all projects. |
 | `GET /api/ingestion/status/{projectId}` | Get ingestion status for one project. |
 | `GET /api/insights` | General insight summary. |
@@ -512,7 +525,8 @@ This means the search embedding and the storage embedding are related but not id
 | File | Purpose |
 | --- | --- |
 | [PoolSense.Api/Program.cs](PoolSense.Api/Program.cs) | Service registration, Swagger, CORS, and app pipeline. |
-| [PoolSense.Api/Controllers](PoolSense.Api/Controllers) | HTTP endpoints for ticket workflow, projects, ingestion, feedback, and insights. |
+| [PoolSense.Api/Logging/UserActivityAuditLogger.cs](PoolSense.Api/Logging/UserActivityAuditLogger.cs) | Persists user activity audit records (config changes, sign-in, sign-out, knowledge store writes) to `dbo.user_activity_logs`. |
+| [PoolSense.Api/Controllers](PoolSense.Api/Controllers) | HTTP endpoints for ticket workflow, projects, ingestion, feedback, insights, settings, and auth. |
 | [PoolSense.Api/Services/BackgroundTicketPollingService.cs](PoolSense.Api/Services/BackgroundTicketPollingService.cs) | Scheduled polling, ingestion, and recommendation-email workflow. |
 | [PoolSense.Api/Services/ApplicationSyncService.cs](PoolSense.Api/Services/ApplicationSyncService.cs) | Synchronizes `tbl_Application.PoolSense` into project configuration before polling. |
 | [PoolSense.Api/Services/DatabaseMailEmailService.cs](PoolSense.Api/Services/DatabaseMailEmailService.cs) | SQL Server Database Mail delivery via `PoolSenseSqlServer`. |
@@ -531,7 +545,7 @@ This means the search embedding and the storage embedding are related but not id
 - If the API returns `500`, check API logs and verify `AiSettings`, `PoolSenseSqlServer`, and `TicketSourceSqlServer` values.
 - If project configuration does not load, confirm `dbo.project_configs` exists in the PoolSense database.
 - If ingestion status is empty or incorrect, confirm `dbo.ingestion_status` exists and the polling service is enabled.
-- If recommendation emails are not sent, verify project-level `Send Email`, semicolon-separated recipients, and the configured email delivery mode.
+- If recommendation emails are not sent, verify the master **PoolSense Email** kill switch is enabled in Master Settings, then verify project-level `Send Email`, semicolon-separated recipients, and the configured email delivery mode.
 - If disabling or enabling a project does not update `tbl_Application.PoolSense`, confirm `project_configs.application_filter` exactly matches `tbl_Application.Application`, and confirm the `TicketSourceSqlServer` login can update `dbo.tbl_Application.PoolSense`.
 - If `DeliveryMode = DatabaseMail`, verify the SQL Server Database Mail profile exists on `PoolSenseSqlServer` and is usable by the configured login.
 - If `dotnet build .\PoolSense.UI\PoolSense.UI.csproj` fails, confirm Node.js/npm are installed and frontend dependencies restore correctly.
@@ -540,3 +554,6 @@ This means the search embedding and the storage embedding are related but not id
 
 - The active local UI dev server uses Angular.
 - The active persistence path is SQL Server.
+- v1 knowledge source is pool ticket history only. Additional sources (wikis, SharePoint, codebases) are planned for future releases.
+- `dbo.user_activity_logs` records all configuration changes (ticket automation settings, project create/update/email settings, knowledge store writes) and sign-in/sign-out events with the authenticated user name, action, entity, details, IP address, and HTTP context.
+- The `PoolSenseEmail` master switch in `dbo.ticket_automation_settings` takes priority over per-application `send_email` flags during polling.
