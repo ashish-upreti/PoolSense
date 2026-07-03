@@ -39,6 +39,9 @@ export interface PoolReport {
   processedAt: string | null
   emailSent: boolean
   emailRecipient: string
+  projectId: string
+  projectName: string
+  application: string
   workflowResult: TicketWorkflowResult | null
 }
 
@@ -158,6 +161,8 @@ export interface FeedbackRequest {
   feedbackType: number
   wasUsed?: boolean
   comment?: string
+  currentIssueId?: string
+  applyToTargetIncident?: boolean
   selectedTicketId: string
   retrievedTicketIds: string[]
 }

@@ -284,7 +284,6 @@ Include realistic v1 limitations:
 
 Then include a `v2 Roadmap` section:
 - expand knowledge sources: integrate project wikis and SharePoint via NYRA APIs
-- connect directly to the production DBAS system for real-time ticket ingestion
 - add codebase as a knowledge source for deeper root cause context
 - expand dashboards, analytics, and evaluation loops
 - add APM integration and health check endpoints

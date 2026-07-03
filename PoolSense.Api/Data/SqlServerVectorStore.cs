@@ -120,11 +120,11 @@ public sealed class SqlServerVectorStore : IVectorStore, ITicketKnowledgeEmbeddi
             return [];
         }
 
-        var feedbackScores = await _feedbackRepository.GetFeedbackScores(
+        var feedbackEvidence = await _feedbackRepository.GetFeedbackEvidence(
             candidates.Select(candidate => candidate.TicketId).ToArray(),
             cancellationToken);
 
-        return _similaritySearch.Search(embedding, candidates, feedbackScores, limit);
+        return _similaritySearch.Search(embedding, candidates, feedbackEvidence, limit);
     }
 
     public Task<double> GetFeedbackScore(string ticketId, CancellationToken cancellationToken = default)

@@ -1,0 +1,27 @@
+- generic [ref=e5]:
+  - generic [ref=e6]:
+    - generic [ref=e7]: PS
+    - button "Switch to dark theme" [ref=e8] [cursor=pointer]:
+      - img [ref=e10]
+  - generic [ref=e12]:
+    - paragraph [ref=e13]: Intel Active Directory
+    - heading "Pool Sense" [level=1] [ref=e14]:
+      - generic [ref=e15]: Pool
+      - generic [ref=e16]: Sense
+    - paragraph [ref=e17]: Detect. Diagnose. Resolve.
+    - paragraph [ref=e18]: v1.4 · DEV
+  - generic [ref=e19]:
+    - generic [ref=e20]:
+      - generic [ref=e21]: Username
+      - textbox "Username" [ref=e22]
+    - generic [ref=e23]:
+      - generic [ref=e24]: Password
+      - textbox "Password" [ref=e25]
+  - generic [ref=e26]:
+    - checkbox "Remember Me Keep this browser session active for the configured extended duration." [ref=e27]
+    - generic [ref=e28]:
+      - strong [ref=e29]: Remember Me
+      - generic [ref=e30]: Keep this browser session active for the configured extended duration.
+  - generic [ref=e31]:
+    - paragraph [ref=e32]: Use your corporate username, UPN, or domain-qualified account.
+    - button "Sign In" [ref=e33] [cursor=pointer]

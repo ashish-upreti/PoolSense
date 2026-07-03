@@ -7,6 +7,8 @@ public sealed record FeedbackRequest
     public int FeedbackType { get; init; }
     public bool WasUsed { get; init; }
     public string? Comment { get; init; }
+    public string? CurrentIssueId { get; init; }
+    public bool ApplyToTargetIncident { get; init; }
     public string SelectedTicketId { get; init; } = string.Empty;
     public string[] RetrievedTicketIds { get; init; } = [];
 }

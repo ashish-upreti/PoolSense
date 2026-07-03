@@ -48,6 +48,7 @@ type FeedbackState = {
   error: string
   selectedFeedbackType: number | null
   wasUsed: boolean
+  applyToTargetIncident: boolean
   selectedTicketId: string
 }
 
@@ -131,6 +132,7 @@ function createFeedbackState(selectedTicketId = ''): FeedbackState {
     error: '',
     selectedFeedbackType: null,
     wasUsed: false,
+    applyToTargetIncident: false,
     selectedTicketId,
   }
 }
@@ -287,6 +289,10 @@ export class AppComponent implements OnInit {
     return this.selectedGroupIds.length === 0
   }
 
+  get selectedGroupScopeValues() {
+    return this.isAllGroupsSelected ? [this.allGroupValue] : this.selectedGroupIds
+  }
+
   get generatedProjectId() {
     return buildProjectIdPreview(this.projectForm.projectName)
   }
@@ -433,8 +439,7 @@ export class AppComponent implements OnInit {
         rememberMe: false,
       }
       this.applyAuthenticatedUserToFeedbackForm(loginResult.user)
-      await this.loadAuthenticatedWorkspace()
-      await this.loadInitialPoolReport()
+      this.startAuthenticatedWorkspaceLoad()
     } catch (requestError) {
       this.loginError = requestError instanceof Error ? requestError.message : 'Unable to sign in.'
     } finally {
@@ -512,6 +517,21 @@ export class AppComponent implements OnInit {
 
   isGroupChecked(groupId: string) {
     return !this.isAllGroupsSelected && this.selectedGroupIds.includes(groupId)
+  }
+
+  handleGroupMultiSelectChange(selectedValues: string[] | string) {
+    const values = Array.isArray(selectedValues) ? selectedValues : [selectedValues]
+    const normalizedValues = values
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+
+    if (normalizedValues.length === 0 || normalizedValues.includes(this.allGroupValue)) {
+      this.selectedGroupIds = []
+      return
+    }
+
+    const validGroupIds = new Set(this.groups.map((group) => group.groupId))
+    this.selectedGroupIds = Array.from(new Set(normalizedValues.filter((value) => validGroupIds.has(value))))
   }
 
   async loadProjectWorkspace(refreshIngestionTotals = false) {
@@ -698,6 +718,9 @@ export class AppComponent implements OnInit {
   getFeedbackSubmittedLabel(messageId: number) {
     const state = this.getFeedbackState(messageId)
     const targetLabel = state.selectedTicketId ? ` for ${state.selectedTicketId}` : ''
+    const sharingLabel = state.applyToTargetIncident
+      ? ' Shared for future incident ranking.'
+      : ' Kept on this current issue only.'
 
     if (!state.submitted) {
       return ''
@@ -705,11 +728,20 @@ export class AppComponent implements OnInit {
 
     if (state.selectedFeedbackType === 1) {
       return state.wasUsed
-        ? `Feedback submitted${targetLabel}: marked helpful and used in resolution.`
-        : `Feedback submitted${targetLabel}: marked helpful.`
+        ? `Feedback submitted${targetLabel}: marked helpful and used in resolution.${sharingLabel}`
+        : `Feedback submitted${targetLabel}: marked helpful.${sharingLabel}`
     }
 
-    return `Feedback submitted${targetLabel}: marked not helpful.`
+    return `Feedback submitted${targetLabel}: marked not helpful.${sharingLabel}`
+  }
+
+  getCurrentIssueId(message: AssistantMessage) {
+    const poolIssueId = (this.poolReport?.sourceEventId || this.poolReportSourceEventId || '').trim()
+    if (poolIssueId) {
+      return `pool:${poolIssueId}`
+    }
+
+    return `chat:${message.id}`
   }
 
   async submitMessageFeedback(message: AssistantMessage, feedbackType: number) {
@@ -734,6 +766,8 @@ export class AppComponent implements OnInit {
         feedbackType,
         wasUsed,
         comment: state.comment.trim() || undefined,
+        currentIssueId: this.getCurrentIssueId(message),
+        applyToTargetIncident: state.applyToTargetIncident,
         selectedTicketId: state.selectedTicketId,
         retrievedTicketIds: this.getRetrievedTicketIds(message),
       })
@@ -835,11 +869,14 @@ export class AppComponent implements OnInit {
 
     try {
       this.deploymentInfo = await this.api.getDeploymentInfo()
+    } catch {
+      this.deploymentInfo = null
+    }
+
+    try {
       this.currentUser = await this.api.getSession()
       if (this.currentUser) {
         this.applyAuthenticatedUserToFeedbackForm(this.currentUser)
-        await this.loadAuthenticatedWorkspace()
-        await this.loadInitialPoolReport()
       }
     } catch (requestError) {
       this.loginError = requestError instanceof Error ? requestError.message : 'Unable to validate your session.'
@@ -847,6 +884,17 @@ export class AppComponent implements OnInit {
     } finally {
       this.isSessionLoading = false
     }
+
+    if (this.currentUser) {
+      this.startAuthenticatedWorkspaceLoad()
+    }
+  }
+
+  private startAuthenticatedWorkspaceLoad() {
+    void (async () => {
+      await this.loadAuthenticatedWorkspace()
+      await this.loadInitialPoolReport()
+    })()
   }
 
   private async loadAuthenticatedWorkspace() {
@@ -917,6 +965,7 @@ export class AppComponent implements OnInit {
       const report = await this.api.getPoolReport(poolReportId)
       this.poolReport = report
       this.poolReportSourceEventId = report.sourceEventId || poolReportId
+      this.applyPoolReportScope(report)
       if (report.isReady && report.workflowResult) {
         this.applyPoolReportToWorkspace(report)
       } else {
@@ -956,6 +1005,29 @@ export class AppComponent implements OnInit {
     this.messages = [userMessage, assistantMessage]
     this.insights = result
     this.input = ''
+  }
+
+  private applyPoolReportScope(report: PoolReport) {
+    if (!this.poolReportSourceEventId || this.groups.length === 0) {
+      return
+    }
+
+    const exactProjectMatch = report.projectId
+      ? this.groups.find((group) => group.groupId.localeCompare(report.projectId, undefined, { sensitivity: 'accent' }) === 0)
+      : null
+
+    const targetNames = [report.projectName, report.application]
+      .map((value) => value?.trim().toLowerCase() ?? '')
+      .filter((value) => value.length > 0)
+
+    const nameMatch =
+      exactProjectMatch ||
+      this.groups.find((group) => {
+        const displayName = group.displayName.trim().toLowerCase()
+        return targetNames.some((targetName) => displayName === targetName)
+      })
+
+    this.selectedGroupIds = nameMatch ? [nameMatch.groupId] : []
   }
 
   private resolvePoolTroubleshootQuestion(rawQuestion: string) {

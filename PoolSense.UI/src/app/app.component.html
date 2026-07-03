@@ -269,15 +269,18 @@
 
       <div *ngIf="groups.length > 0" class="group-selector" role="group" aria-label="Application group filter">
         <p class="group-selector-label">Search scope</p>
-        <div class="group-selector-options">
-          <label class="group-chip" [class.group-chip-active]="isAllGroupsSelected">
-            <input type="checkbox" [value]="allGroupValue" [checked]="isAllGroupsSelected" [disabled]="isLoading" (change)="handleAllGroupChange($any($event.target).checked)" />
-            All
-          </label>
-          <label *ngFor="let group of groups" class="group-chip" [class.group-chip-active]="isGroupChecked(group.groupId)">
-            <input type="checkbox" [value]="group.groupId" [checked]="isGroupChecked(group.groupId)" [disabled]="isLoading" (change)="handleGroupChange(group.groupId, $any($event.target).checked)" />
-            {{ group.displayName }}
-          </label>
+        <div class="field-group field-group-full">
+          <select
+            class="field-input"
+            name="searchScopeMultiSelect"
+            [ngModel]="selectedGroupScopeValues"
+            (ngModelChange)="handleGroupMultiSelectChange($event)"
+            [disabled]="isLoading"
+            multiple>
+            <option [value]="allGroupValue">All applications</option>
+            <option *ngFor="let group of groups" [value]="group.groupId">{{ group.displayName }}</option>
+          </select>
+          <span class="field-note">Use Ctrl/Cmd + click to select multiple applications.</span>
         </div>
       </div>
 
@@ -329,6 +332,13 @@
                   <small>Marks helpful feedback as a stronger signal for future incident ranking.</small>
                 </span>
               </label>
+              <label class="feedback-usage-option" [for]="'feedback-share-' + message.id">
+                <input [id]="'feedback-share-' + message.id" type="checkbox" [(ngModel)]="getFeedbackState(message.id).applyToTargetIncident" [name]="'feedback-share-' + message.id" [disabled]="isFeedbackDisabled(message)" />
+                <span class="feedback-usage-copy">
+                  <strong>Use this feedback for future incident ranking</strong>
+                  <small>Keep unchecked to associate this feedback with the current issue only.</small>
+                </span>
+              </label>
               <div class="feedback-actions">
                 <button type="button" class="feedback-button" (click)="submitMessageFeedback(message, 1)" [disabled]="isFeedbackSubmitDisabled(message)">Helpful</button>
                 <button type="button" class="feedback-button feedback-button-secondary" (click)="submitMessageFeedback(message, -1)" [disabled]="isFeedbackSubmitDisabled(message)">Not Helpful</button>
@@ -346,7 +356,7 @@
         </article>
       </div>
 
-      <form class="composer" (ngSubmit)="handleSend()">
+      <form *ngIf="!poolReportSourceEventId" class="composer" (ngSubmit)="handleSend()">
         <div class="prompt-strip" aria-label="Suggested prompts">
           <button *ngFor="let prompt of quickPrompts" type="button" class="prompt-chip" (click)="handleSend(prompt)" [disabled]="isLoading">{{ prompt }}</button>
         </div>
