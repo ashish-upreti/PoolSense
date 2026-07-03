@@ -83,6 +83,9 @@ public sealed class PoolReportController : ControllerBase
             ProcessedAt = report.ProcessedAt,
             EmailSent = report.EmailSent,
             EmailRecipient = report.EmailRecipient,
+            ProjectId = report.ProjectId,
+            ProjectName = report.ProjectName,
+            Application = report.Application,
             WorkflowResult = report.WorkflowResult
         });
     }
@@ -167,6 +170,9 @@ public sealed class PoolReportResponse
     public DateTime? ProcessedAt { get; set; }
     public bool EmailSent { get; set; }
     public string EmailRecipient { get; set; } = string.Empty;
+    public string ProjectId { get; set; } = string.Empty;
+    public string ProjectName { get; set; } = string.Empty;
+    public string Application { get; set; } = string.Empty;
     public TicketWorkflowResult? WorkflowResult { get; set; }
 
     public static PoolReportResponse NotReady(string sourceEventId, string status, string message, ProcessedSourceEventRecord? record = null)
@@ -182,6 +188,9 @@ public sealed class PoolReportResponse
             ProcessedAt = record?.ProcessedAt,
             EmailSent = record?.EmailSent ?? false,
             EmailRecipient = record?.EmailRecipient ?? string.Empty,
+            ProjectId = record?.ProjectId ?? string.Empty,
+            ProjectName = record?.ProjectName ?? string.Empty,
+            Application = record?.Application ?? string.Empty,
             WorkflowResult = null
         };
     }

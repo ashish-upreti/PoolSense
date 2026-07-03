@@ -73,8 +73,10 @@ public class FeedbackController : ControllerBase
             {
                 TicketQuery = request.Query.Trim(),
                 SuggestedResolution = request.SuggestedResolution.Trim(),
+                CurrentIssueId = string.IsNullOrWhiteSpace(request.CurrentIssueId) ? string.Empty : request.CurrentIssueId.Trim(),
                 FeedbackType = request.FeedbackType,
                 WasUsed = request.WasUsed,
+                ApplyToTargetIncident = request.ApplyToTargetIncident,
                 Comment = string.IsNullOrWhiteSpace(request.Comment) ? string.Empty : request.Comment.Trim(),
                 TargetTicketId = selectedTicketId,
                 RetrievedTicketIds = string.Join(',', retrievedTicketIds),

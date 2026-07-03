@@ -33,6 +33,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
     private readonly IKnowledgeEnrichmentService _knowledgeEnrichmentService;
     private readonly IFailurePatternAgent _failurePatternAgent;
     private readonly IFailurePatternRepository _failurePatternRepository;
+    private readonly IFeedbackRepository _feedbackRepository;
     private readonly InteractionLogger _interactionLogger;
     private readonly ILogger<TicketWorkflowOrchestrator> _logger;
     private readonly TicketAutomationSettings _settings;
@@ -46,6 +47,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         IKnowledgeEnrichmentService knowledgeEnrichmentService,
         IFailurePatternAgent failurePatternAgent,
         IFailurePatternRepository failurePatternRepository,
+        IFeedbackRepository feedbackRepository,
         InteractionLogger interactionLogger,
         IOptions<TicketAutomationSettings> settings,
         ILogger<TicketWorkflowOrchestrator> logger)
@@ -58,6 +60,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         _knowledgeEnrichmentService = knowledgeEnrichmentService;
         _failurePatternAgent = failurePatternAgent;
         _failurePatternRepository = failurePatternRepository;
+        _feedbackRepository = feedbackRepository;
         _interactionLogger = interactionLogger;
         _settings = settings.Value;
         _logger = logger;
@@ -115,13 +118,24 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         var similarTickets = await _vectorStore.SearchSimilarTickets(searchEmbedding, similaritySearchLimit, request.SelectedGroupIds, cancellationToken);
         _logger.LogInformation("Found {SimilarTicketCount} similar tickets for ticket {TicketId}.", similarTickets.Count, request.TicketId);
 
+        var feedbackEvidenceByTicketId = await _feedbackRepository.GetFeedbackEvidence(
+            similarTickets.Select(ticket => ticket.TicketId).ToArray(),
+            cancellationToken);
+
         var resolutionIncidents = similarTickets
-            .Select(ticket => new ResolutionIncident
+            .Select(ticket =>
             {
-                TicketId = ticket.TicketId,
-                Problem = ticket.Problem,
-                RootCause = ticket.RootCause,
-                Resolution = ticket.Resolution
+                feedbackEvidenceByTicketId.TryGetValue(ticket.TicketId, out var evidence);
+                return new ResolutionIncident
+                {
+                    TicketId = ticket.TicketId,
+                    Problem = ticket.Problem,
+                    RootCause = ticket.RootCause,
+                    Resolution = ticket.Resolution,
+                    FeedbackScore = evidence?.Score ?? 0,
+                    LatestHelpfulComment = evidence?.LatestHelpfulComment ?? string.Empty,
+                    LatestNotHelpfulComment = evidence?.LatestNotHelpfulComment ?? string.Empty
+                };
             })
             .ToList();
 

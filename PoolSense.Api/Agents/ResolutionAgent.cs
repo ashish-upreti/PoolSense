@@ -17,6 +17,9 @@ public sealed class ResolutionIncident
     public string Problem { get; set; } = string.Empty;
     public string RootCause { get; set; } = string.Empty;
     public string Resolution { get; set; } = string.Empty;
+    public double FeedbackScore { get; set; }
+    public string LatestHelpfulComment { get; set; } = string.Empty;
+    public string LatestNotHelpfulComment { get; set; } = string.Empty;
 }
 
 public class ResolutionAgent : IResolutionAgent
@@ -54,16 +57,18 @@ New Ticket Title:
 New Ticket Description:
 {{$description}}
 
-Similar Historical Incidents (ordered most-similar first, each has a TicketId, Problem, RootCause, Resolution):
+Similar Historical Incidents (ordered most-similar first, each has TicketId, Problem, RootCause, Resolution, FeedbackScore, LatestHelpfulComment, LatestNotHelpfulComment):
 {{$similarHistoricalIncidents}}
 
 Step-by-step instructions:
 1. Read the new ticket's title and description. Identify the specific symptoms and affected items/components.
 2. Compare the PROBLEM field of each historical incident against the new ticket's symptoms. Look for matching keywords, items, failure modes, and affected components.
 3. Select the 1-2 historical incidents whose PROBLEM most closely matches the new ticket's specific symptoms.
-4. For suggestedRootCause: Derive a SPECIFIC root cause from the selected incident's Problem and Resolution fields. Do NOT use the generic stored RootCause. Example: instead of 'Solver configuration mismatch causing improper handling of VG items', say 'VG item 8PG3 missing A33 location mapping in VG Group Mapping, preventing correct die sort mapping'.
-5. For suggestedResolution: Use the selected incident's Resolution field, adapting it minimally to fit the new ticket's specific items/components.
-6. In reasoning, state which TicketId(s) you selected and why their Problem description specifically matches.
+4. Treat LatestHelpfulComment as high-trust human-validated evidence when it is specific and relevant.
+5. Treat LatestNotHelpfulComment as high-trust negative evidence that indicates what to avoid.
+6. For suggestedRootCause: Derive a SPECIFIC root cause from the selected incident's Problem, Resolution, and relevant feedback comments. Do NOT use the generic stored RootCause. Example: instead of 'Solver configuration mismatch causing improper handling of VG items', say 'VG item 8PG3 missing A33 location mapping in VG Group Mapping, preventing correct die sort mapping'.
+7. For suggestedResolution: Use the selected incident's Resolution field and relevant helpful comments, adapting minimally to this ticket's specific items/components.
+8. In reasoning, state which TicketId(s) were selected, why their Problem matches, and how helpful/not-helpful comments influenced the choice.
 
 Return only valid JSON with this exact structure:
 {

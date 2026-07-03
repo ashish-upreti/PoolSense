@@ -21,6 +21,9 @@ public sealed class ProcessedSourceEventRecord
     public DateTime ProcessedAt { get; set; } = DateTime.UtcNow;
     public bool EmailSent { get; set; }
     public string EmailRecipient { get; set; } = string.Empty;
+    public string ProjectId { get; set; } = string.Empty;
+    public string ProjectName { get; set; } = string.Empty;
+    public string Application { get; set; } = string.Empty;
     public TicketWorkflowResult? WorkflowResult { get; set; }
 }
 
@@ -166,10 +169,41 @@ public class ProcessedSourceEventRepository : IProcessedSourceEventRepository
                    processed_at,
                    email_sent,
                    email_recipient,
+                                     project_id,
+                                     project_name,
+                                     application,
                    workflow_result
-            FROM dbo.processed_source_events
-            WHERE source_event_id = @sourceEventId
-              AND NULLIF(workflow_result, '') IS NOT NULL
+                        FROM (
+                                SELECT pse.source_event_id,
+                                             pse.processing_kind,
+                                             pse.processed_at,
+                                             pse.email_sent,
+                                             pse.email_recipient,
+                                             COALESCE(matched_project.project_id, '') AS project_id,
+                                             COALESCE(matched_project.project_name, '') AS project_name,
+                                             COALESCE(payload.application, '') AS application,
+                                             pse.workflow_result
+                                FROM dbo.processed_source_events pse
+                                CROSS APPLY (
+                                        SELECT JSON_VALUE(pse.workflow_result, '$.FailurePattern.Application') AS application
+                                ) payload
+                                OUTER APPLY (
+                                        SELECT TOP (1) project_id, project_name
+                                        FROM dbo.project_configs project
+                                        WHERE NULLIF(project.application_filter, '') IS NOT NULL
+                                            AND NULLIF(payload.application, '') IS NOT NULL
+                                            AND (
+                                                    (CHARINDEX('%', project.application_filter) > 0 OR CHARINDEX('_', project.application_filter) > 0)
+                                                            AND payload.application LIKE project.application_filter
+                                                    OR (CHARINDEX('%', project.application_filter) = 0 AND CHARINDEX('_', project.application_filter) = 0)
+                                                            AND payload.application = project.application_filter
+                                            )
+                                        ORDER BY CASE WHEN project.application_filter = payload.application THEN 0 ELSE 1 END,
+                                                         project.project_name ASC
+                                ) matched_project
+                                WHERE pse.source_event_id = @sourceEventId
+                                    AND NULLIF(pse.workflow_result, '') IS NOT NULL
+                        ) report
             ORDER BY CASE WHEN processing_kind = 'NewRecommendation' THEN 0 ELSE 1 END,
                      processed_at DESC;
             """;
@@ -200,9 +234,40 @@ public class ProcessedSourceEventRepository : IProcessedSourceEventRepository
                    processed_at,
                    email_sent,
                    email_recipient,
+                   project_id,
+                   project_name,
+                   application,
                    workflow_result
-            FROM dbo.processed_source_events
-            WHERE source_event_id = @sourceEventId
+            FROM (
+                SELECT pse.source_event_id,
+                       pse.processing_kind,
+                       pse.processed_at,
+                       pse.email_sent,
+                       pse.email_recipient,
+                       COALESCE(matched_project.project_id, '') AS project_id,
+                       COALESCE(matched_project.project_name, '') AS project_name,
+                       COALESCE(payload.application, '') AS application,
+                       pse.workflow_result
+                FROM dbo.processed_source_events pse
+                CROSS APPLY (
+                    SELECT JSON_VALUE(pse.workflow_result, '$.FailurePattern.Application') AS application
+                ) payload
+                OUTER APPLY (
+                    SELECT TOP (1) project_id, project_name
+                    FROM dbo.project_configs project
+                    WHERE NULLIF(project.application_filter, '') IS NOT NULL
+                      AND NULLIF(payload.application, '') IS NOT NULL
+                      AND (
+                          (CHARINDEX('%', project.application_filter) > 0 OR CHARINDEX('_', project.application_filter) > 0)
+                              AND payload.application LIKE project.application_filter
+                          OR (CHARINDEX('%', project.application_filter) = 0 AND CHARINDEX('_', project.application_filter) = 0)
+                              AND payload.application = project.application_filter
+                      )
+                    ORDER BY CASE WHEN project.application_filter = payload.application THEN 0 ELSE 1 END,
+                             project.project_name ASC
+                ) matched_project
+                WHERE pse.source_event_id = @sourceEventId
+            ) record
             ORDER BY CASE WHEN processing_kind = 'NewRecommendation' THEN 0 ELSE 1 END,
                      processed_at DESC;
             """;
@@ -320,7 +385,7 @@ public class ProcessedSourceEventRepository : IProcessedSourceEventRepository
 
     private static ProcessedSourceEventRecord MapProcessedSourceEventRecord(SqlDataReader reader)
     {
-        var workflowResultJson = reader.IsDBNull(5) ? string.Empty : reader.GetString(5);
+        var workflowResultJson = reader.IsDBNull(8) ? string.Empty : reader.GetString(8);
 
         return new ProcessedSourceEventRecord
         {
@@ -329,6 +394,9 @@ public class ProcessedSourceEventRepository : IProcessedSourceEventRepository
             ProcessedAt = reader.GetDateTime(2),
             EmailSent = reader.GetBoolean(3),
             EmailRecipient = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+            ProjectId = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+            ProjectName = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
+            Application = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
             WorkflowResult = string.IsNullOrWhiteSpace(workflowResultJson)
                 ? null
                 : JsonSerializer.Deserialize<TicketWorkflowResult>(workflowResultJson, JsonOptions)

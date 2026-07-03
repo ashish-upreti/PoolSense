@@ -11,12 +11,12 @@ public sealed class CosineVectorSimilaritySearch : IVectorSimilaritySearch
     public IReadOnlyList<TicketKnowledge> Search(
         float[] queryEmbedding,
         IReadOnlyList<TicketKnowledge> candidates,
-        IReadOnlyDictionary<string, double> feedbackScores,
+        IReadOnlyDictionary<string, FeedbackEvidence> feedbackEvidence,
         int limit)
     {
         ArgumentNullException.ThrowIfNull(queryEmbedding);
         ArgumentNullException.ThrowIfNull(candidates);
-        ArgumentNullException.ThrowIfNull(feedbackScores);
+        ArgumentNullException.ThrowIfNull(feedbackEvidence);
 
         if (limit <= 0 || queryEmbedding.Length == 0 || candidates.Count == 0)
         {
@@ -36,7 +36,7 @@ public sealed class CosineVectorSimilaritySearch : IVectorSimilaritySearch
             .Take(candidateLimit)
             .Select(candidate => CloneWithSimilarity(
                 candidate.Candidate,
-                candidate.VectorSimilarity + GetFeedbackScore(candidate.Candidate.TicketId, feedbackScores)))
+                candidate.VectorSimilarity + GetFeedbackScore(candidate.Candidate.TicketId, feedbackEvidence)))
             .OrderByDescending(candidate => candidate.Similarity)
             .ThenBy(candidate => candidate.TicketId, StringComparer.OrdinalIgnoreCase)
             .Take(limit)
@@ -71,15 +71,15 @@ public sealed class CosineVectorSimilaritySearch : IVectorSimilaritySearch
         return dotProduct / (Math.Sqrt(queryMagnitude) * Math.Sqrt(candidateMagnitude));
     }
 
-    private static double GetFeedbackScore(string ticketId, IReadOnlyDictionary<string, double> feedbackScores)
+    private static double GetFeedbackScore(string ticketId, IReadOnlyDictionary<string, FeedbackEvidence> feedbackEvidence)
     {
         if (string.IsNullOrWhiteSpace(ticketId)
-            || !feedbackScores.TryGetValue(ticketId, out var score))
+            || !feedbackEvidence.TryGetValue(ticketId, out var evidence))
         {
             return 0;
         }
 
-        return Math.Max(MinFeedbackWeight, Math.Min(MaxFeedbackWeight, score));
+        return Math.Max(MinFeedbackWeight, Math.Min(MaxFeedbackWeight, evidence.Score));
     }
 
     private static TicketKnowledge CloneWithSimilarity(TicketKnowledge ticketKnowledge, double similarity)

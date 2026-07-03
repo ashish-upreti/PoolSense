@@ -22,7 +22,7 @@ public interface IVectorSimilaritySearch
     IReadOnlyList<TicketKnowledge> Search(
         float[] queryEmbedding,
         IReadOnlyList<TicketKnowledge> candidates,
-        IReadOnlyDictionary<string, double> feedbackScores,
+        IReadOnlyDictionary<string, FeedbackEvidence> feedbackEvidence,
         int limit);
 }
 
