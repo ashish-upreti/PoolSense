@@ -40,7 +40,7 @@ public class ResolutionController : ControllerBase
 
         try
         {
-            var result = await _ticketWorkflowOrchestrator.ProcessAsync(request, cancellationToken);
+            var result = await _ticketWorkflowOrchestrator.RecommendAsync(request, cancellationToken);
 
             return Ok(result);
         }
