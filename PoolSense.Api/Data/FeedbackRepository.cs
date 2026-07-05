@@ -305,42 +305,19 @@ public sealed class FeedbackRepository : IFeedbackRepository
     {
         const string sql = """
             IF OBJECT_ID(N'dbo.feedback_logs', N'U') IS NULL
-            BEGIN
-                CREATE TABLE dbo.feedback_logs (
-                    id int IDENTITY(1,1) NOT NULL CONSTRAINT PK_feedback_logs PRIMARY KEY,
-                    ticket_query nvarchar(max) NOT NULL,
-                    suggested_resolution nvarchar(max) NOT NULL,
-                    current_issue_id nvarchar(450) NOT NULL CONSTRAINT DF_feedback_logs_current_issue_id DEFAULT '',
-                    feedback_type int NOT NULL,
-                    was_used bit NOT NULL CONSTRAINT DF_feedback_logs_was_used DEFAULT 0,
-                    apply_to_target_incident bit NOT NULL CONSTRAINT DF_feedback_logs_apply_to_target_incident DEFAULT 1,
-                    comment nvarchar(max) NOT NULL CONSTRAINT DF_feedback_logs_comment DEFAULT '',
-                    target_ticket_id nvarchar(450) NOT NULL CONSTRAINT DF_feedback_logs_target_ticket_id DEFAULT '',
-                    retrieved_ticket_ids nvarchar(max) NOT NULL,
-                    created_at datetime2(7) NOT NULL CONSTRAINT DF_feedback_logs_created_at DEFAULT SYSUTCDATETIME()
-                );
-            END;
+                THROW 50001, 'Missing dbo.feedback_logs. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
 
             IF COL_LENGTH('dbo.feedback_logs', 'current_issue_id') IS NULL
-                ALTER TABLE dbo.feedback_logs ADD current_issue_id nvarchar(450) NOT NULL CONSTRAINT DF_feedback_logs_current_issue_id DEFAULT '';
+                THROW 50002, 'Missing dbo.feedback_logs.current_issue_id. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
 
             IF COL_LENGTH('dbo.feedback_logs', 'was_used') IS NULL
-                ALTER TABLE dbo.feedback_logs ADD was_used bit NOT NULL CONSTRAINT DF_feedback_logs_was_used DEFAULT 0;
+                THROW 50003, 'Missing dbo.feedback_logs.was_used. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
 
             IF COL_LENGTH('dbo.feedback_logs', 'apply_to_target_incident') IS NULL
-                ALTER TABLE dbo.feedback_logs ADD apply_to_target_incident bit NOT NULL CONSTRAINT DF_feedback_logs_apply_to_target_incident DEFAULT 1;
+                THROW 50004, 'Missing dbo.feedback_logs.apply_to_target_incident. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
 
             IF COL_LENGTH('dbo.feedback_logs', 'target_ticket_id') IS NULL
-                ALTER TABLE dbo.feedback_logs ADD target_ticket_id nvarchar(450) NOT NULL CONSTRAINT DF_feedback_logs_target_ticket_id DEFAULT '';
-
-            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_feedback_logs_created_at' AND object_id = OBJECT_ID(N'dbo.feedback_logs'))
-                CREATE INDEX IX_feedback_logs_created_at ON dbo.feedback_logs (created_at DESC);
-
-            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_feedback_logs_target_ticket_id' AND object_id = OBJECT_ID(N'dbo.feedback_logs'))
-                CREATE INDEX IX_feedback_logs_target_ticket_id ON dbo.feedback_logs (target_ticket_id);
-
-            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_feedback_logs_current_issue_id' AND object_id = OBJECT_ID(N'dbo.feedback_logs'))
-                CREATE INDEX IX_feedback_logs_current_issue_id ON dbo.feedback_logs (current_issue_id);
+                THROW 50005, 'Missing dbo.feedback_logs.target_ticket_id. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
             """;
 
         await using var command = new SqlCommand(sql, connection);
@@ -351,19 +328,7 @@ public sealed class FeedbackRepository : IFeedbackRepository
     {
         const string sql = """
             IF OBJECT_ID(N'dbo.application_feedback_logs', N'U') IS NULL
-            BEGIN
-                CREATE TABLE dbo.application_feedback_logs (
-                    id int IDENTITY(1,1) NOT NULL CONSTRAINT PK_application_feedback_logs PRIMARY KEY,
-                    user_name nvarchar(256) NOT NULL CONSTRAINT DF_application_feedback_logs_user_name DEFAULT '',
-                    user_email nvarchar(256) NOT NULL CONSTRAINT DF_application_feedback_logs_user_email DEFAULT '',
-                    feedback_type nvarchar(64) NOT NULL CONSTRAINT DF_application_feedback_logs_feedback_type DEFAULT '',
-                    message nvarchar(max) NOT NULL CONSTRAINT DF_application_feedback_logs_message DEFAULT '',
-                    created_at datetime2(7) NOT NULL CONSTRAINT DF_application_feedback_logs_created_at DEFAULT SYSUTCDATETIME()
-                );
-            END;
-
-            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_application_feedback_logs_created_at' AND object_id = OBJECT_ID(N'dbo.application_feedback_logs'))
-                CREATE INDEX IX_application_feedback_logs_created_at ON dbo.application_feedback_logs (created_at DESC);
+                THROW 50006, 'Missing dbo.application_feedback_logs. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
             """;
 
         await using var command = new SqlCommand(sql, connection);

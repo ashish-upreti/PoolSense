@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
+using PoolSense.Api.Feedback;
 using PoolSense.Api.Logging;
 using PoolSense.Api.Agents;
 using PoolSense.Api.Configuration;
@@ -34,6 +35,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
     private readonly IFailurePatternAgent _failurePatternAgent;
     private readonly IFailurePatternRepository _failurePatternRepository;
     private readonly IFeedbackRepository _feedbackRepository;
+    private readonly IValidatedResolutionRepository _validatedResolutionRepository;
     private readonly InteractionLogger _interactionLogger;
     private readonly ILogger<TicketWorkflowOrchestrator> _logger;
     private readonly TicketAutomationSettings _settings;
@@ -48,6 +50,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         IFailurePatternAgent failurePatternAgent,
         IFailurePatternRepository failurePatternRepository,
         IFeedbackRepository feedbackRepository,
+        IValidatedResolutionRepository validatedResolutionRepository,
         InteractionLogger interactionLogger,
         IOptions<TicketAutomationSettings> settings,
         ILogger<TicketWorkflowOrchestrator> logger)
@@ -61,6 +64,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         _failurePatternAgent = failurePatternAgent;
         _failurePatternRepository = failurePatternRepository;
         _feedbackRepository = feedbackRepository;
+        _validatedResolutionRepository = validatedResolutionRepository;
         _interactionLogger = interactionLogger;
         _settings = settings.Value;
         _logger = logger;
@@ -122,6 +126,10 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             similarTickets.Select(ticket => ticket.TicketId).ToArray(),
             cancellationToken);
 
+        var validatedResolutionsByTicketId = await _validatedResolutionRepository.GetByTicketIdsAsync(
+            similarTickets.Select(ticket => ticket.TicketId).ToArray(),
+            cancellationToken);
+
         var resolutionIncidents = similarTickets
             .Select(ticket =>
             {
@@ -133,6 +141,8 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
                     RootCause = ticket.RootCause,
                     Resolution = ticket.Resolution,
                     FeedbackScore = evidence?.Score ?? 0,
+                    LatestHumanValidatedFix = GetLatestHumanValidatedFix(validatedResolutionsByTicketId, ticket.TicketId),
+                    LatestHumanAvoidanceNote = GetLatestHumanAvoidanceNote(validatedResolutionsByTicketId, ticket.TicketId),
                     LatestHelpfulComment = evidence?.LatestHelpfulComment ?? string.Empty,
                     LatestNotHelpfulComment = evidence?.LatestNotHelpfulComment ?? string.Empty
                 };
@@ -258,5 +268,28 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         public string Component { get; set; } = string.Empty;
         public string FailureType { get; set; } = string.Empty;
         public string ResolutionCategory { get; set; } = string.Empty;
+    }
+
+    private static string GetLatestHumanValidatedFix(
+        IReadOnlyDictionary<string, IReadOnlyList<ValidatedResolution>> byTicketId,
+        string ticketId)
+    {
+        if (!byTicketId.TryGetValue(ticketId, out var list))
+            return string.Empty;
+
+        // Prefer was_used=true (lifeguard confirmed they used this fix), fall back to any helpful note
+        return list.FirstOrDefault(r => r.FeedbackType == 1 && r.WasUsed)?.ConfirmedNote
+            ?? list.FirstOrDefault(r => r.FeedbackType == 1)?.ConfirmedNote
+            ?? string.Empty;
+    }
+
+    private static string GetLatestHumanAvoidanceNote(
+        IReadOnlyDictionary<string, IReadOnlyList<ValidatedResolution>> byTicketId,
+        string ticketId)
+    {
+        if (!byTicketId.TryGetValue(ticketId, out var list))
+            return string.Empty;
+
+        return list.FirstOrDefault(r => r.FeedbackType == -1)?.ConfirmedNote ?? string.Empty;
     }
 }

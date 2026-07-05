@@ -160,7 +160,7 @@ export interface FeedbackRequest {
   suggestedResolution: string
   feedbackType: number
   wasUsed?: boolean
-  comment?: string
+  currentPoolResolutionNote?: string
   currentIssueId?: string
   applyToTargetIncident?: boolean
   selectedTicketId: string
@@ -364,6 +364,7 @@ export class ApiService {
       body: JSON.stringify({
         ...request,
         wasUsed: request.wasUsed ?? false,
+        applyToTargetIncident: true,
       }),
     })
 

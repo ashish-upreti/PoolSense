@@ -99,37 +99,10 @@ public sealed class LlmTokenUsageRepository : ILlmTokenUsageRepository
     {
         const string sql = """
             IF OBJECT_ID(N'dbo.llm_token_usage', N'U') IS NULL
-            BEGIN
-                CREATE TABLE dbo.llm_token_usage (
-                    id bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_llm_token_usage PRIMARY KEY,
-                    created_at datetime2(7) NOT NULL CONSTRAINT DF_llm_token_usage_created_at DEFAULT SYSUTCDATETIME(),
-                    service_type nvarchar(32) NOT NULL,
-                    operation_name nvarchar(128) NOT NULL,
-                    provider nvarchar(64) NOT NULL CONSTRAINT DF_llm_token_usage_provider DEFAULT '',
-                    model nvarchar(128) NOT NULL CONSTRAINT DF_llm_token_usage_model DEFAULT '',
-                    deployment_name nvarchar(128) NOT NULL CONSTRAINT DF_llm_token_usage_deployment_name DEFAULT '',
-                    prompt_tokens int NOT NULL CONSTRAINT DF_llm_token_usage_prompt_tokens DEFAULT 0,
-                    completion_tokens int NOT NULL CONSTRAINT DF_llm_token_usage_completion_tokens DEFAULT 0,
-                    total_tokens int NOT NULL CONSTRAINT DF_llm_token_usage_total_tokens DEFAULT 0,
-                    is_estimated bit NOT NULL CONSTRAINT DF_llm_token_usage_is_estimated DEFAULT 0,
-                    input_characters int NOT NULL CONSTRAINT DF_llm_token_usage_input_characters DEFAULT 0,
-                    output_characters int NOT NULL CONSTRAINT DF_llm_token_usage_output_characters DEFAULT 0,
-                    vector_dimensions int NULL,
-                    latency_ms int NOT NULL CONSTRAINT DF_llm_token_usage_latency_ms DEFAULT 0,
-                    success bit NOT NULL CONSTRAINT DF_llm_token_usage_success DEFAULT 1,
-                    error_message nvarchar(max) NOT NULL CONSTRAINT DF_llm_token_usage_error_message DEFAULT '',
-                    correlation_id nvarchar(128) NOT NULL CONSTRAINT DF_llm_token_usage_correlation_id DEFAULT '',
-                    machine_name nvarchar(128) NOT NULL CONSTRAINT DF_llm_token_usage_machine_name DEFAULT '',
-                    user_name nvarchar(256) NOT NULL CONSTRAINT DF_llm_token_usage_user_name DEFAULT '',
-                    process_id int NOT NULL CONSTRAINT DF_llm_token_usage_process_id DEFAULT 0
-                );
-            END;
+                THROW 50005, 'Missing dbo.llm_token_usage. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
 
-            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_llm_token_usage_created_at' AND object_id = OBJECT_ID(N'dbo.llm_token_usage'))
-                CREATE INDEX IX_llm_token_usage_created_at ON dbo.llm_token_usage (created_at DESC);
-
-            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_llm_token_usage_service_operation' AND object_id = OBJECT_ID(N'dbo.llm_token_usage'))
-                CREATE INDEX IX_llm_token_usage_service_operation ON dbo.llm_token_usage (service_type, operation_name, created_at DESC);
+            IF COL_LENGTH('dbo.llm_token_usage', 'operation_name') IS NULL
+                THROW 50006, 'Missing dbo.llm_token_usage.operation_name. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
             """;
 
         await using var command = new SqlCommand(sql, connection);

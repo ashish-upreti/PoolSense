@@ -164,34 +164,10 @@ public sealed class SqlServerApplicationLoggerProvider : ILoggerProvider, ISuppo
     {
         const string sql = """
             IF OBJECT_ID(N'dbo.application_run_logs', N'U') IS NULL
-            BEGIN
-                CREATE TABLE dbo.application_run_logs (
-                    id bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_application_run_logs PRIMARY KEY,
-                    created_at datetime2(7) NOT NULL CONSTRAINT DF_application_run_logs_created_at DEFAULT SYSUTCDATETIME(),
-                    level nvarchar(32) NOT NULL,
-                    category nvarchar(256) NOT NULL,
-                    event_id int NOT NULL CONSTRAINT DF_application_run_logs_event_id DEFAULT 0,
-                    event_name nvarchar(256) NOT NULL CONSTRAINT DF_application_run_logs_event_name DEFAULT '',
-                    message nvarchar(max) NOT NULL,
-                    exception_type nvarchar(512) NOT NULL CONSTRAINT DF_application_run_logs_exception_type DEFAULT '',
-                    exception_message nvarchar(max) NOT NULL CONSTRAINT DF_application_run_logs_exception_message DEFAULT '',
-                    exception_stack_trace nvarchar(max) NOT NULL CONSTRAINT DF_application_run_logs_exception_stack_trace DEFAULT '',
-                    state_json nvarchar(max) NOT NULL CONSTRAINT DF_application_run_logs_state_json DEFAULT '',
-                    scopes_json nvarchar(max) NOT NULL CONSTRAINT DF_application_run_logs_scopes_json DEFAULT '',
-                    machine_name nvarchar(128) NOT NULL CONSTRAINT DF_application_run_logs_machine_name DEFAULT '',
-                    user_name nvarchar(256) NOT NULL CONSTRAINT DF_application_run_logs_user_name DEFAULT '',
-                    process_id int NOT NULL CONSTRAINT DF_application_run_logs_process_id DEFAULT 0,
-                    thread_id int NOT NULL CONSTRAINT DF_application_run_logs_thread_id DEFAULT 0,
-                    environment_name nvarchar(128) NOT NULL CONSTRAINT DF_application_run_logs_environment_name DEFAULT '',
-                    application_name nvarchar(128) NOT NULL CONSTRAINT DF_application_run_logs_application_name DEFAULT ''
-                );
-            END;
+                THROW 50006, 'Missing dbo.application_run_logs. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
 
-            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_application_run_logs_created_at' AND object_id = OBJECT_ID(N'dbo.application_run_logs'))
-                CREATE INDEX IX_application_run_logs_created_at ON dbo.application_run_logs (created_at DESC);
-
-            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_application_run_logs_level_created_at' AND object_id = OBJECT_ID(N'dbo.application_run_logs'))
-                CREATE INDEX IX_application_run_logs_level_created_at ON dbo.application_run_logs (level, created_at DESC);
+            IF COL_LENGTH('dbo.application_run_logs', 'message') IS NULL
+                THROW 50007, 'Missing dbo.application_run_logs.message. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
             """;
 
         await using var command = new SqlCommand(sql, connection);

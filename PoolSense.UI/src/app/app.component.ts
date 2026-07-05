@@ -42,13 +42,12 @@ type PoolTroubleshootEntry = PoolTroubleshootResponse & {
 }
 
 type FeedbackState = {
-  comment: string
+  currentPoolResolutionNote: string
   isSubmitting: boolean
   submitted: boolean
   error: string
   selectedFeedbackType: number | null
   wasUsed: boolean
-  applyToTargetIncident: boolean
   selectedTicketId: string
 }
 
@@ -126,13 +125,12 @@ function createDefaultApplicationFeedbackForm(): ApplicationFeedbackForm {
 
 function createFeedbackState(selectedTicketId = ''): FeedbackState {
   return {
-    comment: '',
+    currentPoolResolutionNote: '',
     isSubmitting: false,
     submitted: false,
     error: '',
     selectedFeedbackType: null,
     wasUsed: false,
-    applyToTargetIncident: false,
     selectedTicketId,
   }
 }
@@ -377,6 +375,10 @@ export class AppComponent implements OnInit {
 
   get poolRecommendationProjectOptions() {
     return this.projects.filter((project) => project.applicationFilter.trim().length > 0)
+  }
+
+  get isPoolReportWorkspace() {
+    return this.poolReportSourceEventId.trim().length > 0 || this.poolReport !== null || this.isPoolReportLoading
   }
 
   async handleSend(rawMessage = this.input) {
@@ -743,9 +745,6 @@ export class AppComponent implements OnInit {
   getFeedbackSubmittedLabel(messageId: number) {
     const state = this.getFeedbackState(messageId)
     const targetLabel = state.selectedTicketId ? ` for ${state.selectedTicketId}` : ''
-    const sharingLabel = state.applyToTargetIncident
-      ? ' Shared for future incident ranking.'
-      : ' Kept on this current issue only.'
 
     if (!state.submitted) {
       return ''
@@ -753,11 +752,11 @@ export class AppComponent implements OnInit {
 
     if (state.selectedFeedbackType === 1) {
       return state.wasUsed
-        ? `Feedback submitted${targetLabel}: marked helpful and used in resolution.${sharingLabel}`
-        : `Feedback submitted${targetLabel}: marked helpful.${sharingLabel}`
+        ? `Feedback submitted${targetLabel}: marked helpful and used in resolution.`
+        : `Feedback submitted${targetLabel}: marked helpful.`
     }
 
-    return `Feedback submitted${targetLabel}: marked not helpful.${sharingLabel}`
+    return `Feedback submitted${targetLabel}: marked not helpful.`
   }
 
   getCurrentIssueId(message: AssistantMessage) {
@@ -772,13 +771,25 @@ export class AppComponent implements OnInit {
   async submitMessageFeedback(message: AssistantMessage, feedbackType: number) {
     if (this.isFeedbackSubmitDisabled(message)) {
       if (!this.isFeedbackDisabled(message)) {
-        this.getFeedbackState(message.id).error = 'Select the primary incident for this feedback.'
+        this.getFeedbackState(message.id).error = 'Select the incident this feedback applies to.'
       }
 
       return
     }
 
     const state = this.getFeedbackState(message.id)
+    const note = state.currentPoolResolutionNote.trim()
+
+    if (feedbackType === -1 && !note) {
+      state.error = 'Add the current pool cause or what went wrong — helps PoolSense avoid this path next time.'
+      return
+    }
+
+    if (feedbackType === 1 && state.wasUsed && !note) {
+      state.error = 'Add the confirmed fix you used — gives PoolSense stronger evidence for future similar issues.'
+      return
+    }
+
     state.isSubmitting = true
     state.error = ''
 
@@ -790,9 +801,9 @@ export class AppComponent implements OnInit {
         suggestedResolution: message.result.suggestedResolution,
         feedbackType,
         wasUsed,
-        comment: state.comment.trim() || undefined,
+        currentPoolResolutionNote: state.currentPoolResolutionNote.trim() || undefined,
         currentIssueId: this.getCurrentIssueId(message),
-        applyToTargetIncident: state.applyToTargetIncident,
+        applyToTargetIncident: true,
         selectedTicketId: state.selectedTicketId,
         retrievedTicketIds: this.getRetrievedTicketIds(message),
       })

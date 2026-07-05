@@ -6,6 +6,7 @@ public sealed record FeedbackRequest
     public string SuggestedResolution { get; init; } = string.Empty;
     public int FeedbackType { get; init; }
     public bool WasUsed { get; init; }
+    public string? CurrentPoolResolutionNote { get; init; }
     public string? Comment { get; init; }
     public string? CurrentIssueId { get; init; }
     public bool ApplyToTargetIncident { get; init; }

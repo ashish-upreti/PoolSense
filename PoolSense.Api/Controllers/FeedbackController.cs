@@ -13,14 +13,19 @@ namespace PoolSense.Api.Controllers;
 public class FeedbackController : ControllerBase
 {
     private readonly IFeedbackRepository _feedbackRepository;
+    private readonly IValidatedResolutionRepository _validatedResolutionRepository;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FeedbackController"/> class.
     /// </summary>
     /// <param name="feedbackRepository">The repository used to store feedback entries.</param>
-    public FeedbackController(IFeedbackRepository feedbackRepository)
+    /// <param name="validatedResolutionRepository">The repository used to store human-validated resolutions.</param>
+    public FeedbackController(
+        IFeedbackRepository feedbackRepository,
+        IValidatedResolutionRepository validatedResolutionRepository)
     {
         _feedbackRepository = feedbackRepository;
+        _validatedResolutionRepository = validatedResolutionRepository;
     }
 
     /// <summary>
@@ -69,6 +74,10 @@ public class FeedbackController : ControllerBase
 
         try
         {
+            var currentPoolResolutionNote = string.IsNullOrWhiteSpace(request.CurrentPoolResolutionNote)
+                ? request.Comment
+                : request.CurrentPoolResolutionNote;
+
             var feedback = new FeedbackLog
             {
                 TicketQuery = request.Query.Trim(),
@@ -76,14 +85,29 @@ public class FeedbackController : ControllerBase
                 CurrentIssueId = string.IsNullOrWhiteSpace(request.CurrentIssueId) ? string.Empty : request.CurrentIssueId.Trim(),
                 FeedbackType = request.FeedbackType,
                 WasUsed = request.WasUsed,
-                ApplyToTargetIncident = request.ApplyToTargetIncident,
-                Comment = string.IsNullOrWhiteSpace(request.Comment) ? string.Empty : request.Comment.Trim(),
+                ApplyToTargetIncident = true,
+                Comment = string.IsNullOrWhiteSpace(currentPoolResolutionNote) ? string.Empty : currentPoolResolutionNote.Trim(),
                 TargetTicketId = selectedTicketId,
                 RetrievedTicketIds = string.Join(',', retrievedTicketIds),
                 CreatedAt = DateTime.UtcNow
             };
 
             var id = await _feedbackRepository.AddAsync(feedback, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(currentPoolResolutionNote))
+            {
+                var validatedResolution = new ValidatedResolution
+                {
+                    TargetTicketId = selectedTicketId,
+                    CurrentIssueId = feedback.CurrentIssueId,
+                    ConfirmedNote = currentPoolResolutionNote.Trim(),
+                    FeedbackType = request.FeedbackType,
+                    WasUsed = request.FeedbackType == 1 && request.WasUsed,
+                    CreatedAt = DateTime.UtcNow
+                };
+                await _validatedResolutionRepository.AddAsync(validatedResolution, cancellationToken);
+            }
+
             return Ok(new { id });
         }
         catch (Exception ex)

@@ -267,7 +267,7 @@
         </div>
       </section>
 
-      <div *ngIf="groups.length > 0" class="group-selector" role="group" aria-label="Application group filter">
+      <div *ngIf="groups.length > 0 && !isPoolReportWorkspace" class="group-selector" role="group" aria-label="Application group filter">
         <p class="group-selector-label">Search scope</p>
         <div class="field-group field-group-full">
           <select
@@ -312,7 +312,8 @@
 
             <div class="feedback-panel">
               <div *ngIf="message.result.similarIncidents.length > 0" class="feedback-ticket-selector">
-                <p class="feedback-label">Primary incident for this feedback</p>
+                <p class="feedback-label">Which similar incident should receive this Helpful or Not Helpful impact?</p>
+                <p class="helper-text">Select the historical incident that influenced this answer. Helpful boosts it for similar pools; Not Helpful lowers it.</p>
                 <div class="feedback-ticket-options">
                   <label *ngFor="let incident of message.result.similarIncidents" class="feedback-ticket-option" [class.feedback-ticket-option-active]="getFeedbackState(message.id).selectedTicketId === incident.ticketId">
                     <input type="radio" [name]="'feedback-target-' + message.id" [value]="incident.ticketId" [(ngModel)]="getFeedbackState(message.id).selectedTicketId" [disabled]="isFeedbackDisabled(message)" />
@@ -323,20 +324,13 @@
                   </label>
                 </div>
               </div>
-              <label class="feedback-label" [for]="'feedback-comment-' + message.id">Optional comment</label>
-              <textarea [id]="'feedback-comment-' + message.id" class="feedback-comment-input" [(ngModel)]="getFeedbackState(message.id).comment" [name]="'feedback-comment-' + message.id" placeholder="Add context about this response" rows="2" [disabled]="isFeedbackDisabled(message)"></textarea>
+              <label class="feedback-label" [for]="'feedback-comment-' + message.id">Current pool cause or exact fix</label>
+              <textarea [id]="'feedback-comment-' + message.id" class="feedback-comment-input" [(ngModel)]="getFeedbackState(message.id).currentPoolResolutionNote" [name]="'feedback-comment-' + message.id" placeholder="Example: root cause was a stuck validation job; reran DataLoad and refreshed the VG mapping." rows="2" [disabled]="isFeedbackDisabled(message)"></textarea>
               <label class="feedback-usage-option" [for]="'feedback-used-' + message.id">
                 <input [id]="'feedback-used-' + message.id" type="checkbox" [(ngModel)]="getFeedbackState(message.id).wasUsed" [name]="'feedback-used-' + message.id" [disabled]="isFeedbackDisabled(message)" />
                 <span class="feedback-usage-copy">
                   <strong>I used this resolution</strong>
-                  <small>Marks helpful feedback as a stronger signal for future incident ranking.</small>
-                </span>
-              </label>
-              <label class="feedback-usage-option" [for]="'feedback-share-' + message.id">
-                <input [id]="'feedback-share-' + message.id" type="checkbox" [(ngModel)]="getFeedbackState(message.id).applyToTargetIncident" [name]="'feedback-share-' + message.id" [disabled]="isFeedbackDisabled(message)" />
-                <span class="feedback-usage-copy">
-                  <strong>Use this feedback for future incident ranking</strong>
-                  <small>Keep unchecked to associate this feedback with the current issue only.</small>
+                  <small>Requires the note above. Stores it as the strongest positive evidence for future similar issues.</small>
                 </span>
               </label>
               <div class="feedback-actions">

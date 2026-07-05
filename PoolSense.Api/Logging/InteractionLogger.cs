@@ -152,22 +152,10 @@ public sealed class InteractionLogger
     {
         const string sql = """
             IF OBJECT_ID(N'dbo.interaction_logs', N'U') IS NULL
-            BEGIN
-                CREATE TABLE dbo.interaction_logs (
-                    id int IDENTITY(1,1) NOT NULL CONSTRAINT PK_interaction_logs PRIMARY KEY,
-                    query nvarchar(max) NOT NULL,
-                    generated_embedding_length int NOT NULL CONSTRAINT DF_interaction_logs_generated_embedding_length DEFAULT 0,
-                    retrieved_ticket_ids nvarchar(max) NOT NULL CONSTRAINT DF_interaction_logs_retrieved_ticket_ids DEFAULT '',
-                    retrieved_contents nvarchar(max) NOT NULL CONSTRAINT DF_interaction_logs_retrieved_contents DEFAULT '',
-                    suggested_resolution nvarchar(max) NOT NULL CONSTRAINT DF_interaction_logs_suggested_resolution DEFAULT '',
-                    confidence real NOT NULL CONSTRAINT DF_interaction_logs_confidence DEFAULT 0,
-                    processing_time_ms int NOT NULL CONSTRAINT DF_interaction_logs_processing_time_ms DEFAULT 0,
-                    created_at datetime2(7) NOT NULL CONSTRAINT DF_interaction_logs_created_at DEFAULT SYSUTCDATETIME()
-                );
-            END;
+                THROW 50004, 'Missing dbo.interaction_logs. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
 
-            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_interaction_logs_created_at' AND object_id = OBJECT_ID(N'dbo.interaction_logs'))
-                CREATE INDEX IX_interaction_logs_created_at ON dbo.interaction_logs (created_at DESC);
+            IF COL_LENGTH('dbo.interaction_logs', 'retrieved_contents') IS NULL
+                THROW 50005, 'Missing dbo.interaction_logs.retrieved_contents. Run database/sqlserver-bootstrap.sql before starting PoolSense.Api.', 1;
             """;
 
         await using var command = new SqlCommand(sql, connection);

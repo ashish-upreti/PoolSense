@@ -314,7 +314,8 @@ Embeddings are stored in SQL Server as serialized vectors. The current implement
 | `failure_patterns` | Structured failure classifications (system, component, failure type, resolution category) |
 | `processed_source_events` | Deduplication records with processing timestamps and email status |
 | `project_configs` | Project registration metadata (source type, connection info, knowledge sources) |
-| `feedback_logs` | User feedback for AI responses, including helpful / not-helpful rating, whether the suggestion was used, optional comment, and retrieved ticket ids |
+| `feedback_logs` | User feedback for AI responses, including Helpful / Not Helpful rating, whether the suggestion was used, current pool cause/fix note, and retrieved ticket IDs |
+| `validated_resolutions` | Human-validated cause/fix notes submitted by lifeguards, stored per selected historical incident; surfaced directly to the resolution agent as the highest-trust evidence signal on future similar issues |
 | `interaction_logs` | AI pipeline interaction metadata including query text, embedding length, retrieved ticket ids and summaries, suggested resolution, confidence, and processing time |
 
 ### Q: Does PoolSense modify the source ticket system?
@@ -360,7 +361,7 @@ Embeddings are stored in SQL Server as serialized vectors. The current implement
 | **Limited observability** | Interaction and feedback data are persisted, but there is still no centralized structured logging, distributed tracing, dashboards, or alerting |
 | **No authentication/authorization** | API endpoints are unauthenticated |
 | **No PII handling** | Sensitive content is passed through without scrubbing |
-| **No closed-loop learning automation** | Users can now rate suggestions and mark whether they were used, but there is no automated retraining, prompt tuning pipeline, or feedback analytics dashboard yet |
+| **No closed-loop learning automation** | Lifeguard feedback now stores confirmed cause/fix notes as standalone `validated_resolutions` records that the resolution agent uses directly as highest-trust evidence on future similar issues. Remaining gaps: no automated retraining, no prompt tuning pipeline, no feedback analytics dashboard. |
 | **No CI/CD pipeline** | No automated build, test, or deployment pipeline |
 | **No automated testing** | No unit tests, integration tests, or end-to-end tests |
 | **No rate limiting** | API has no throttling or abuse protection |

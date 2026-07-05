@@ -159,12 +159,54 @@ BEGIN
         id int IDENTITY(1,1) NOT NULL CONSTRAINT PK_feedback_logs PRIMARY KEY,
         ticket_query nvarchar(max) NOT NULL,
         suggested_resolution nvarchar(max) NOT NULL,
+        current_issue_id nvarchar(450) NOT NULL CONSTRAINT DF_feedback_logs_current_issue_id DEFAULT '',
         feedback_type int NOT NULL,
         was_used bit NOT NULL CONSTRAINT DF_feedback_logs_was_used DEFAULT 0,
+        apply_to_target_incident bit NOT NULL CONSTRAINT DF_feedback_logs_apply_to_target_incident DEFAULT 1,
         comment nvarchar(max) NOT NULL CONSTRAINT DF_feedback_logs_comment DEFAULT '',
-        target_ticket_id nvarchar(128) NOT NULL CONSTRAINT DF_feedback_logs_target_ticket_id DEFAULT '',
+        target_ticket_id nvarchar(450) NOT NULL CONSTRAINT DF_feedback_logs_target_ticket_id DEFAULT '',
         retrieved_ticket_ids nvarchar(max) NOT NULL,
         created_at datetime2(7) NOT NULL CONSTRAINT DF_feedback_logs_created_at DEFAULT SYSUTCDATETIME()
+    );
+END;
+GO
+
+IF COL_LENGTH(N'dbo.feedback_logs', N'current_issue_id') IS NULL
+    ALTER TABLE dbo.feedback_logs ADD current_issue_id nvarchar(450) NOT NULL CONSTRAINT DF_feedback_logs_current_issue_id DEFAULT '';
+GO
+
+IF COL_LENGTH(N'dbo.feedback_logs', N'was_used') IS NULL
+    ALTER TABLE dbo.feedback_logs ADD was_used bit NOT NULL CONSTRAINT DF_feedback_logs_was_used DEFAULT 0;
+GO
+
+IF COL_LENGTH(N'dbo.feedback_logs', N'apply_to_target_incident') IS NULL
+    ALTER TABLE dbo.feedback_logs ADD apply_to_target_incident bit NOT NULL CONSTRAINT DF_feedback_logs_apply_to_target_incident DEFAULT 1;
+GO
+
+IF COL_LENGTH(N'dbo.feedback_logs', N'target_ticket_id') IS NOT NULL
+    AND COL_LENGTH(N'dbo.feedback_logs', N'target_ticket_id') < 900
+BEGIN
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_feedback_logs_target_ticket_id' AND object_id = OBJECT_ID(N'dbo.feedback_logs'))
+        DROP INDEX IX_feedback_logs_target_ticket_id ON dbo.feedback_logs;
+
+    IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = 'DF_feedback_logs_target_ticket_id' AND parent_object_id = OBJECT_ID(N'dbo.feedback_logs'))
+        ALTER TABLE dbo.feedback_logs DROP CONSTRAINT DF_feedback_logs_target_ticket_id;
+
+    ALTER TABLE dbo.feedback_logs ALTER COLUMN target_ticket_id nvarchar(450) NOT NULL;
+    ALTER TABLE dbo.feedback_logs ADD CONSTRAINT DF_feedback_logs_target_ticket_id DEFAULT '' FOR target_ticket_id;
+END;
+GO
+
+IF OBJECT_ID(N'dbo.validated_resolutions', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.validated_resolutions (
+        id int IDENTITY(1,1) NOT NULL CONSTRAINT PK_validated_resolutions PRIMARY KEY,
+        target_ticket_id nvarchar(450) NOT NULL,
+        current_issue_id nvarchar(450) NOT NULL CONSTRAINT DF_validated_resolutions_current_issue_id DEFAULT '',
+        confirmed_note nvarchar(max) NOT NULL,
+        feedback_type int NOT NULL,
+        was_used bit NOT NULL CONSTRAINT DF_validated_resolutions_was_used DEFAULT 0,
+        created_at datetime2(7) NOT NULL CONSTRAINT DF_validated_resolutions_created_at DEFAULT SYSUTCDATETIME()
     );
 END;
 GO
@@ -326,6 +368,18 @@ GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_feedback_logs_target_ticket_id' AND object_id = OBJECT_ID(N'dbo.feedback_logs'))
     CREATE INDEX IX_feedback_logs_target_ticket_id ON dbo.feedback_logs (target_ticket_id);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_feedback_logs_current_issue_id' AND object_id = OBJECT_ID(N'dbo.feedback_logs'))
+    CREATE INDEX IX_feedback_logs_current_issue_id ON dbo.feedback_logs (current_issue_id);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_validated_resolutions_target_ticket_id' AND object_id = OBJECT_ID(N'dbo.validated_resolutions'))
+    CREATE INDEX IX_validated_resolutions_target_ticket_id ON dbo.validated_resolutions (target_ticket_id);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_validated_resolutions_created_at' AND object_id = OBJECT_ID(N'dbo.validated_resolutions'))
+    CREATE INDEX IX_validated_resolutions_created_at ON dbo.validated_resolutions (created_at DESC);
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_application_feedback_logs_created_at' AND object_id = OBJECT_ID(N'dbo.application_feedback_logs'))

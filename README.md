@@ -23,7 +23,7 @@ At a high level, PoolSense does four things:
 - Master email kill switch (`PoolSenseEmail`) in application configuration suppresses all outbound emails when disabled, regardless of per-application settings.
 - User activity audit trail capturing configuration changes, knowledge store operations, and sign-in/sign-out events in `dbo.user_activity_logs`.
 - Dedicated application feedback capture with submitter name, email, and stored comments for the overall product.
-- Feedback capture with helpful / not helpful rating, selected primary incident, optional comment, and usage signal.
+- Feedback capture with Helpful / Not Helpful rating, selected primary incident, current pool cause/fix note, and usage signal. Notes with a cause/fix are stored as standalone human-validated resolutions (`dbo.validated_resolutions`) that the resolution agent consults directly on future similar issues, in addition to ranking the selected historical incident.
 - Operational insight endpoints for failures, systems, components, and timelines.
 - Recommendation email delivery through SMTP or SQL Server Database Mail.
 - External API support for toggling `send_email` and updating semicolon-separated Lifeguard email recipients by `application_filter`.
@@ -174,6 +174,7 @@ The bootstrap script creates and/or maintains these primary tables:
 - `dbo.project_configs`
 - `dbo.ingestion_status`
 - `dbo.feedback_logs`
+- `dbo.validated_resolutions`
 - `dbo.application_feedback_logs`
 - `dbo.interaction_logs`
 - `dbo.application_run_logs`

@@ -168,6 +168,7 @@ builder.Services.AddScoped<SqlServerVectorStore>();
 builder.Services.AddScoped<IVectorStore>(sp => sp.GetRequiredService<SqlServerVectorStore>());
 builder.Services.AddScoped<ITicketKnowledgeEmbeddingStore>(sp => sp.GetRequiredService<SqlServerVectorStore>());
 builder.Services.AddScoped<IFeedbackRepository, FeedbackRepository>();
+builder.Services.AddScoped<IValidatedResolutionRepository, ValidatedResolutionRepository>();
 builder.Services.AddScoped<IFailurePatternRepository, FailurePatternRepository>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
 builder.Services.AddScoped<ITicketSourceApplicationRepository, TicketSourceApplicationRepository>();

@@ -18,6 +18,8 @@ public sealed class ResolutionIncident
     public string RootCause { get; set; } = string.Empty;
     public string Resolution { get; set; } = string.Empty;
     public double FeedbackScore { get; set; }
+    public string LatestHumanValidatedFix { get; set; } = string.Empty;
+    public string LatestHumanAvoidanceNote { get; set; } = string.Empty;
     public string LatestHelpfulComment { get; set; } = string.Empty;
     public string LatestNotHelpfulComment { get; set; } = string.Empty;
 }
@@ -57,18 +59,20 @@ New Ticket Title:
 New Ticket Description:
 {{$description}}
 
-Similar Historical Incidents (ordered most-similar first, each has TicketId, Problem, RootCause, Resolution, FeedbackScore, LatestHelpfulComment, LatestNotHelpfulComment):
+Similar Historical Incidents (ordered most-similar first, each has TicketId, Problem, RootCause, Resolution, FeedbackScore, LatestHumanValidatedFix, LatestHumanAvoidanceNote, LatestHelpfulComment, LatestNotHelpfulComment):
 {{$similarHistoricalIncidents}}
 
 Step-by-step instructions:
 1. Read the new ticket's title and description. Identify the specific symptoms and affected items/components.
 2. Compare the PROBLEM field of each historical incident against the new ticket's symptoms. Look for matching keywords, items, failure modes, and affected components.
 3. Select the 1-2 historical incidents whose PROBLEM most closely matches the new ticket's specific symptoms.
-4. Treat LatestHelpfulComment as high-trust human-validated evidence when it is specific and relevant.
-5. Treat LatestNotHelpfulComment as high-trust negative evidence that indicates what to avoid.
-6. For suggestedRootCause: Derive a SPECIFIC root cause from the selected incident's Problem, Resolution, and relevant feedback comments. Do NOT use the generic stored RootCause. Example: instead of 'Solver configuration mismatch causing improper handling of VG items', say 'VG item 8PG3 missing A33 location mapping in VG Group Mapping, preventing correct die sort mapping'.
-7. For suggestedResolution: Use the selected incident's Resolution field and relevant helpful comments, adapting minimally to this ticket's specific items/components.
-8. In reasoning, state which TicketId(s) were selected, why their Problem matches, and how helpful/not-helpful comments influenced the choice.
+4. Treat LatestHumanValidatedFix as the HIGHEST priority evidence — a lifeguard confirmed they used this exact fix on a real current pool issue. Use it directly in suggestedResolution if it is relevant and specific.
+5. Treat LatestHumanAvoidanceNote as the HIGHEST priority negative evidence — a lifeguard confirmed this path was wrong. Do not suggest it.
+6. Treat LatestHelpfulComment as high-trust supporting evidence when specific and relevant.
+7. Treat LatestNotHelpfulComment as high-trust negative evidence indicating what to avoid.
+8. For suggestedRootCause: Derive a SPECIFIC root cause from the selected incident's Problem, Resolution, and human-validated notes. Do NOT use the generic stored RootCause. Example: instead of 'Solver configuration mismatch causing improper handling of VG items', say 'VG item 8PG3 missing A33 location mapping in VG Group Mapping, preventing correct die sort mapping'.
+9. For suggestedResolution: Prioritize LatestHumanValidatedFix if present and relevant, then use the selected incident's Resolution field and helpful comments, adapting minimally to this ticket's specific items/components.
+10. In reasoning, state which TicketId(s) were selected, why their Problem matches, and how human-validated notes influenced the choice.
 
 Return only valid JSON with this exact structure:
 {
