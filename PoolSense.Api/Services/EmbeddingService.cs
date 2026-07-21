@@ -27,7 +27,7 @@ public class EmbeddingService : IEmbeddingService
 {
     private readonly IEmbeddingGenerator<string, Embedding<float>> _embeddingGenerator;
     private readonly ILlmTokenUsageRepository _tokenUsageRepository;
-    private readonly IOptionsMonitor<AiSettings> _aiSettings;
+    private readonly IOptionsMonitor<NyraSettings> _nyraSettings;
     private readonly ILogger<EmbeddingService> _logger;
 
     /// <summary>
@@ -37,12 +37,12 @@ public class EmbeddingService : IEmbeddingService
     public EmbeddingService(
         IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator,
         ILlmTokenUsageRepository tokenUsageRepository,
-        IOptionsMonitor<AiSettings> aiSettings,
+        IOptionsMonitor<NyraSettings> nyraSettings,
         ILogger<EmbeddingService> logger)
     {
         _embeddingGenerator = embeddingGenerator;
         _tokenUsageRepository = tokenUsageRepository;
-        _aiSettings = aiSettings;
+        _nyraSettings = nyraSettings;
         _logger = logger;
     }
 
@@ -90,7 +90,7 @@ public class EmbeddingService : IEmbeddingService
         try
         {
             var usage = TokenUsageMetadataExtractor.FromMetadata(metadata, inputText);
-            var model = _aiSettings.CurrentValue.Models.Embeddings;
+            var model = _nyraSettings.CurrentValue.EmbeddingModel;
             await _tokenUsageRepository.LogAsync(new LlmTokenUsageRecord
             {
                 ServiceType = "embedding",

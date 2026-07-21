@@ -149,3 +149,57 @@ Style:
 - simple and action-oriented
 - supportive tone (not policing)
 - easy-to-scan checklist layout
+
+---
+
+## Slide 5 — Additional Help: Improving PoolSense With Feedback
+
+**Prompt**
+
+Create a practical follow-up slide called `Additional Help: Improving PoolSense With Feedback` for Pool system users.
+
+Goal of this slide:
+- explain how teams can improve PoolSense recommendations from the troubleshooting screen
+- show that Helpful / Not Helpful feedback and comments make future recommendations more accurate
+- encourage lifeguards to add the confirmed cause or exact fix after troubleshooting
+
+Include a clear message:
+- `After using a PoolSense recommendation, please take a few seconds to tell PoolSense whether it helped and what actually fixed the current pool issue.`
+
+Add a `How feedback works` section with 3 simple steps:
+
+**Step 1 — Select the related historical incident**
+- Pick the similar past incident that influenced the recommendation
+- This tells PoolSense which historical example should receive the feedback impact
+
+**Step 2 — Choose Helpful or Not Helpful**
+- `Helpful` means the selected incident was relevant and should be trusted more for similar future issues
+- `Not Helpful` means the selected incident looked similar but led to the wrong path, so PoolSense should be more careful next time
+
+**Step 3 — Add the current pool cause or exact fix**
+- Enter what actually caused the current issue
+- Enter the exact action taken to resolve it
+- If you used the recommendation, check `I used this resolution`
+
+Add a `Why this matters` section:
+- `Helpful feedback teaches PoolSense which past incidents are reliable.`
+- `Not Helpful feedback teaches PoolSense what paths to avoid.`
+- `Confirmed cause/fix comments become high-trust evidence for future similar issues.`
+- `The more specific the feedback, the better PoolSense can help the next lifeguard.`
+
+Add examples:
+
+**Good Helpful Feedback**
+- `Confirmed root cause: stale VG mapping after DataLoad failure. Reran DataLoad and refreshed VG mapping; pool validated successfully.`
+
+**Good Not Helpful Feedback**
+- `This was not a VG mapping issue. Actual cause was missing application filter in project configuration.`
+
+Add a closing team message:
+- `Every feedback note makes PoolSense smarter for the next similar ticket.`
+
+Style:
+- friendly and non-technical
+- simple 3-step visual layout
+- include a small feedback loop graphic if possible
+- supportive tone, focused on helping teams improve recommendation quality

@@ -149,6 +149,7 @@ public class ProjectsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error creating project.");
             return StatusCode(500, $"An error occurred while creating the project: {ex.Message}");
         }
     }
@@ -168,6 +169,7 @@ public class ProjectsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error retrieving projects.");
             return StatusCode(500, $"An error occurred while retrieving projects: {ex.Message}");
         }
     }
@@ -187,6 +189,7 @@ public class ProjectsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error retrieving project '{ProjectId}'.", projectId);
             return StatusCode(500, $"An error occurred while retrieving project '{projectId}': {ex.Message}");
         }
     }
@@ -241,6 +244,7 @@ public class ProjectsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error updating project '{ProjectId}'.", projectId);
             return StatusCode(500, $"An error occurred while updating project '{projectId}': {ex.Message}");
         }
     }
@@ -319,6 +323,7 @@ public class ProjectsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error updating email settings for ApplicationFilter '{ApplicationFilter}'.", request.ApplicationFilter);
             return StatusCode(500, $"An error occurred while updating email settings for ApplicationFilter '{request.ApplicationFilter}': {ex.Message}");
         }
     }
@@ -427,6 +432,7 @@ public class ProjectsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error saving external project settings for ApplicationName '{ApplicationName}'.", request.ApplicationName);
             return StatusCode(500, $"An error occurred while saving external project settings for ApplicationName '{request.ApplicationName}': {ex.Message}");
         }
     }

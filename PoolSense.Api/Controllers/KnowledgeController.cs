@@ -27,6 +27,7 @@ public class KnowledgeController : ControllerBase
     private readonly ISimilaritySearchService _similaritySearchService;
     private readonly IVectorStore _vectorStore;
     private readonly IUserActivityAuditLogger _auditLogger;
+    private readonly ILogger<KnowledgeController> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="KnowledgeController"/> class.
@@ -36,13 +37,16 @@ public class KnowledgeController : ControllerBase
     /// <param name="embeddingService">The service that generates embeddings for enriched knowledge.</param>
     /// <param name="similaritySearchService">The service that searches for similar tickets.</param>
     /// <param name="vectorStore">The vector store used to persist ticket knowledge.</param>
+    /// <param name="auditLogger">The audit logger.</param>
+    /// <param name="logger">Logger for persisting errors to the database.</param>
     public KnowledgeController(
         ITicketAnalyzerAgent ticketAnalyzerAgent,
         IKnowledgeEnrichmentService knowledgeEnrichmentService,
         IEmbeddingService embeddingService,
         ISimilaritySearchService similaritySearchService,
         IVectorStore vectorStore,
-        IUserActivityAuditLogger auditLogger)
+        IUserActivityAuditLogger auditLogger,
+        ILogger<KnowledgeController> logger)
     {
         _ticketAnalyzerAgent = ticketAnalyzerAgent;
         _knowledgeEnrichmentService = knowledgeEnrichmentService;
@@ -50,6 +54,7 @@ public class KnowledgeController : ControllerBase
         _similaritySearchService = similaritySearchService;
         _vectorStore = vectorStore;
         _auditLogger = auditLogger;
+        _logger = logger;
     }
 
     /// <summary>
@@ -112,10 +117,12 @@ public class KnowledgeController : ControllerBase
         }
         catch (JsonException ex)
         {
+            _logger.LogError(ex, "Unable to parse analyzer output while storing ticket knowledge.");
             return StatusCode(500, $"Unable to parse analyzer output: {ex.Message}");
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error storing ticket knowledge.");
             return StatusCode(500, $"An error occurred while storing ticket knowledge: {ex.Message}");
         }
     }
@@ -153,6 +160,7 @@ public class KnowledgeController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error searching for similar tickets.");
             return StatusCode(500, $"An error occurred while searching for similar tickets: {ex.Message}");
         }
     }

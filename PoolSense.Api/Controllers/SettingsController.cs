@@ -41,6 +41,7 @@ public sealed class SettingsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error retrieving ticket automation settings.");
             return StatusCode(500, $"An error occurred while retrieving ticket automation settings: {ex.Message}");
         }
     }
@@ -87,6 +88,7 @@ public sealed class SettingsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error updating ticket automation settings.");
             await _auditLogger.LogAsync("UpdateTicketAutomationSettings", "TicketAutomationSettings", "master_polling",
                 $"Error: {ex.Message}", success: false, cancellationToken);
             return StatusCode(500, $"An error occurred while updating ticket automation settings: {ex.Message}");

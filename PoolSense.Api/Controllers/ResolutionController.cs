@@ -14,14 +14,17 @@ namespace PoolSense.Api.Controllers;
 public class ResolutionController : ControllerBase
 {
     private readonly ITicketWorkflowOrchestrator _ticketWorkflowOrchestrator;
+    private readonly ILogger<ResolutionController> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ResolutionController"/> class.
     /// </summary>
     /// <param name="ticketWorkflowOrchestrator">The orchestrator that processes tickets end to end.</param>
-    public ResolutionController(ITicketWorkflowOrchestrator ticketWorkflowOrchestrator)
+    /// <param name="logger">Logger for persisting errors to the database.</param>
+    public ResolutionController(ITicketWorkflowOrchestrator ticketWorkflowOrchestrator, ILogger<ResolutionController> logger)
     {
         _ticketWorkflowOrchestrator = ticketWorkflowOrchestrator;
+        _logger = logger;
     }
 
     /// <summary>
@@ -46,6 +49,7 @@ public class ResolutionController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error processing ticket through workflow.");
             return StatusCode(500, $"An error occurred while processing the ticket: {GetClientErrorMessage(ex)}");
         }
     }

@@ -18,19 +18,22 @@ public class IngestionController : ControllerBase
     private readonly IProcessedSourceEventRepository _processedSourceEventRepository;
     private readonly SqlTicketConnector _sqlTicketConnector;
     private readonly ITicketAutomationSettingsProvider _settingsProvider;
+    private readonly ILogger<IngestionController> _logger;
 
     public IngestionController(
         IIngestionStatusRepository ingestionStatusRepository,
         IProjectRepository projectRepository,
         IProcessedSourceEventRepository processedSourceEventRepository,
         SqlTicketConnector sqlTicketConnector,
-        ITicketAutomationSettingsProvider settingsProvider)
+        ITicketAutomationSettingsProvider settingsProvider,
+        ILogger<IngestionController> logger)
     {
         _ingestionStatusRepository = ingestionStatusRepository;
         _projectRepository = projectRepository;
         _processedSourceEventRepository = processedSourceEventRepository;
         _sqlTicketConnector = sqlTicketConnector;
         _settingsProvider = settingsProvider;
+        _logger = logger;
     }
 
     [HttpGet("status")]
@@ -59,6 +62,7 @@ public class IngestionController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error retrieving ingestion statuses.");
             return StatusCode(500, $"An error occurred while retrieving ingestion statuses: {ex.Message}");
         }
     }
@@ -91,6 +95,7 @@ public class IngestionController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error retrieving ingestion status for project '{ProjectId}'.", projectId);
             return StatusCode(500, $"An error occurred while retrieving ingestion status for '{projectId}': {ex.Message}");
         }
     }

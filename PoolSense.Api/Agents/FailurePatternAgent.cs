@@ -14,16 +14,16 @@ public class FailurePatternAgent : IFailurePatternAgent
 {
     private readonly Kernel _kernel;
     private readonly ILlmTokenUsageRepository _tokenUsageRepository;
-    private readonly IOptionsMonitor<AiSettings> _aiSettings;
+    private readonly IOptionsMonitor<NyraSettings> _nyraSettings;
 
     public FailurePatternAgent(
         Kernel kernel,
         ILlmTokenUsageRepository tokenUsageRepository,
-        IOptionsMonitor<AiSettings> aiSettings)
+        IOptionsMonitor<NyraSettings> nyraSettings)
     {
         _kernel = kernel;
         _tokenUsageRepository = tokenUsageRepository;
-        _aiSettings = aiSettings;
+        _nyraSettings = nyraSettings;
     }
 
     public Task<string> ExtractFailurePatternAsync(string problem, string rootCause, string resolution)
@@ -76,6 +76,6 @@ Rules:
             arguments,
             _tokenUsageRepository,
             "FailurePatternExtraction",
-            _aiSettings.CurrentValue.Models.Chat);
+            _nyraSettings.CurrentValue.Model);
     }
 }

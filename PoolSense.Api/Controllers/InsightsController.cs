@@ -13,16 +13,19 @@ public class InsightsController : ControllerBase
 {
     private readonly IFailurePatternService _failurePatternService;
     private readonly IVectorStore _vectorStore;
+    private readonly ILogger<InsightsController> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="InsightsController"/> class.
     /// </summary>
     /// <param name="failurePatternService">The service that supplies failure pattern aggregates.</param>
     /// <param name="vectorStore">The vector store that supplies incident timeline data.</param>
-    public InsightsController(IFailurePatternService failurePatternService, IVectorStore vectorStore)
+    /// <param name="logger">Logger for persisting errors to the database.</param>
+    public InsightsController(IFailurePatternService failurePatternService, IVectorStore vectorStore, ILogger<InsightsController> logger)
     {
         _failurePatternService = failurePatternService;
         _vectorStore = vectorStore;
+        _logger = logger;
     }
 
     /// <summary>
@@ -67,6 +70,7 @@ public class InsightsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error retrieving combined insights.");
             return StatusCode(500, $"An error occurred while retrieving insights: {ex.Message}");
         }
     }
@@ -95,6 +99,7 @@ public class InsightsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error retrieving failure insights.");
             return StatusCode(500, $"An error occurred while retrieving failure insights: {ex.Message}");
         }
     }
@@ -123,6 +128,7 @@ public class InsightsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error retrieving component insights.");
             return StatusCode(500, $"An error occurred while retrieving component insights: {ex.Message}");
         }
     }
@@ -152,6 +158,7 @@ public class InsightsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error retrieving system insights.");
             return StatusCode(500, $"An error occurred while retrieving system insights: {ex.Message}");
         }
     }
@@ -180,6 +187,7 @@ public class InsightsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Error retrieving incident timeline.");
             return StatusCode(500, $"An error occurred while retrieving the incident timeline: {ex.Message}");
         }
     }

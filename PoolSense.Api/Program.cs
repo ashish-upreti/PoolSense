@@ -11,9 +11,8 @@ using PoolSense.Api.Data;
 using PoolSense.Api.Options;
 using PoolSense.Api.Orchestration;
 using PoolSense.Api.Services;
+using PoolSense.Api.Services.Nyra;
 using PoolSense.Api.Logging;
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
 
 var builder = WebApplication.CreateBuilder(args);
 const string PoolSenseUiCorsPolicy = "PoolSenseUi";
@@ -40,60 +39,23 @@ static bool HasHttpsBinding(IConfiguration configuration)
         .Any(value => value.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
 }
 
-static bool HasRequiredAiSettings(AiSettings aiSettings)
+static bool HasRequiredNyraSettings(NyraSettings nyraSettings)
 {
-    return !string.IsNullOrWhiteSpace(aiSettings.BaseUrl)
-        && !string.IsNullOrWhiteSpace(aiSettings.ApiKey)
-        && !string.IsNullOrWhiteSpace(aiSettings.Models.Chat)
-        && !string.IsNullOrWhiteSpace(aiSettings.Models.Embeddings);
+    return !string.IsNullOrWhiteSpace(nyraSettings.ApiKey)
+        && !string.IsNullOrWhiteSpace(nyraSettings.GatewayEndpoint)
+        && !string.IsNullOrWhiteSpace(nyraSettings.Model)
+        && !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingModel)
+        && (!string.IsNullOrWhiteSpace(nyraSettings.EmbeddingGenerateUrl)
+            || !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingEndpoint))
+        && !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingApiVersion);
 }
 
-static void ValidateAiSettings(AiSettings aiSettings)
+static void ValidateNyraSettings(NyraSettings nyraSettings)
 {
-    if (!HasRequiredAiSettings(aiSettings))
+    if (!HasRequiredNyraSettings(nyraSettings))
     {
-        throw new InvalidOperationException("Azure OpenAI configuration is incomplete. Configure AiSettings:BaseUrl, AiSettings:ApiKey, AiSettings:Models:Chat, and AiSettings:Models:Embeddings.");
+        throw new InvalidOperationException("NYRA configuration is incomplete. Configure Nyra:ApiKey, Nyra:GatewayEndpoint, Nyra:Model, Nyra:EmbeddingModel, Nyra:EmbeddingApiVersion, and Nyra:EmbeddingGenerateUrl or Nyra:EmbeddingEndpoint.");
     }
-}
-
-static HttpMessageHandler CreateAzureOpenAiHttpMessageHandler(AiSettings aiSettings, ILogger logger)
-{
-    if (!aiSettings.Http.AllowCertificateRevocationUnknown)
-    {
-        return new HttpClientHandler();
-    }
-
-    logger.LogWarning("Azure OpenAI HTTP client is configured to allow certificate chains whose only validation errors are unknown or offline revocation status.");
-    return new HttpClientHandler
-    {
-        CheckCertificateRevocationList = true,
-        ServerCertificateCustomValidationCallback = ValidateCertificateAllowingRevocationUnknown
-    };
-}
-
-static bool ValidateCertificateAllowingRevocationUnknown(
-    HttpRequestMessage request,
-    X509Certificate2? certificate,
-    X509Chain? chain,
-    SslPolicyErrors sslPolicyErrors)
-{
-    if (sslPolicyErrors == SslPolicyErrors.None)
-    {
-        return true;
-    }
-
-    if ((sslPolicyErrors & ~SslPolicyErrors.RemoteCertificateChainErrors) != 0 || chain is null)
-    {
-        return false;
-    }
-
-    const X509ChainStatusFlags allowedRevocationStatusErrors =
-        X509ChainStatusFlags.RevocationStatusUnknown |
-        X509ChainStatusFlags.OfflineRevocation;
-
-    return chain.ChainStatus.All(status =>
-        status.Status == X509ChainStatusFlags.NoError ||
-        (status.Status & ~allowedRevocationStatusErrors) == 0);
 }
 
 // Add services to the container.
@@ -102,6 +64,7 @@ builder.Services.AddControllers(options =>
     options.Filters.Add(new AuthorizeFilter());
 });
 builder.Services.Configure<AiSettings>(builder.Configuration.GetSection("AiSettings"));
+builder.Services.Configure<NyraSettings>(builder.Configuration.GetSection("Nyra"));
 builder.Services.Configure<ActiveDirectoryOptions>(builder.Configuration.GetSection(ActiveDirectoryOptions.SectionName));
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
 builder.Services.Configure<TicketAutomationSettings>(builder.Configuration.GetSection("TicketAutomation"));
@@ -183,13 +146,6 @@ builder.Services.AddScoped<IUserActivityAuditLogger, UserActivityAuditLogger>();
 builder.Services.AddScoped<SqlTicketConnector>();
 builder.Services.AddScoped<IApplicationSyncService, ApplicationSyncService>();
 builder.Services.AddHttpClient<ApiTicketConnector>();
-builder.Services.AddHttpClient("AzureOpenAI")
-    .ConfigurePrimaryHttpMessageHandler(sp =>
-    {
-        var aiSettings = sp.GetRequiredService<IOptionsMonitor<AiSettings>>().CurrentValue;
-        var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("AzureOpenAIHttpClient");
-        return CreateAzureOpenAiHttpMessageHandler(aiSettings, logger);
-    });
 
 builder.Services.AddScoped<ITicketWorkflowOrchestrator, TicketWorkflowOrchestrator>();
 builder.Services.AddHostedService<BackgroundTicketPollingService>();
@@ -230,52 +186,25 @@ builder.Services.AddSwaggerGen(c =>
 
 builder.Services.AddScoped<Kernel>(sp =>
 {
-    var aiSettings = sp.GetRequiredService<IOptionsMonitor<AiSettings>>().CurrentValue;
-    ValidateAiSettings(aiSettings);
+    var nyraSettings = sp.GetRequiredService<IOptionsMonitor<NyraSettings>>().CurrentValue;
+    ValidateNyraSettings(nyraSettings);
 
     var kernelBuilder = Kernel.CreateBuilder();
-    if (aiSettings.Http.AllowCertificateRevocationUnknown)
-    {
-        var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
-        var chatHttpClient = httpClientFactory.CreateClient("AzureOpenAI");
-        var embeddingHttpClient = httpClientFactory.CreateClient("AzureOpenAI");
+    var endpoint = new Uri(nyraSettings.GatewayEndpoint);
+    var nyraClient = string.IsNullOrWhiteSpace(nyraSettings.TokenUrl)
+        ? NyraGateway.Create(nyraSettings.ApiKey, endpoint)
+        : NyraGateway.Create(nyraSettings.ApiKey, endpoint, nyraSettings.TokenUrl);
 
-        kernelBuilder.AddAzureOpenAIChatCompletion(
-            deploymentName: aiSettings.Models.Chat,
-            endpoint: aiSettings.BaseUrl,
-            apiKey: aiSettings.ApiKey,
-            httpClient: chatHttpClient);
-
-#pragma warning disable SKEXP0010
-        kernelBuilder.AddAzureOpenAIEmbeddingGenerator(
-            deploymentName: aiSettings.Models.Embeddings,
-            endpoint: aiSettings.BaseUrl,
-            apiKey: aiSettings.ApiKey,
-            httpClient: embeddingHttpClient);
-#pragma warning restore SKEXP0010
-    }
-    else
-    {
-        kernelBuilder.AddAzureOpenAIChatCompletion(
-            deploymentName: aiSettings.Models.Chat,
-            endpoint: aiSettings.BaseUrl,
-            apiKey: aiSettings.ApiKey);
-
-#pragma warning disable SKEXP0010
-        kernelBuilder.AddAzureOpenAIEmbeddingGenerator(
-            deploymentName: aiSettings.Models.Embeddings,
-            endpoint: aiSettings.BaseUrl,
-            apiKey: aiSettings.ApiKey);
-#pragma warning restore SKEXP0010
-    }
+    kernelBuilder.AddAzureOpenAIChatCompletion(
+        deploymentName: nyraSettings.Model,
+        azureOpenAIClient: nyraClient);
 
     return kernelBuilder.Build();
 });
 
+builder.Services.AddHttpClient<NyraEmbeddingGenerator>();
 builder.Services.AddScoped<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
-    sp.GetRequiredService<Kernel>()
-      .Services
-            .GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>());
+    sp.GetRequiredService<NyraEmbeddingGenerator>());
 
 
 var app = builder.Build();

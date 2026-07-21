@@ -13,16 +13,16 @@ public class BackgroundTicketPollingService : BackgroundService
     private const string NewRecommendationKind = "NewRecommendation";
 
     private readonly IServiceScopeFactory _serviceScopeFactory;
-    private readonly IOptionsMonitor<AiSettings> _aiSettingsMonitor;
+    private readonly IOptionsMonitor<NyraSettings> _nyraSettingsMonitor;
     private readonly ILogger<BackgroundTicketPollingService> _logger;
 
     public BackgroundTicketPollingService(
         IServiceScopeFactory serviceScopeFactory,
-        IOptionsMonitor<AiSettings> aiSettingsMonitor,
+        IOptionsMonitor<NyraSettings> nyraSettingsMonitor,
         ILogger<BackgroundTicketPollingService> logger)
     {
         _serviceScopeFactory = serviceScopeFactory;
-        _aiSettingsMonitor = aiSettingsMonitor;
+        _nyraSettingsMonitor = nyraSettingsMonitor;
         _logger = logger;
     }
 
@@ -39,9 +39,9 @@ public class BackgroundTicketPollingService : BackgroundService
                 {
                     _logger.LogInformation("Polling is paused (PollingEnabled=false). Waiting {DelaySeconds} seconds before the next check.", delay.TotalSeconds);
                 }
-                else if (!HasRequiredAiSettings(_aiSettingsMonitor.CurrentValue))
+                else if (!HasRequiredNyraSettings(_nyraSettingsMonitor.CurrentValue))
                 {
-                    _logger.LogWarning("Polling is skipped because Azure OpenAI settings are incomplete. Configure AiSettings:BaseUrl, AiSettings:ApiKey, AiSettings:Models:Chat, and AiSettings:Models:Embeddings.");
+                    _logger.LogWarning("Polling is skipped because NYRA settings are incomplete. Configure Nyra:ApiKey, Nyra:GatewayEndpoint, Nyra:Model, Nyra:EmbeddingModel, Nyra:EmbeddingApiVersion, and Nyra:EmbeddingGenerateUrl or Nyra:EmbeddingEndpoint.");
                 }
                 else
                 {
@@ -61,12 +61,15 @@ public class BackgroundTicketPollingService : BackgroundService
         }
     }
 
-    private static bool HasRequiredAiSettings(AiSettings aiSettings)
+    private static bool HasRequiredNyraSettings(NyraSettings nyraSettings)
     {
-        return !string.IsNullOrWhiteSpace(aiSettings.BaseUrl)
-            && !string.IsNullOrWhiteSpace(aiSettings.ApiKey)
-            && !string.IsNullOrWhiteSpace(aiSettings.Models.Chat)
-            && !string.IsNullOrWhiteSpace(aiSettings.Models.Embeddings);
+        return !string.IsNullOrWhiteSpace(nyraSettings.ApiKey)
+            && !string.IsNullOrWhiteSpace(nyraSettings.GatewayEndpoint)
+            && !string.IsNullOrWhiteSpace(nyraSettings.Model)
+            && !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingModel)
+            && (!string.IsNullOrWhiteSpace(nyraSettings.EmbeddingGenerateUrl)
+                || !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingEndpoint))
+            && !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingApiVersion);
     }
 
     private async Task<TicketAutomationSettings> GetSettingsAsync(CancellationToken cancellationToken)

@@ -26,7 +26,7 @@ public class LLMService : ILLMService
 {
     private readonly Kernel _kernel;
     private readonly ILlmTokenUsageRepository _tokenUsageRepository;
-    private readonly IOptionsMonitor<AiSettings> _aiSettings;
+    private readonly IOptionsMonitor<NyraSettings> _nyraSettings;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LLMService"/> class.
@@ -35,11 +35,11 @@ public class LLMService : ILLMService
     public LLMService(
         Kernel kernel,
         ILlmTokenUsageRepository tokenUsageRepository,
-        IOptionsMonitor<AiSettings> aiSettings)
+        IOptionsMonitor<NyraSettings> nyraSettings)
     {
         _kernel = kernel;
         _tokenUsageRepository = tokenUsageRepository;
-        _aiSettings = aiSettings;
+        _nyraSettings = nyraSettings;
     }
 
     /// <summary>
@@ -55,6 +55,6 @@ public class LLMService : ILLMService
             new KernelArguments(),
             _tokenUsageRepository,
             "GenericPrompt",
-            _aiSettings.CurrentValue.Models.Chat);
+            _nyraSettings.CurrentValue.Model);
     }
 }
