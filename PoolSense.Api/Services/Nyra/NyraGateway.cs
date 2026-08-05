@@ -10,16 +10,12 @@ namespace PoolSense.Api.Services.Nyra;
 
 public static class NyraGateway
 {
-    internal const string DefaultTokenUrl = "https://sso.rf3stg.mfgint.intel.com/as/token.oauth2";
-    private const string DefaultClientId = "nyra-test-client-rf3stg";
-    private const string DefaultClientSecret = "rMMB74dvVUTfc1gAETHRLVgktjRbfyUDkTMUiToCFVXBCX01S3escWU2rAqfhyr0";
-    private const string DefaultAudience = "nyra-web-core-api-rf3stg";
     private const string NoProxyPattern = @".*\.mfgint\.intel\.com";
 
     public static AzureOpenAIClient Create(
         string? apiKey,
         Uri endpoint,
-        string tokenUrl = DefaultTokenUrl)
+        string? tokenUrl = null)
     {
         return CreateAsync(apiKey, endpoint, tokenUrl).GetAwaiter().GetResult();
     }
@@ -30,21 +26,25 @@ public static class NyraGateway
         string? tokenUrl,
         string? clientId,
         string? clientSecret,
-        string? audience)
+        string? audience,
+        string? issuer = null,
+        string? scope = null)
     {
-        return CreateAsync(apiKey, endpoint, tokenUrl, clientId, clientSecret, audience).GetAwaiter().GetResult();
+        return CreateAsync(apiKey, endpoint, tokenUrl, clientId, clientSecret, audience, issuer, scope).GetAwaiter().GetResult();
     }
 
     public static async Task<AzureOpenAIClient> CreateAsync(
         string? apiKey,
         Uri endpoint,
-        string? tokenUrl = DefaultTokenUrl,
+        string? tokenUrl = null,
         string? clientId = null,
         string? clientSecret = null,
         string? audience = null,
+        string? issuer = null,
+        string? scope = null,
         CancellationToken cancellationToken = default)
     {
-        var token = await FetchTokenAsync(tokenUrl, clientId, clientSecret, audience, cancellationToken).ConfigureAwait(false);
+        var token = await FetchTokenAsync(tokenUrl, issuer, clientId, clientSecret, audience, scope, cancellationToken).ConfigureAwait(false);
         var options = new AzureOpenAIClientOptions();
 
         options.AddPolicy(new NyraAuthPolicy(token, apiKey), PipelinePosition.PerCall);
@@ -53,21 +53,26 @@ public static class NyraGateway
     }
 
     internal static async Task<string> FetchTokenAsync(
-        string? tokenUrl = DefaultTokenUrl,
+        string? tokenUrl = null,
+        string? issuer = null,
         string? clientId = null,
         string? clientSecret = null,
         string? audience = null,
+        string? scope = null,
         CancellationToken cancellationToken = default)
     {
         using var httpClient = CreateTokenHttpClient();
+        var resolvedTokenUrl = !string.IsNullOrWhiteSpace(tokenUrl)
+            ? tokenUrl
+            : await ResolveTokenUrlAsync(httpClient, issuer, cancellationToken).ConfigureAwait(false);
 
         var form = new Dictionary<string, string>
         {
             ["grant_type"] = "client_credentials",
-            ["client_id"] = FirstNonEmpty(clientId, DefaultClientId),
-            ["client_secret"] = FirstNonEmpty(clientSecret, DefaultClientSecret),
-            ["scope"] = "openid",
-            ["audience"] = FirstNonEmpty(audience, DefaultAudience),
+            ["client_id"] = GetRequiredOption(clientId, "Nyra:ClientId"),
+            ["client_secret"] = GetRequiredOption(clientSecret, "Nyra:ClientSecret"),
+            ["scope"] = FirstNonEmpty(scope, "openid"),
+            ["audience"] = GetRequiredOption(audience, "Nyra:Audience"),
         };
 
         using var content = new FormUrlEncodedContent(form);
@@ -76,7 +81,7 @@ public static class NyraGateway
         try
         {
             response = await httpClient
-                .PostAsync(FirstNonEmpty(tokenUrl, DefaultTokenUrl), content, cancellationToken)
+                .PostAsync(resolvedTokenUrl, content, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (HttpRequestException ex)
@@ -101,6 +106,42 @@ public static class NyraGateway
         }
 
         return accessToken;
+    }
+
+    private static async Task<string> ResolveTokenUrlAsync(
+        HttpClient httpClient,
+        string? issuer,
+        CancellationToken cancellationToken)
+    {
+        var resolvedIssuer = GetRequiredOption(issuer, "Nyra:Issuer or Nyra:TokenUrl").TrimEnd('/');
+        var openIdConfigurationUrl = resolvedIssuer + "/.well-known/openid-configuration";
+
+        using var response = await httpClient.GetAsync(openIdConfigurationUrl, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"OIDC configuration endpoint returned {(int)response.StatusCode}: {body}");
+        }
+
+        using var json = JsonDocument.Parse(body);
+        if (!json.RootElement.TryGetProperty("token_endpoint", out var tokenEndpointProperty)
+            || tokenEndpointProperty.GetString() is not { Length: > 0 } tokenEndpoint)
+        {
+            throw new InvalidOperationException("OIDC configuration endpoint returned 200 but no token_endpoint in response.");
+        }
+
+        return tokenEndpoint;
+    }
+
+    private static string GetRequiredOption(string? value, string configurationKey)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"{configurationKey} configuration is required.");
+        }
+
+        return value;
     }
 
     private static string FirstNonEmpty(params string?[] values) =>

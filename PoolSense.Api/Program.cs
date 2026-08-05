@@ -39,29 +39,6 @@ static bool HasHttpsBinding(IConfiguration configuration)
         .Any(value => value.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
 }
 
-static bool HasRequiredNyraSettings(NyraSettings nyraSettings)
-{
-    var hasNyraAuth = !string.IsNullOrWhiteSpace(nyraSettings.ApiKey)
-        || (!string.IsNullOrWhiteSpace(nyraSettings.ClientId)
-            && !string.IsNullOrWhiteSpace(nyraSettings.ClientSecret));
-
-    return hasNyraAuth
-        && !string.IsNullOrWhiteSpace(nyraSettings.GatewayEndpoint)
-        && !string.IsNullOrWhiteSpace(nyraSettings.Model)
-        && !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingModel)
-        && (!string.IsNullOrWhiteSpace(nyraSettings.EmbeddingGenerateUrl)
-            || !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingEndpoint))
-        && !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingApiVersion);
-}
-
-static void ValidateNyraSettings(NyraSettings nyraSettings)
-{
-    if (!HasRequiredNyraSettings(nyraSettings))
-    {
-        throw new InvalidOperationException("NYRA configuration is incomplete. Configure Nyra:ApiKey or Nyra:ClientId/Nyra:ClientSecret, plus Nyra:GatewayEndpoint, Nyra:Model, Nyra:EmbeddingModel, Nyra:EmbeddingApiVersion, and Nyra:EmbeddingGenerateUrl or Nyra:EmbeddingEndpoint.");
-    }
-}
-
 // Add services to the container.
 builder.Services.AddControllers(options =>
 {
@@ -69,6 +46,7 @@ builder.Services.AddControllers(options =>
 });
 builder.Services.Configure<AiSettings>(builder.Configuration.GetSection("AiSettings"));
 builder.Services.Configure<NyraSettings>(builder.Configuration.GetSection("Nyra"));
+builder.Services.PostConfigure<NyraSettings>(NyraSettingsResolver.ApplyActiveProfile);
 builder.Services.Configure<ActiveDirectoryOptions>(builder.Configuration.GetSection(ActiveDirectoryOptions.SectionName));
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
 builder.Services.Configure<TicketAutomationSettings>(builder.Configuration.GetSection("TicketAutomation"));
@@ -191,17 +169,19 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddScoped<Kernel>(sp =>
 {
     var nyraSettings = sp.GetRequiredService<IOptionsMonitor<NyraSettings>>().CurrentValue;
-    ValidateNyraSettings(nyraSettings);
+    NyraSettingsResolver.Validate(nyraSettings);
 
     var kernelBuilder = Kernel.CreateBuilder();
     var endpoint = new Uri(nyraSettings.GatewayEndpoint);
     var nyraClient = NyraGateway.Create(
-        nyraSettings.ApiKey,
+        NyraSettingsResolver.GetApiKeyHeaderValue(nyraSettings),
         endpoint,
         nyraSettings.TokenUrl,
         nyraSettings.ClientId,
         nyraSettings.ClientSecret,
-        nyraSettings.Audience);
+        nyraSettings.Audience,
+        nyraSettings.Issuer,
+        nyraSettings.Scope);
 
     kernelBuilder.AddAzureOpenAIChatCompletion(
         deploymentName: nyraSettings.Model,

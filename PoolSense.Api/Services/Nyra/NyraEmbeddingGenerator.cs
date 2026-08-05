@@ -33,22 +33,26 @@ public sealed class NyraEmbeddingGenerator : IEmbeddingGenerator<string, Embeddi
         }
 
         var settings = _settings.CurrentValue;
+        NyraSettingsResolver.ApplyActiveProfile(settings);
         var tokenUrl = string.IsNullOrWhiteSpace(settings.TokenUrl)
             ? null
             : settings.TokenUrl;
         var token = await NyraGateway.FetchTokenAsync(
-            tokenUrl,
-            settings.ClientId,
-            settings.ClientSecret,
-            settings.Audience,
-            cancellationToken).ConfigureAwait(false);
+            tokenUrl: tokenUrl,
+            issuer: settings.Issuer,
+            clientId: settings.ClientId,
+            clientSecret: settings.ClientSecret,
+            audience: settings.Audience,
+            scope: settings.Scope,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
         var generateUrl = GetEmbeddingGenerateUrl(settings);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, generateUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (!string.IsNullOrWhiteSpace(settings.ApiKey))
+        var apiKey = NyraSettingsResolver.GetApiKeyHeaderValue(settings);
+        if (!string.IsNullOrWhiteSpace(apiKey))
         {
-            request.Headers.Add("NYRA-API-KEY", settings.ApiKey);
+            request.Headers.Add("NYRA-API-KEY", apiKey);
         }
 
         request.Content = JsonContent.Create(new
@@ -106,6 +110,7 @@ public sealed class NyraEmbeddingGenerator : IEmbeddingGenerator<string, Embeddi
         if (serviceType == typeof(EmbeddingGeneratorMetadata))
         {
             var settings = _settings.CurrentValue;
+            NyraSettingsResolver.ApplyActiveProfile(settings);
             return new EmbeddingGeneratorMetadata(
                 providerName: "nyra",
                 providerUri: new Uri(GetEmbeddingGenerateUrl(settings)),

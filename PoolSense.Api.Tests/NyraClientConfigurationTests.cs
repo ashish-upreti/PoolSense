@@ -4,6 +4,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using PoolSense.Api.Configuration;
 using Xunit;
 
 namespace PoolSense.Api.Tests;
@@ -131,22 +132,26 @@ public sealed class NyraClientConfigurationTests
     private static NyraClientTestSettings? CreateSettings(bool requireSecret)
     {
         var configuration = new ConfigurationBuilder()
+            .AddJsonFile("appsettings.json", optional: true)
             .AddEnvironmentVariables()
             .Build();
 
+        var nyraSettings = configuration.GetSection("Nyra").Get<NyraSettings>() ?? new NyraSettings();
+        NyraSettingsResolver.ApplyActiveProfile(nyraSettings);
+
         var settings = new NyraClientTestSettings(
-            Issuer: FirstNonEmpty(configuration["Nyra:Issuer"], configuration["NYRA_ISSUER"], DefaultIssuer),
-            TokenUrl: FirstNonEmpty(configuration["Nyra:TokenUrl"], configuration["NYRA_TOKEN_URL"]),
-            Audience: FirstNonEmpty(configuration["Nyra:Audience"], configuration["NYRA_AUDIENCE"], DefaultAudience),
-            ClientId: FirstNonEmpty(configuration["Nyra:ClientId"], configuration["NYRA_CLIENT_ID"], DefaultClientId),
-            ClientSecret: FirstNonEmpty(configuration["Nyra:ClientSecret"], configuration["NYRA_CLIENT_SECRET"], DefaultClientSecret),
-            Scope: FirstNonEmpty(configuration["Nyra:Scope"], configuration["NYRA_SCOPE"], DefaultScope),
-            ResponsesUrl: FirstNonEmpty(configuration["Nyra:ResponsesUrl"], configuration["NYRA_RESPONSES_URL"], DefaultResponsesUrl),
-            LlmModel: FirstNonEmpty(configuration["Nyra:Model"], configuration["NYRA_LLM_MODEL"], DefaultLlmModel),
-            EmbeddingGenerateUrl: FirstNonEmpty(configuration["Nyra:EmbeddingGenerateUrl"], configuration["NYRA_EMBEDDING_GENERATE_URL"], DefaultEmbeddingGenerateUrl),
-            EmbeddingModel: FirstNonEmpty(configuration["Nyra:EmbeddingModel"], configuration["NYRA_EMBEDDING_MODEL"], DefaultEmbeddingModel),
-            EmbeddingSubscriptionType: FirstNonEmpty(configuration["Nyra:EmbeddingSubscriptionType"], configuration["NYRA_EMBEDDING_SUBSCRIPTION_TYPE"], DefaultEmbeddingSubscriptionType),
-            EmbeddingApiVersion: FirstNonEmpty(configuration["Nyra:EmbeddingApiVersion"], configuration["NYRA_EMBEDDING_API_VERSION"], DefaultEmbeddingApiVersion));
+            Issuer: FirstNonEmpty(configuration["NYRA_ISSUER"], nyraSettings.Issuer, DefaultIssuer),
+            TokenUrl: FirstNonEmpty(configuration["NYRA_TOKEN_URL"], nyraSettings.TokenUrl),
+            Audience: FirstNonEmpty(configuration["NYRA_AUDIENCE"], nyraSettings.Audience, DefaultAudience),
+            ClientId: FirstNonEmpty(configuration["NYRA_CLIENT_ID"], nyraSettings.ClientId, DefaultClientId),
+            ClientSecret: FirstNonEmpty(configuration["NYRA_CLIENT_SECRET"], nyraSettings.ClientSecret, DefaultClientSecret),
+            Scope: FirstNonEmpty(configuration["NYRA_SCOPE"], nyraSettings.Scope, DefaultScope),
+            ResponsesUrl: FirstNonEmpty(configuration["NYRA_RESPONSES_URL"], nyraSettings.ResponsesUrl, DefaultResponsesUrl),
+            LlmModel: FirstNonEmpty(configuration["NYRA_LLM_MODEL"], nyraSettings.Model, DefaultLlmModel),
+            EmbeddingGenerateUrl: FirstNonEmpty(configuration["NYRA_EMBEDDING_GENERATE_URL"], nyraSettings.EmbeddingGenerateUrl, DefaultEmbeddingGenerateUrl),
+            EmbeddingModel: FirstNonEmpty(configuration["NYRA_EMBEDDING_MODEL"], nyraSettings.EmbeddingModel, DefaultEmbeddingModel),
+            EmbeddingSubscriptionType: FirstNonEmpty(configuration["NYRA_EMBEDDING_SUBSCRIPTION_TYPE"], nyraSettings.EmbeddingSubscriptionType, DefaultEmbeddingSubscriptionType),
+            EmbeddingApiVersion: FirstNonEmpty(configuration["NYRA_EMBEDDING_API_VERSION"], nyraSettings.EmbeddingApiVersion, DefaultEmbeddingApiVersion));
 
         if (requireSecret && string.IsNullOrWhiteSpace(settings.ClientSecret))
         {

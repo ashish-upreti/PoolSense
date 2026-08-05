@@ -15,28 +15,37 @@ public sealed class NyraConfigurationTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Nyra:ApiKey"] = "test-key",
-                ["Nyra:GatewayEndpoint"] = "https://nyra.test/api/nyra-gateway/llm-service/",
-                ["Nyra:TokenUrl"] = "https://sso.test/as/token.oauth2",
+                ["Nyra:ActiveProfile"] = "staging",
+                ["Nyra:AuthMode"] = NyraAuthModes.ClientCredentials,
+                ["Nyra:Profiles:staging:ClientId"] = "poolsense-nyra-app-rf3stg",
+                ["Nyra:Profiles:staging:ClientSecret"] = "test-secret",
+                ["Nyra:Profiles:staging:Issuer"] = "https://sso.test",
+                ["Nyra:Profiles:staging:Audience"] = "nyra-web-core-api-rf3stg",
+                ["Nyra:Profiles:staging:GatewayEndpoint"] = "https://nyra.test/api/nyra-gateway/llm-service/",
                 ["Nyra:Model"] = "gpt-5.4",
-                ["Nyra:EmbeddingGenerateUrl"] = "https://nyra.test/api/nyra-gateway/embedding-service/v1/embeddings/generate",
-                ["Nyra:EmbeddingModel"] = "text-embedding-3-small",
+                ["Nyra:Profiles:staging:EmbeddingGenerateUrl"] = "https://nyra.test/api/nyra-gateway/embedding-service/v1/embeddings/generate",
+                ["Nyra:EmbeddingModel"] = "text-embedding-3-large",
                 ["Nyra:EmbeddingSubscriptionType"] = "azure",
                 ["Nyra:EmbeddingApiVersion"] = "2025-01-01-preview"
             })
             .Build();
 
         var settings = configuration.GetSection("Nyra").Get<NyraSettings>();
-
         Assert.NotNull(settings);
-        Assert.Equal("test-key", settings.ApiKey);
+        NyraSettingsResolver.ApplyActiveProfile(settings);
+
+        Assert.Equal(NyraAuthModes.ClientCredentials, settings.AuthMode);
+        Assert.Equal("poolsense-nyra-app-rf3stg", settings.ClientId);
+        Assert.Equal("test-secret", settings.ClientSecret);
+        Assert.Equal("https://sso.test", settings.Issuer);
+        Assert.Equal("nyra-web-core-api-rf3stg", settings.Audience);
         Assert.Equal("https://nyra.test/api/nyra-gateway/llm-service/", settings.GatewayEndpoint);
-        Assert.Equal("https://sso.test/as/token.oauth2", settings.TokenUrl);
         Assert.Equal("gpt-5.4", settings.Model);
         Assert.Equal("https://nyra.test/api/nyra-gateway/embedding-service/v1/embeddings/generate", settings.EmbeddingGenerateUrl);
-        Assert.Equal("text-embedding-3-small", settings.EmbeddingModel);
+        Assert.Equal("text-embedding-3-large", settings.EmbeddingModel);
         Assert.Equal("azure", settings.EmbeddingSubscriptionType);
         Assert.Equal("2025-01-01-preview", settings.EmbeddingApiVersion);
+        Assert.Null(NyraSettingsResolver.GetApiKeyHeaderValue(settings));
     }
 
     [Fact]
@@ -85,10 +94,17 @@ public sealed class NyraConfigurationTests
 
     private static async Task<Kernel> CreateKernelAsync(NyraSettings settings)
     {
+        NyraSettingsResolver.ApplyActiveProfile(settings);
         var endpoint = new Uri(GetRequiredOption(settings.GatewayEndpoint, "Nyra:GatewayEndpoint"));
-        var nyraClient = string.IsNullOrWhiteSpace(settings.TokenUrl)
-            ? await NyraGateway.CreateAsync(settings.ApiKey, endpoint)
-            : await NyraGateway.CreateAsync(settings.ApiKey, endpoint, settings.TokenUrl);
+        var nyraClient = await NyraGateway.CreateAsync(
+            NyraSettingsResolver.GetApiKeyHeaderValue(settings),
+            endpoint,
+            tokenUrl: settings.TokenUrl,
+            clientId: settings.ClientId,
+            clientSecret: settings.ClientSecret,
+            audience: settings.Audience,
+            issuer: settings.Issuer,
+            scope: settings.Scope);
 
         var kernelBuilder = Kernel.CreateBuilder();
         kernelBuilder.AddAzureOpenAIChatCompletion(
@@ -119,7 +135,15 @@ public sealed class NyraConfigurationTests
         var settings = configuration.GetSection("Nyra").Get<NyraSettings>()
             ?? throw new InvalidOperationException("Nyra configuration section is required.");
 
-        settings.ApiKey = GetRequiredOption(settings.ApiKey, "Nyra:ApiKey");
+        NyraSettingsResolver.ApplyActiveProfile(settings);
+        settings.ClientId = GetRequiredOption(settings.ClientId, "Nyra:ClientId");
+        settings.ClientSecret = GetRequiredOption(settings.ClientSecret, "Nyra:ClientSecret");
+        settings.Audience = GetRequiredOption(settings.Audience, "Nyra:Audience");
+        if (string.IsNullOrWhiteSpace(settings.TokenUrl) && string.IsNullOrWhiteSpace(settings.Issuer))
+        {
+            throw new InvalidOperationException("Nyra:Issuer or Nyra:TokenUrl configuration is required.");
+        }
+
         settings.GatewayEndpoint = GetRequiredOption(settings.GatewayEndpoint, "Nyra:GatewayEndpoint");
         settings.Model = GetRequiredOption(settings.Model, "Nyra:Model");
         settings.EmbeddingModel = GetRequiredOption(settings.EmbeddingModel, "Nyra:EmbeddingModel");

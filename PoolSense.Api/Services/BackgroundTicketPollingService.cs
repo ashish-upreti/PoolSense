@@ -39,9 +39,9 @@ public class BackgroundTicketPollingService : BackgroundService
                 {
                     _logger.LogInformation("Polling is paused (PollingEnabled=false). Waiting {DelaySeconds} seconds before the next check.", delay.TotalSeconds);
                 }
-                else if (!HasRequiredNyraSettings(_nyraSettingsMonitor.CurrentValue))
+                else if (!NyraSettingsResolver.HasRequiredSettings(_nyraSettingsMonitor.CurrentValue))
                 {
-                    _logger.LogWarning("Polling is skipped because NYRA settings are incomplete. Configure Nyra:ApiKey or Nyra:ClientId/Nyra:ClientSecret, plus Nyra:GatewayEndpoint, Nyra:Model, Nyra:EmbeddingModel, Nyra:EmbeddingApiVersion, and Nyra:EmbeddingGenerateUrl or Nyra:EmbeddingEndpoint.");
+                    _logger.LogWarning("Polling is skipped because NYRA settings are incomplete. Configure Nyra:ActiveProfile with client credentials, issuer or token URL, audience, gateway endpoint, model, embedding model, embedding API version, and embedding generate URL or endpoint.");
                 }
                 else
                 {
@@ -59,21 +59,6 @@ public class BackgroundTicketPollingService : BackgroundService
                 _logger.LogError(ex, "Ticket polling iteration failed.");
             }
         }
-    }
-
-    private static bool HasRequiredNyraSettings(NyraSettings nyraSettings)
-    {
-        var hasNyraAuth = !string.IsNullOrWhiteSpace(nyraSettings.ApiKey)
-            || (!string.IsNullOrWhiteSpace(nyraSettings.ClientId)
-                && !string.IsNullOrWhiteSpace(nyraSettings.ClientSecret));
-
-        return hasNyraAuth
-            && !string.IsNullOrWhiteSpace(nyraSettings.GatewayEndpoint)
-            && !string.IsNullOrWhiteSpace(nyraSettings.Model)
-            && !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingModel)
-            && (!string.IsNullOrWhiteSpace(nyraSettings.EmbeddingGenerateUrl)
-                || !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingEndpoint))
-            && !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingApiVersion);
     }
 
     private async Task<TicketAutomationSettings> GetSettingsAsync(CancellationToken cancellationToken)
