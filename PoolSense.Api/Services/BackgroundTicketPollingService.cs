@@ -41,7 +41,7 @@ public class BackgroundTicketPollingService : BackgroundService
                 }
                 else if (!HasRequiredNyraSettings(_nyraSettingsMonitor.CurrentValue))
                 {
-                    _logger.LogWarning("Polling is skipped because NYRA settings are incomplete. Configure Nyra:ApiKey, Nyra:GatewayEndpoint, Nyra:Model, Nyra:EmbeddingModel, Nyra:EmbeddingApiVersion, and Nyra:EmbeddingGenerateUrl or Nyra:EmbeddingEndpoint.");
+                    _logger.LogWarning("Polling is skipped because NYRA settings are incomplete. Configure Nyra:ApiKey or Nyra:ClientId/Nyra:ClientSecret, plus Nyra:GatewayEndpoint, Nyra:Model, Nyra:EmbeddingModel, Nyra:EmbeddingApiVersion, and Nyra:EmbeddingGenerateUrl or Nyra:EmbeddingEndpoint.");
                 }
                 else
                 {
@@ -63,7 +63,11 @@ public class BackgroundTicketPollingService : BackgroundService
 
     private static bool HasRequiredNyraSettings(NyraSettings nyraSettings)
     {
-        return !string.IsNullOrWhiteSpace(nyraSettings.ApiKey)
+        var hasNyraAuth = !string.IsNullOrWhiteSpace(nyraSettings.ApiKey)
+            || (!string.IsNullOrWhiteSpace(nyraSettings.ClientId)
+                && !string.IsNullOrWhiteSpace(nyraSettings.ClientSecret));
+
+        return hasNyraAuth
             && !string.IsNullOrWhiteSpace(nyraSettings.GatewayEndpoint)
             && !string.IsNullOrWhiteSpace(nyraSettings.Model)
             && !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingModel)

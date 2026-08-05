@@ -17,20 +17,34 @@ public static class NyraGateway
     private const string NoProxyPattern = @".*\.mfgint\.intel\.com";
 
     public static AzureOpenAIClient Create(
-        string apiKey,
+        string? apiKey,
         Uri endpoint,
         string tokenUrl = DefaultTokenUrl)
     {
         return CreateAsync(apiKey, endpoint, tokenUrl).GetAwaiter().GetResult();
     }
 
-    public static async Task<AzureOpenAIClient> CreateAsync(
-        string apiKey,
+    public static AzureOpenAIClient Create(
+        string? apiKey,
         Uri endpoint,
-        string tokenUrl = DefaultTokenUrl,
+        string? tokenUrl,
+        string? clientId,
+        string? clientSecret,
+        string? audience)
+    {
+        return CreateAsync(apiKey, endpoint, tokenUrl, clientId, clientSecret, audience).GetAwaiter().GetResult();
+    }
+
+    public static async Task<AzureOpenAIClient> CreateAsync(
+        string? apiKey,
+        Uri endpoint,
+        string? tokenUrl = DefaultTokenUrl,
+        string? clientId = null,
+        string? clientSecret = null,
+        string? audience = null,
         CancellationToken cancellationToken = default)
     {
-        var token = await FetchTokenAsync(tokenUrl, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var token = await FetchTokenAsync(tokenUrl, clientId, clientSecret, audience, cancellationToken).ConfigureAwait(false);
         var options = new AzureOpenAIClientOptions();
 
         options.AddPolicy(new NyraAuthPolicy(token, apiKey), PipelinePosition.PerCall);

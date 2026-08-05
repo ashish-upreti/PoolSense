@@ -41,7 +41,11 @@ static bool HasHttpsBinding(IConfiguration configuration)
 
 static bool HasRequiredNyraSettings(NyraSettings nyraSettings)
 {
-    return !string.IsNullOrWhiteSpace(nyraSettings.ApiKey)
+    var hasNyraAuth = !string.IsNullOrWhiteSpace(nyraSettings.ApiKey)
+        || (!string.IsNullOrWhiteSpace(nyraSettings.ClientId)
+            && !string.IsNullOrWhiteSpace(nyraSettings.ClientSecret));
+
+    return hasNyraAuth
         && !string.IsNullOrWhiteSpace(nyraSettings.GatewayEndpoint)
         && !string.IsNullOrWhiteSpace(nyraSettings.Model)
         && !string.IsNullOrWhiteSpace(nyraSettings.EmbeddingModel)
@@ -54,7 +58,7 @@ static void ValidateNyraSettings(NyraSettings nyraSettings)
 {
     if (!HasRequiredNyraSettings(nyraSettings))
     {
-        throw new InvalidOperationException("NYRA configuration is incomplete. Configure Nyra:ApiKey, Nyra:GatewayEndpoint, Nyra:Model, Nyra:EmbeddingModel, Nyra:EmbeddingApiVersion, and Nyra:EmbeddingGenerateUrl or Nyra:EmbeddingEndpoint.");
+        throw new InvalidOperationException("NYRA configuration is incomplete. Configure Nyra:ApiKey or Nyra:ClientId/Nyra:ClientSecret, plus Nyra:GatewayEndpoint, Nyra:Model, Nyra:EmbeddingModel, Nyra:EmbeddingApiVersion, and Nyra:EmbeddingGenerateUrl or Nyra:EmbeddingEndpoint.");
     }
 }
 
@@ -191,9 +195,13 @@ builder.Services.AddScoped<Kernel>(sp =>
 
     var kernelBuilder = Kernel.CreateBuilder();
     var endpoint = new Uri(nyraSettings.GatewayEndpoint);
-    var nyraClient = string.IsNullOrWhiteSpace(nyraSettings.TokenUrl)
-        ? NyraGateway.Create(nyraSettings.ApiKey, endpoint)
-        : NyraGateway.Create(nyraSettings.ApiKey, endpoint, nyraSettings.TokenUrl);
+    var nyraClient = NyraGateway.Create(
+        nyraSettings.ApiKey,
+        endpoint,
+        nyraSettings.TokenUrl,
+        nyraSettings.ClientId,
+        nyraSettings.ClientSecret,
+        nyraSettings.Audience);
 
     kernelBuilder.AddAzureOpenAIChatCompletion(
         deploymentName: nyraSettings.Model,

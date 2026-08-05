@@ -46,7 +46,11 @@ public sealed class NyraEmbeddingGenerator : IEmbeddingGenerator<string, Embeddi
 
         using var request = new HttpRequestMessage(HttpMethod.Post, generateUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        request.Headers.Add("NYRA-API-KEY", GetRequiredOption(settings.ApiKey, "Nyra:ApiKey"));
+        if (!string.IsNullOrWhiteSpace(settings.ApiKey))
+        {
+            request.Headers.Add("NYRA-API-KEY", settings.ApiKey);
+        }
+
         request.Content = JsonContent.Create(new
         {
             model = GetRequiredOption(settings.EmbeddingModel, "Nyra:EmbeddingModel"),
