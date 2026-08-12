@@ -1,6 +1,6 @@
 # PoolSense
 
-PoolSense is a deployed .NET 9 incident-assistance platform with an ASP.NET Core API, an Angular 18 operator console, Azure OpenAI-backed orchestration, and SQL Server persistence for knowledge, project configuration, ingestion tracking, feedback, telemetry, and operational logging.
+PoolSense is a deployed .NET 9 incident-assistance platform with an ASP.NET Core API, an Angular 18 operator console, NYRA gateway-backed inference and embedding orchestration, and SQL Server persistence for knowledge, project configuration, ingestion tracking, feedback, telemetry, and operational logging.
 
 The initial release (v1) uses pool ticket history as its knowledge source. Future versions will expand to additional sources such as project wikis, SharePoint, and codebases.
 
@@ -70,7 +70,7 @@ PoolSense/
 - Angular 18
 - TypeScript 5
 - Microsoft Semantic Kernel
-- Azure OpenAI chat + embeddings
+- NYRA inference gateway + NYRA embedding gateway
 - SQL Server
 - SMTP or SQL Server Database Mail for recommendation delivery
 
@@ -80,7 +80,7 @@ Install these before running locally:
 
 - .NET 9 SDK
 - Node.js 20+ and npm
-- Access to an Azure OpenAI-compatible endpoint for chat and embeddings
+- Access to NYRA gateway endpoints for inference and embeddings
 - Access to SQL Server instances for:
   - `PoolSenseSqlServer` — PoolSense persistence, logging, project configuration, and Database Mail delivery when enabled
   - `TicketSourceSqlServer` — source ticket database used by polling, ingestion, application sync, and PoolSense flag write-back
@@ -91,13 +91,16 @@ The API reads settings from [PoolSense.Api/appsettings.json](PoolSense.Api/appse
 
 ### Important Configuration Sections
 
-- `AiSettings`
-  - `BaseUrl`
-  - `ApiKey`
-  - `ApiVersion`
-  - `ImageApiVersion`
-  - `Models.Chat`
-  - `Models.Embeddings`
+- `Nyra`
+  - `ApiKey` — NYRA API key sent as the `NYRA-API-KEY` header
+  - `GatewayEndpoint` — NYRA LLM gateway endpoint used by Semantic Kernel inference calls
+  - `TokenUrl` — OAuth token endpoint for NYRA gateway access
+  - `Model` — inference model/deployment name
+  - `EmbeddingGenerateUrl` or `EmbeddingEndpoint` — NYRA embedding gateway endpoint
+  - `EmbeddingModel` — embedding model name
+  - `EmbeddingSubscriptionType`
+  - `EmbeddingApiVersion`
+  - `ClientId`, `ClientSecret`, and `Audience` when overriding gateway token defaults
 
 - `ConnectionStrings`
   - `PoolSenseSqlServer` — PoolSense persistence database
@@ -140,8 +143,14 @@ The API reads settings from [PoolSense.Api/appsettings.json](PoolSense.Api/appse
 Recommended local setup uses user secrets for sensitive values:
 
 ```powershell
-dotnet user-secrets set --project .\PoolSense.Api "AiSettings:BaseUrl" "https://your-endpoint.openai.azure.com"
-dotnet user-secrets set --project .\PoolSense.Api "AiSettings:ApiKey" "<your-api-key>"
+dotnet user-secrets set --project .\PoolSense.Api "Nyra:ApiKey" "<your-nyra-api-key>"
+dotnet user-secrets set --project .\PoolSense.Api "Nyra:GatewayEndpoint" "https://your-nyra-host/api/nyra-gateway/llm-service/"
+dotnet user-secrets set --project .\PoolSense.Api "Nyra:TokenUrl" "https://your-sso-host/as/token.oauth2"
+dotnet user-secrets set --project .\PoolSense.Api "Nyra:Model" "gpt-5.4"
+dotnet user-secrets set --project .\PoolSense.Api "Nyra:EmbeddingGenerateUrl" "https://your-nyra-host/api/nyra-gateway/embedding-service/v1/embeddings/generate"
+dotnet user-secrets set --project .\PoolSense.Api "Nyra:EmbeddingModel" "text-embedding-3-small"
+dotnet user-secrets set --project .\PoolSense.Api "Nyra:EmbeddingSubscriptionType" "azure"
+dotnet user-secrets set --project .\PoolSense.Api "Nyra:EmbeddingApiVersion" "2025-01-01-preview"
 dotnet user-secrets set --project .\PoolSense.Api "ConnectionStrings:PoolSenseSqlServer" "Server=your-sql-server,1433;Database=PoolSense;Trusted_Connection=True;TrustServerCertificate=True"
 dotnet user-secrets set --project .\PoolSense.Api "ConnectionStrings:TicketSourceSqlServer" "Server=your-ticket-source-server,1433;Database=PoolProd;Trusted_Connection=True;TrustServerCertificate=True"
 dotnet user-secrets set --project .\PoolSense.Api "Auth:JwtSecret" "<at-least-32-random-characters>"
@@ -365,12 +374,13 @@ This means retrieval is usually driven by the analyzer's normalized problem summ
 
 ### 2. Query Embedding
 
-The selected search text is embedded through the configured Azure OpenAI embedding model using a fixed dimension of `1536`.
+The selected search text is embedded through the NYRA embedding gateway using a fixed dimension of `1536`.
 
 Current embedding behavior:
 
-- model comes from `AiSettings.Models.Embeddings`
-- embedding generation uses Semantic Kernel retry handling
+- model comes from `Nyra:EmbeddingModel`
+- embedding requests are sent through `NyraEmbeddingGenerator` to `Nyra:EmbeddingGenerateUrl`, or to `Nyra:EmbeddingEndpoint` with `/generate` appended
+- embedding generation uses Semantic Kernel retry handling around the configured generator
 - token and latency usage are logged to `dbo.llm_token_usage`
 
 ### 3. Candidate Set Construction
@@ -543,7 +553,7 @@ This means the search embedding and the storage embedding are related but not id
 
 - If `npm start` fails immediately, run `npm install` or `npm ci` in [PoolSense.UI](PoolSense.UI) and retry.
 - If the UI cannot reach the API, confirm the backend is listening on `http://localhost:5217` or update [PoolSense.UI/proxy.conf.json](PoolSense.UI/proxy.conf.json).
-- If the API returns `500`, check API logs and verify `AiSettings`, `PoolSenseSqlServer`, and `TicketSourceSqlServer` values.
+- If the API returns `500`, check API logs and verify `Nyra`, `PoolSenseSqlServer`, and `TicketSourceSqlServer` values.
 - If project configuration does not load, confirm `dbo.project_configs` exists in the PoolSense database.
 - If ingestion status is empty or incorrect, confirm `dbo.ingestion_status` exists and the polling service is enabled.
 - If recommendation emails are not sent, verify the master **PoolSense Email** kill switch is enabled in Master Settings, then verify project-level `Send Email`, semicolon-separated recipients, and the configured email delivery mode.
