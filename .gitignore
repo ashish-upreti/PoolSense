@@ -89,10 +89,9 @@ Desktop.ini
 $RECYCLE.BIN/
 
 # ── Local configuration and secrets ──────────────────────────
-PoolSense.Api/appsettings.json
-PoolSense.Api/appsettings.Development.json
-PoolSense.Api/appsettings.Production.json
+PoolSense.Api/appsettings*.json
 PoolSense.Api/artifacts/auth-state/
+.playwright-mcp/
 **/appsettings.Local.json
 **/appsettings.*.local.json
 secrets.json
