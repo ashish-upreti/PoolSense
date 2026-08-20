@@ -35,6 +35,7 @@ public class NyraSettings
     public string TokenUrl { get; set; } = string.Empty;
     public string ResponsesUrl { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
+    public string CategorizationModel { get; set; } = string.Empty;
     public string EmbeddingEndpoint { get; set; } = string.Empty;
     public string EmbeddingGenerateUrl { get; set; } = string.Empty;
     public string EmbeddingModel { get; set; } = string.Empty;
@@ -56,11 +57,52 @@ public class NyraProfileSettings
     public string TokenUrl { get; set; } = string.Empty;
     public string ResponsesUrl { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
+    public string CategorizationModel { get; set; } = string.Empty;
     public string EmbeddingEndpoint { get; set; } = string.Empty;
     public string EmbeddingGenerateUrl { get; set; } = string.Empty;
     public string EmbeddingModel { get; set; } = string.Empty;
     public string EmbeddingSubscriptionType { get; set; } = string.Empty;
     public string EmbeddingApiVersion { get; set; } = string.Empty;
+}
+
+public class NyraRetrievalSettings
+{
+    public const string SupportedEmbeddingsName = "text-embedding-3-small";
+
+    public string ActiveProfile { get; set; } = string.Empty;
+    public string BaseUrl { get; set; } = string.Empty;
+    public string EmbeddingsName { get; set; } = SupportedEmbeddingsName;
+    public string VectorDbName { get; set; } = "NYRA_CORE_DB";
+    public string VectorDbType { get; set; } = "PG_VECTOR";
+    public string VectorDbCollection { get; set; } = "core_db";
+}
+
+public static class NyraRetrievalSettingsResolver
+{
+    public static void ApplyDefaults(NyraRetrievalSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        settings.EmbeddingsName = FirstNonEmpty(settings.EmbeddingsName, NyraRetrievalSettings.SupportedEmbeddingsName);
+        settings.VectorDbName = FirstNonEmpty(settings.VectorDbName, "NYRA_CORE_DB");
+        settings.VectorDbType = FirstNonEmpty(settings.VectorDbType, "PG_VECTOR");
+        settings.VectorDbCollection = FirstNonEmpty(settings.VectorDbCollection, "core_db");
+    }
+
+    public static string GetEmbeddingsName(NyraRetrievalSettings settings)
+    {
+        ApplyDefaults(settings);
+
+        if (!settings.EmbeddingsName.Equals(NyraRetrievalSettings.SupportedEmbeddingsName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"NYRA KB retrieval supports only {NyraRetrievalSettings.SupportedEmbeddingsName} for embeddings_name.");
+        }
+
+        return NyraRetrievalSettings.SupportedEmbeddingsName;
+    }
+
+    private static string FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
 }
 
 public static class NyraAuthModes
@@ -88,6 +130,7 @@ public static class NyraSettingsResolver
             settings.TokenUrl = FirstNonEmpty(profile.TokenUrl, settings.TokenUrl);
             settings.ResponsesUrl = FirstNonEmpty(profile.ResponsesUrl, settings.ResponsesUrl);
             settings.Model = FirstNonEmpty(profile.Model, settings.Model);
+            settings.CategorizationModel = FirstNonEmpty(profile.CategorizationModel, settings.CategorizationModel);
             settings.EmbeddingEndpoint = FirstNonEmpty(profile.EmbeddingEndpoint, settings.EmbeddingEndpoint);
             settings.EmbeddingGenerateUrl = FirstNonEmpty(profile.EmbeddingGenerateUrl, settings.EmbeddingGenerateUrl);
             settings.EmbeddingModel = FirstNonEmpty(profile.EmbeddingModel, settings.EmbeddingModel);
@@ -98,6 +141,7 @@ public static class NyraSettingsResolver
         settings.AuthMode = FirstNonEmpty(settings.AuthMode, NyraAuthModes.ClientCredentials);
         settings.Scope = FirstNonEmpty(settings.Scope, "openid");
         settings.EmbeddingSubscriptionType = FirstNonEmpty(settings.EmbeddingSubscriptionType, "azure");
+        settings.CategorizationModel = FirstNonEmpty(settings.CategorizationModel, "gpt-5.4-mini");
     }
 
     public static bool HasRequiredSettings(NyraSettings settings)

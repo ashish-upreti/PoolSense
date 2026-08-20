@@ -45,7 +45,8 @@ public class ProjectRepository : IProjectRepository
                 ticket_source_type,
                 connection_string,
                 knowledge_sources,
-                application_filter)
+                application_filter,
+                nyra_kb_names)
             OUTPUT INSERTED.id, INSERTED.created_at
             VALUES (
                 @projectId,
@@ -58,7 +59,8 @@ public class ProjectRepository : IProjectRepository
                 @ticketSourceType,
                 @connectionString,
                 @knowledgeSources,
-                @applicationFilter);
+                @applicationFilter,
+                @nyraKbNames);
             """;
 
         await using var command = new SqlCommand(sql, connection);
@@ -98,7 +100,8 @@ public class ProjectRepository : IProjectRepository
                    ticket_source_type,
                    connection_string,
                    knowledge_sources,
-                   application_filter
+                     application_filter,
+                     nyra_kb_names
             FROM dbo.project_configs
             WHERE project_id = @projectId;
             """;
@@ -133,7 +136,8 @@ public class ProjectRepository : IProjectRepository
                    ticket_source_type,
                    connection_string,
                    knowledge_sources,
-                   application_filter
+                     application_filter,
+                     nyra_kb_names
             FROM dbo.project_configs
             ORDER BY project_name ASC;
             """;
@@ -174,7 +178,8 @@ public class ProjectRepository : IProjectRepository
                    ticket_source_type,
                    connection_string,
                    knowledge_sources,
-                   application_filter
+                     application_filter,
+                     nyra_kb_names
             FROM dbo.project_configs
             WHERE application_filter = @applicationFilter;
             """;
@@ -209,7 +214,8 @@ public class ProjectRepository : IProjectRepository
                 ticket_source_type = @ticketSourceType,
                 connection_string = @connectionString,
                 knowledge_sources = @knowledgeSources,
-                application_filter = @applicationFilter
+                application_filter = @applicationFilter,
+                nyra_kb_names = @nyraKbNames
             OUTPUT INSERTED.id, INSERTED.created_at
             WHERE project_id = @projectId;
             """;
@@ -243,6 +249,7 @@ public class ProjectRepository : IProjectRepository
         command.Parameters.AddWithValue("@connectionString", projectConfig.ConnectionString ?? string.Empty);
         command.Parameters.AddWithValue("@knowledgeSources", JsonSerializer.Serialize(projectConfig.KnowledgeSources ?? []));
         command.Parameters.AddWithValue("@applicationFilter", projectConfig.ApplicationFilter ?? string.Empty);
+        command.Parameters.AddWithValue("@nyraKbNames", projectConfig.NyraKbNames ?? string.Empty);
     }
 
     private static ProjectConfig MapProjectConfig(SqlDataReader reader)
@@ -261,7 +268,8 @@ public class ProjectRepository : IProjectRepository
             TicketSourceType = reader.IsDBNull(9) ? "sql" : reader.GetString(9),
             ConnectionString = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
             KnowledgeSources = reader.IsDBNull(11) ? [] : DeserializeKnowledgeSources(reader.GetString(11)),
-            ApplicationFilter = reader.IsDBNull(12) ? string.Empty : reader.GetString(12)
+            ApplicationFilter = reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
+            NyraKbNames = reader.IsDBNull(13) ? string.Empty : reader.GetString(13)
         };
     }
 

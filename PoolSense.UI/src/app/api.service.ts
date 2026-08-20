@@ -24,9 +24,28 @@ export interface TicketWorkflowResult {
   suggestedResolution: string
   confidence: number
   similarIncidents: SimilarIncident[]
+  nyraDocuments?: NyraDocumentResult[]
+  nyraKnowledgeBaseUsed?: boolean
+  nyraKnowledgeBaseStatus?: string
+  nyraKnowledgeBaseMessage?: string
+  nyraKnowledgeBaseNames?: string[]
+  nyraKnowledgeBaseProjects?: string[]
+  queryCategory?: string
+  queryCategorizationReasoning?: string
+  usedPoolDatabase?: boolean
   failurePattern: FailurePattern
   reasoning: string
   failurePatternFrequency: number
+}
+
+export interface NyraDocumentResult {
+  documentId: string
+  kbName: string
+  title: string
+  content: string
+  sourceUrl: string
+  citation: string
+  score: number
 }
 
 export interface PoolReport {
@@ -101,6 +120,7 @@ export interface ProjectConfig {
   poolingEnabled: boolean
   emailRecipients: string
   applicationFilter: string
+  nyraKbNames: string
   createdAt: string
 }
 
@@ -113,6 +133,7 @@ export interface ProjectConfigInput {
   poolingEnabled: boolean
   emailRecipients: string
   applicationFilter: string
+  nyraKbNames: string
 }
 
 export interface TicketAutomationSettings {

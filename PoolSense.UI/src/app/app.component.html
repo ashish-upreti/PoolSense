@@ -299,6 +299,18 @@
 
           <article *ngIf="message.role === 'assistant'" class="message-bubble message-bubble-assistant">
             <p class="message-label">PoolSense</p>
+
+            <div class="thinking-panel" *ngIf="message.result.queryCategory">
+              <p class="thinking-line"><strong>Query type:</strong> {{ message.result.queryCategory }}<span *ngIf="message.result.queryCategorizationReasoning"> — {{ message.result.queryCategorizationReasoning }}</span></p>
+              <p class="thinking-line">
+                <strong>Sources used:</strong>
+                <span *ngIf="message.result.usedPoolDatabase">Pool database</span>
+                <span *ngIf="message.result.usedPoolDatabase && message.result.nyraKnowledgeBaseUsed"> + </span>
+                <span *ngIf="message.result.nyraKnowledgeBaseUsed">NYRA KB ({{ (message.result.nyraKnowledgeBaseNames ?? []).join(', ') }})</span>
+                <span *ngIf="!message.result.usedPoolDatabase && !message.result.nyraKnowledgeBaseUsed">Ticket details only</span>
+              </p>
+            </div>
+
             <div class="assistant-summary">
               <section>
                 <h3>Root Cause</h3>
@@ -309,6 +321,13 @@
                 <p>{{ message.result.suggestedResolution || 'Not provided' }}</p>
               </section>
             </div>
+
+            <div class="nyra-kb-status" [class.nyra-kb-status-active]="message.result.nyraKnowledgeBaseUsed">
+              <span class="workspace-dot"></span>
+              <span *ngIf="message.result.nyraKnowledgeBaseUsed">NYRA KB {{ message.result.nyraKnowledgeBaseStatus || 'Queried' }}: {{ (message.result.nyraKnowledgeBaseNames ?? []).join(', ') }}</span>
+              <span *ngIf="!message.result.nyraKnowledgeBaseUsed">NYRA KB not used for this query.</span>
+            </div>
+            <p *ngIf="message.result.nyraKnowledgeBaseMessage" class="project-card-meta">{{ message.result.nyraKnowledgeBaseMessage }}</p>
 
             <div class="feedback-panel">
               <div *ngIf="message.result.similarIncidents.length > 0" class="feedback-ticket-selector">
@@ -380,6 +399,20 @@
       </section>
 
       <ng-container *ngIf="insights">
+        <section class="insight-card thinking-panel" *ngIf="insights.queryCategory">
+          <p class="panel-kicker">Thinking</p>
+          <h3>Query classification &amp; sources</h3>
+          <p class="thinking-line"><strong>Query type:</strong> {{ insights.queryCategory }}</p>
+          <p class="thinking-line" *ngIf="insights.queryCategorizationReasoning">{{ insights.queryCategorizationReasoning }}</p>
+          <p class="thinking-line">
+            <strong>Sources used:</strong>
+            <span *ngIf="insights.usedPoolDatabase">Pool database</span>
+            <span *ngIf="insights.usedPoolDatabase && insights.nyraKnowledgeBaseUsed"> + </span>
+            <span *ngIf="insights.nyraKnowledgeBaseUsed">NYRA KB ({{ (insights.nyraKnowledgeBaseNames ?? []).join(', ') }})</span>
+            <span *ngIf="!insights.usedPoolDatabase && !insights.nyraKnowledgeBaseUsed">Ticket details only</span>
+          </p>
+        </section>
+
         <section class="insight-card">
           <div class="card-heading-row">
             <div>
@@ -456,6 +489,35 @@
               </div>
             </li>
           </ul>
+        </section>
+
+        <section class="insight-card" *ngIf="(insights.nyraDocuments ?? []).length > 0">
+          <div class="card-heading-row">
+            <div>
+              <p class="panel-kicker">NYRA Wiki</p>
+              <h3>Document matches</h3>
+            </div>
+            <span class="section-count data-mono">{{ (insights.nyraDocuments ?? []).length }}</span>
+          </div>
+
+          <ul class="nyra-doc-list">
+            <li *ngFor="let document of insights.nyraDocuments ?? []; trackBy: trackNyraDocument" class="nyra-doc-item">
+              <a *ngIf="document.sourceUrl; else plainInsightCitation" class="nyra-doc-title" [href]="document.sourceUrl" target="_blank" rel="noopener noreferrer">{{ document.title || document.citation }}</a>
+              <ng-template #plainInsightCitation><span class="nyra-doc-title">{{ document.title || document.citation }}</span></ng-template>
+              <p class="nyra-doc-copy">{{ document.content }}</p>
+              <p class="project-card-meta">{{ document.kbName || 'NYRA KB' }}<span *ngIf="document.score > 0"> &bull; {{ document.score | number: '1.2-2' }}</span></p>
+            </li>
+          </ul>
+        </section>
+
+        <section class="insight-card nyra-kb-insight" *ngIf="insights.nyraKnowledgeBaseUsed">
+          <p class="panel-kicker">NYRA Knowledge Base</p>
+          <h3>KB retrieval used</h3>
+          <p class="insight-item-copy">Projects: {{ (insights.nyraKnowledgeBaseProjects ?? []).join(', ') || 'Configured project scope' }}</p>
+          <p class="insight-item-copy">KBs: {{ (insights.nyraKnowledgeBaseNames ?? []).join(', ') }}</p>
+          <p class="insight-item-copy">Status: {{ insights.nyraKnowledgeBaseStatus || 'Queried' }}</p>
+          <p *ngIf="insights.nyraKnowledgeBaseMessage" class="project-card-meta">{{ insights.nyraKnowledgeBaseMessage }}</p>
+          <p class="project-card-meta">Documents returned: {{ (insights.nyraDocuments ?? []).length }}</p>
         </section>
 
         <section class="insight-card">
@@ -669,6 +731,12 @@
                   <span class="field-note">Use an exact application name for one app</span>
                 </label>
 
+                <label class="field-group field-group-full">
+                  <span class="field-label">NYRA KB Names</span>
+                  <input class="field-input" type="text" name="nyraKbNames" [(ngModel)]="projectForm.nyraKbNames" placeholder="FSCOUserGuide, FSCO_Wiki" [disabled]="isProjectSaving" />
+                  <span class="field-note">Optional, comma-separated. NYRA document retrieval runs only when this value is populated for the selected application.</span>
+                </label>
+
                 <label class="field-group">
                   <span class="field-label">Application Id</span>
                   <input class="field-input" type="text" [value]="editingProjectId ? projectForm.projectId : generatedProjectId" placeholder="Auto-generated" readonly [disabled]="isProjectSaving" />
@@ -747,6 +815,7 @@
 
                   <p class="project-card-copy">Lookback: {{ project.knowledgeLookbackYears }} year{{ project.knowledgeLookbackYears === 1 ? '' : 's' }} &bull; Similarity limit: {{ project.similaritySearchLimit }} &bull; Email: {{ project.sendEmail ? 'On' : 'Off' }} &bull; Pooling: {{ project.poolingEnabled ? 'On' : 'Off' }}</p>
                   <p class="project-card-meta">Filter: {{ project.applicationFilter || project.projectName }}</p>
+                  <p class="project-card-meta">NYRA KBs: {{ project.nyraKbNames || 'Not configured' }}</p>
                 </article>
               </div>
             </div>

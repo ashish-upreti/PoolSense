@@ -19,7 +19,7 @@ public sealed class NyraProdClientConfigurationTests
     private const string DefaultResponsesUrl = "https://imi.rf3prod.mfgint.intel.com/api/nyra-gateway/llm-service/openai/responses?api-version=2025-03-01-preview";
     private const string DefaultLlmModel = "gpt-5.4";
     private const string DefaultEmbeddingGenerateUrl = "https://imi.rf3prod.mfgint.intel.com/api/nyra-gateway/embedding-service/v1/embeddings/generate";
-    private const string DefaultEmbeddingModel = "text-embedding-3-large";
+    private const string DefaultEmbeddingModel = "text-embedding-3-small";
     private const string DefaultEmbeddingSubscriptionType = "azure";
     private const string DefaultEmbeddingApiVersion = "2025-01-01-preview";
 

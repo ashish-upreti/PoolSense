@@ -11,15 +11,15 @@ namespace PoolSense.Api.Tests;
 
 public sealed class NyraClientConfigurationTests
 {
-    private const string DefaultIssuer = "https://sso.rf3stg.mfgint.intel.com";
-    private const string DefaultAudience = "nyra-web-core-api-rf3stg";
-    private const string DefaultClientId = "poolsense-nyra-app-rf3stg";
+    private const string DefaultIssuer = "https://sso.cdcprod.mfg.intel.com";
+    private const string DefaultAudience = "nyra-web-core-api-cdcprod";
+    private const string DefaultClientId = "poolsense-nyra-app-cdcprod";
     private const string DefaultClientSecret = "";
     private const string DefaultScope = "openid";
-    private const string DefaultResponsesUrl = "https://imi.rf3stg.mfgint.intel.com/api/nyra-gateway/llm-service/openai/responses?api-version=2025-03-01-preview";
+    private const string DefaultResponsesUrl = "https://imi.cdcprod.mfg.intel.com/api/nyra-gateway/llm-service/openai/responses?api-version=2025-03-01-preview";
     private const string DefaultLlmModel = "gpt-5.4";
-    private const string DefaultEmbeddingGenerateUrl = "https://imi.rf3stg.mfgint.intel.com/api/nyra-gateway/embedding-service/v1/embeddings/generate";
-    private const string DefaultEmbeddingModel = "text-embedding-3-large";
+    private const string DefaultEmbeddingGenerateUrl = "https://imi.cdcprod.mfg.intel.com/api/nyra-gateway/embedding-service/v1/embeddings/generate";
+    private const string DefaultEmbeddingModel = "text-embedding-3-small";
     private const string DefaultEmbeddingSubscriptionType = "azure";
     private const string DefaultEmbeddingApiVersion = "2025-01-01-preview";
 

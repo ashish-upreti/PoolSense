@@ -17,14 +17,14 @@ public sealed class NyraConfigurationTests
             {
                 ["Nyra:ActiveProfile"] = "staging",
                 ["Nyra:AuthMode"] = NyraAuthModes.ClientCredentials,
-                ["Nyra:Profiles:staging:ClientId"] = "poolsense-nyra-app-rf3stg",
+                ["Nyra:Profiles:staging:ClientId"] = "poolsense-nyra-app-cdcprod",
                 ["Nyra:Profiles:staging:ClientSecret"] = "test-secret",
                 ["Nyra:Profiles:staging:Issuer"] = "https://sso.test",
-                ["Nyra:Profiles:staging:Audience"] = "nyra-web-core-api-rf3stg",
+                ["Nyra:Profiles:staging:Audience"] = "nyra-web-core-api-cdcprod",
                 ["Nyra:Profiles:staging:GatewayEndpoint"] = "https://nyra.test/api/nyra-gateway/llm-service/",
                 ["Nyra:Model"] = "gpt-5.4",
                 ["Nyra:Profiles:staging:EmbeddingGenerateUrl"] = "https://nyra.test/api/nyra-gateway/embedding-service/v1/embeddings/generate",
-                ["Nyra:EmbeddingModel"] = "text-embedding-3-large",
+                ["Nyra:EmbeddingModel"] = "text-embedding-3-small",
                 ["Nyra:EmbeddingSubscriptionType"] = "azure",
                 ["Nyra:EmbeddingApiVersion"] = "2025-01-01-preview"
             })
@@ -35,14 +35,14 @@ public sealed class NyraConfigurationTests
         NyraSettingsResolver.ApplyActiveProfile(settings);
 
         Assert.Equal(NyraAuthModes.ClientCredentials, settings.AuthMode);
-        Assert.Equal("poolsense-nyra-app-rf3stg", settings.ClientId);
+        Assert.Equal("poolsense-nyra-app-cdcprod", settings.ClientId);
         Assert.Equal("test-secret", settings.ClientSecret);
         Assert.Equal("https://sso.test", settings.Issuer);
-        Assert.Equal("nyra-web-core-api-rf3stg", settings.Audience);
+        Assert.Equal("nyra-web-core-api-cdcprod", settings.Audience);
         Assert.Equal("https://nyra.test/api/nyra-gateway/llm-service/", settings.GatewayEndpoint);
         Assert.Equal("gpt-5.4", settings.Model);
         Assert.Equal("https://nyra.test/api/nyra-gateway/embedding-service/v1/embeddings/generate", settings.EmbeddingGenerateUrl);
-        Assert.Equal("text-embedding-3-large", settings.EmbeddingModel);
+        Assert.Equal("text-embedding-3-small", settings.EmbeddingModel);
         Assert.Equal("azure", settings.EmbeddingSubscriptionType);
         Assert.Equal("2025-01-01-preview", settings.EmbeddingApiVersion);
         Assert.Null(NyraSettingsResolver.GetApiKeyHeaderValue(settings));
@@ -52,6 +52,30 @@ public sealed class NyraConfigurationTests
     public void NyraGatewayReference_IsAvailableToPoolSenseApi()
     {
         Assert.Equal("PoolSense.Api.Services.Nyra", typeof(NyraGateway).Namespace);
+    }
+
+    [Fact]
+    public void NyraRetrievalSettings_BindSeparatelyFromAiModelConfiguration()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Nyra:Model"] = "gpt-5.4",
+                ["Nyra:EmbeddingModel"] = "text-embedding-3-large",
+                ["NyraRetrieval:BaseUrl"] = "https://nyra.test/api/nyra-gateway/retrieval-service/v1",
+                ["NyraRetrieval:EmbeddingsName"] = NyraRetrievalSettings.SupportedEmbeddingsName
+            })
+            .Build();
+
+        var nyraSettings = configuration.GetSection("Nyra").Get<NyraSettings>();
+        var retrievalSettings = configuration.GetSection("NyraRetrieval").Get<NyraRetrievalSettings>();
+
+        Assert.NotNull(nyraSettings);
+        Assert.NotNull(retrievalSettings);
+        Assert.Equal("gpt-5.4", nyraSettings.Model);
+        Assert.Equal("text-embedding-3-large", nyraSettings.EmbeddingModel);
+        Assert.Equal("https://nyra.test/api/nyra-gateway/retrieval-service/v1", retrievalSettings.BaseUrl);
+        Assert.Equal(NyraRetrievalSettings.SupportedEmbeddingsName, NyraRetrievalSettingsResolver.GetEmbeddingsName(retrievalSettings));
     }
 
     [Fact]

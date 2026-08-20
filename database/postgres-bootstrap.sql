@@ -120,7 +120,8 @@ CREATE TABLE IF NOT EXISTS project_configs (
     ticket_source_type text NOT NULL DEFAULT 'sql',
     connection_string text NOT NULL DEFAULT '',
     knowledge_sources text[] NOT NULL DEFAULT '{}',
-    application_filter text NOT NULL DEFAULT ''
+    application_filter text NOT NULL DEFAULT '',
+    nyra_kb_names text NOT NULL DEFAULT ''
 );
 
 ALTER TABLE IF EXISTS project_configs ADD COLUMN IF NOT EXISTS id integer;
@@ -188,6 +189,7 @@ ALTER TABLE IF EXISTS project_configs ADD COLUMN IF NOT EXISTS ticket_source_typ
 ALTER TABLE IF EXISTS project_configs ADD COLUMN IF NOT EXISTS connection_string text NOT NULL DEFAULT '';
 ALTER TABLE IF EXISTS project_configs ADD COLUMN IF NOT EXISTS knowledge_sources text[] NOT NULL DEFAULT '{}';
 ALTER TABLE IF EXISTS project_configs ADD COLUMN IF NOT EXISTS application_filter text NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS project_configs ADD COLUMN IF NOT EXISTS nyra_kb_names text NOT NULL DEFAULT '';
 
 UPDATE project_configs
 SET pooling_enabled = COALESCE(pooling_enabled, TRUE),
@@ -198,6 +200,7 @@ SET pooling_enabled = COALESCE(pooling_enabled, TRUE),
     ticket_source_type = COALESCE(NULLIF(ticket_source_type, ''), 'sql'),
     connection_string = COALESCE(connection_string, ''),
     knowledge_sources = COALESCE(knowledge_sources, '{}'),
+    nyra_kb_names = COALESCE(nyra_kb_names, ''),
     application_filter = COALESCE(NULLIF(application_filter, ''), project_name),
     created_at = COALESCE(created_at, now());
 

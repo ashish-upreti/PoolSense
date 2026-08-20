@@ -8,6 +8,7 @@ using PoolSense.Api.Configuration;
 using PoolSense.Api.Data;
 using PoolSense.Api.Models;
 using PoolSense.Api.Services;
+using PoolSense.Api.Services.Nyra;
 using PoolSense.Application.Models;
 
 namespace PoolSense.Api.Orchestration;
@@ -31,6 +32,9 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
     private readonly IVectorStore _vectorStore;
     private readonly IncidentContextBuilder _incidentContextBuilder;
     private readonly IResolutionAgent _resolutionAgent;
+    private readonly IQueryCategorizationAgent _queryCategorizationAgent;
+    private readonly INyraDocumentRetrievalService _nyraDocumentRetrievalService;
+    private readonly IProjectRepository _projectRepository;
     private readonly IKnowledgeEnrichmentService _knowledgeEnrichmentService;
     private readonly IFailurePatternAgent _failurePatternAgent;
     private readonly IFailurePatternRepository _failurePatternRepository;
@@ -46,6 +50,9 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         IVectorStore vectorStore,
         IncidentContextBuilder incidentContextBuilder,
         IResolutionAgent resolutionAgent,
+        IQueryCategorizationAgent queryCategorizationAgent,
+        INyraDocumentRetrievalService nyraDocumentRetrievalService,
+        IProjectRepository projectRepository,
         IKnowledgeEnrichmentService knowledgeEnrichmentService,
         IFailurePatternAgent failurePatternAgent,
         IFailurePatternRepository failurePatternRepository,
@@ -60,6 +67,9 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         _vectorStore = vectorStore;
         _incidentContextBuilder = incidentContextBuilder;
         _resolutionAgent = resolutionAgent;
+        _queryCategorizationAgent = queryCategorizationAgent;
+        _nyraDocumentRetrievalService = nyraDocumentRetrievalService;
+        _projectRepository = projectRepository;
         _knowledgeEnrichmentService = knowledgeEnrichmentService;
         _failurePatternAgent = failurePatternAgent;
         _failurePatternRepository = failurePatternRepository;
@@ -106,6 +116,22 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         var title = request.GetWorkflowTitle();
         var description = request.GetWorkflowDescription();
 
+        _logger.LogInformation("Categorizing query for ticket {TicketId}.", request.TicketId);
+        var categorizationJson = await _queryCategorizationAgent.CategorizeQueryAsync(title, description);
+        var categorization = JsonSerializer.Deserialize<QueryCategorizationResult>(AiJsonResponseSanitizer.Normalize(categorizationJson), JsonOptions)
+            ?? new QueryCategorizationResult { Category = "Issue" };
+        _logger.LogInformation(
+            "Query categorized as {QueryCategory} for ticket {TicketId}: {QueryCategorizationReasoning}",
+            categorization.Category,
+            request.TicketId,
+            categorization.Reasoning);
+
+        var isInfoOnlyQuery = !persistKnowledge && categorization.Category.Equals("Info", StringComparison.OrdinalIgnoreCase);
+        if (isInfoOnlyQuery)
+        {
+            return await ProcessInfoQueryAsync(request, title, description, categorization, processingStopwatch, cancellationToken);
+        }
+
         _logger.LogInformation("Analyzing ticket {TicketId}.", request.TicketId);
         var analysisJson = await _ticketAnalyzerAgent.AnalyzeTicketAsync(title, description);
         var analysis = JsonSerializer.Deserialize<TicketAnalysisResult>(AiJsonResponseSanitizer.Normalize(analysisJson), JsonOptions)
@@ -115,12 +141,21 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             ? $"Title: {title}{Environment.NewLine}Description: {description}"
             : analysis.Problem;
         _logger.LogInformation("Generating search embedding for ticket {TicketId}.", request.TicketId);
+        var nyraScopeTask = ResolveNyraRetrievalScopeAsync(request, cancellationToken);
         var searchEmbedding = await _embeddingService.GenerateEmbedding(searchText);
         var similaritySearchLimit = request.SimilaritySearchLimitOverride is > 0
             ? request.SimilaritySearchLimitOverride.Value
             : _settings.SimilaritySearchLimit;
-        var similarTickets = await _vectorStore.SearchSimilarTickets(searchEmbedding, similaritySearchLimit, request.SelectedGroupIds, cancellationToken);
+        var similarTicketsTask = _vectorStore.SearchSimilarTickets(searchEmbedding, similaritySearchLimit, request.SelectedGroupIds, cancellationToken);
+        var nyraScope = await nyraScopeTask;
+        LogNyraRetrievalScope(request, nyraScope);
+        var nyraRetrievalTask = RetrieveNyraDocumentsAsync(searchText, nyraScope.KbNames, cancellationToken);
+
+        var similarTickets = await similarTicketsTask;
+        var nyraRetrieval = await nyraRetrievalTask;
+        var nyraDocuments = nyraRetrieval.Documents;
         _logger.LogInformation("Found {SimilarTicketCount} similar tickets for ticket {TicketId}.", similarTickets.Count, request.TicketId);
+        _logger.LogInformation("Found {NyraDocumentCount} NYRA document(s) for ticket {TicketId}.", nyraDocuments.Count, request.TicketId);
 
         var feedbackEvidenceByTicketId = await _feedbackRepository.GetFeedbackEvidence(
             similarTickets.Select(ticket => ticket.TicketId).ToArray(),
@@ -150,7 +185,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             .ToList();
 
         _logger.LogInformation("Generating resolution for ticket {TicketId}.", request.TicketId);
-        var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, description, resolutionIncidents);
+        var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, description, resolutionIncidents.Take(5).ToList(), nyraDocuments.Take(5).ToList());
         var resolution = JsonSerializer.Deserialize<ResolutionResult>(AiJsonResponseSanitizer.Normalize(resolutionJson), JsonOptions)
             ?? throw new InvalidOperationException("The resolution agent returned an empty result.");
 
@@ -240,11 +275,217 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
                 Resolution = ticket.Resolution,
                 Similarity = ticket.Similarity
             }).ToList(),
+            NyraDocuments = nyraDocuments,
+            NyraKnowledgeBaseUsed = nyraScope.KbNames.Count > 0,
+            NyraKnowledgeBaseStatus = GetNyraKnowledgeBaseStatus(nyraScope, nyraRetrieval),
+            NyraKnowledgeBaseMessage = GetNyraKnowledgeBaseMessage(nyraScope, nyraRetrieval),
+            NyraKnowledgeBaseNames = nyraScope.KbNames,
+            NyraKnowledgeBaseProjects = nyraScope.ProjectLabels,
+            QueryCategory = categorization.Category,
+            QueryCategorizationReasoning = categorization.Reasoning,
+            UsedPoolDatabase = true,
             FailurePattern = failurePattern,
             Reasoning = resolution.Reasoning,
             FailurePatternFrequency = patternFrequency
         };
     }
+
+    private async Task<TicketWorkflowResult> ProcessInfoQueryAsync(
+        TicketRequest request,
+        string title,
+        string description,
+        QueryCategorizationResult categorization,
+        Stopwatch processingStopwatch,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Skipping PoolSense database retrieval for ticket {TicketId}; query categorized as Info.", request.TicketId);
+
+        var searchText = $"Title: {title}{Environment.NewLine}Description: {description}";
+        var nyraScope = await ResolveNyraRetrievalScopeAsync(request, cancellationToken);
+        LogNyraRetrievalScope(request, nyraScope);
+        var nyraRetrieval = await RetrieveNyraDocumentsAsync(searchText, nyraScope.KbNames, cancellationToken);
+        var nyraDocuments = nyraRetrieval.Documents;
+        _logger.LogInformation("Found {NyraDocumentCount} NYRA document(s) for ticket {TicketId}.", nyraDocuments.Count, request.TicketId);
+
+        var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, description, [], nyraDocuments.Take(5).ToList());
+        var resolution = JsonSerializer.Deserialize<ResolutionResult>(AiJsonResponseSanitizer.Normalize(resolutionJson), JsonOptions)
+            ?? throw new InvalidOperationException("The resolution agent returned an empty result.");
+
+        await _interactionLogger.LogInteractionAsync(
+            searchText,
+            [],
+            resolution.SuggestedResolution,
+            resolution.Confidence,
+            processingStopwatch.Elapsed,
+            0,
+            cancellationToken);
+
+        _logger.LogInformation("Completed workflow mode Recommend (Info) for ticket {TicketId}.", request.TicketId);
+
+        return new TicketWorkflowResult
+        {
+            SuggestedRootCause = resolution.SuggestedRootCause,
+            SuggestedResolution = resolution.SuggestedResolution,
+            Confidence = resolution.Confidence,
+            SimilarIncidents = [],
+            NyraDocuments = nyraDocuments,
+            NyraKnowledgeBaseUsed = nyraScope.KbNames.Count > 0,
+            NyraKnowledgeBaseStatus = GetNyraKnowledgeBaseStatus(nyraScope, nyraRetrieval),
+            NyraKnowledgeBaseMessage = GetNyraKnowledgeBaseMessage(nyraScope, nyraRetrieval),
+            NyraKnowledgeBaseNames = nyraScope.KbNames,
+            NyraKnowledgeBaseProjects = nyraScope.ProjectLabels,
+            QueryCategory = categorization.Category,
+            QueryCategorizationReasoning = categorization.Reasoning,
+            UsedPoolDatabase = false,
+            FailurePattern = new FailurePattern(),
+            Reasoning = resolution.Reasoning,
+            FailurePatternFrequency = 0
+        };
+    }
+
+    private async Task<NyraDocumentRetrievalOutcome> RetrieveNyraDocumentsAsync(
+        string searchText,
+        IReadOnlyList<string> nyraKbNames,
+        CancellationToken cancellationToken)
+    {
+        if (nyraKbNames.Count == 0)
+        {
+            return new NyraDocumentRetrievalOutcome([], string.Empty);
+        }
+
+        try
+        {
+            var documents = await _nyraDocumentRetrievalService.RetrieveHybridDocumentsAsync(
+                searchText,
+                nyraKbNames,
+                limit: 5,
+                cancellationToken: cancellationToken);
+            return new NyraDocumentRetrievalOutcome(documents, string.Empty);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "NYRA document retrieval failed. Continuing with PoolSense historical incidents only.");
+            return new NyraDocumentRetrievalOutcome([], ex.Message);
+        }
+    }
+
+    private static string GetNyraKnowledgeBaseStatus(NyraRetrievalScope scope, NyraDocumentRetrievalOutcome retrieval)
+    {
+        if (scope.KbNames.Count == 0)
+        {
+            return "Skipped";
+        }
+
+        return string.IsNullOrWhiteSpace(retrieval.ErrorMessage) ? "Queried" : "Failed";
+    }
+
+    private static string GetNyraKnowledgeBaseMessage(NyraRetrievalScope scope, NyraDocumentRetrievalOutcome retrieval)
+    {
+        if (scope.KbNames.Count == 0)
+        {
+            return "No NYRA KB names are configured for the selected project scope.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(retrieval.ErrorMessage))
+        {
+            return retrieval.ErrorMessage;
+        }
+
+        return retrieval.Documents.Count == 0
+            ? "NYRA KB was queried but returned no documents."
+            : $"NYRA KB returned {retrieval.Documents.Count} document(s).";
+    }
+
+    private async Task<NyraRetrievalScope> ResolveNyraRetrievalScopeAsync(TicketRequest request, CancellationToken cancellationToken)
+    {
+        var projects = await ResolveNyraProjectsAsync(request, cancellationToken);
+        var kbNames = projects
+            .SelectMany(project => SplitCommaSeparated(project.NyraKbNames))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var projectLabels = projects
+            .Select(project => string.IsNullOrWhiteSpace(project.ProjectName)
+                ? project.ProjectId
+                : $"{project.ProjectName} ({project.ProjectId})")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new NyraRetrievalScope(projectLabels, kbNames);
+    }
+
+    private void LogNyraRetrievalScope(TicketRequest request, NyraRetrievalScope scope)
+    {
+        if (scope.KbNames.Count == 0)
+        {
+            _logger.LogInformation(
+                "NYRA KB retrieval skipped for ticket {TicketId}. No NYRA KB names are configured for selected projects. Application: {Application}; ApplicationId: {ApplicationId}; SelectedGroupIds: {SelectedGroupIds}.",
+                request.TicketId,
+                request.Application,
+                request.ApplicationId,
+                string.Join(", ", request.SelectedGroupIds ?? []));
+            return;
+        }
+
+        _logger.LogInformation(
+            "NYRA KB retrieval enabled for ticket {TicketId}. Projects: {NyraProjects}. KBs: {NyraKbNames}.",
+            request.TicketId,
+            string.Join(", ", scope.ProjectLabels),
+            string.Join(", ", scope.KbNames));
+    }
+
+    private async Task<IReadOnlyList<ProjectConfig>> ResolveNyraProjectsAsync(TicketRequest request, CancellationToken cancellationToken)
+    {
+        if (request.SelectedGroupIds is { Count: > 0 })
+        {
+            var projectTasks = request.SelectedGroupIds
+                .Where(projectId => !string.IsNullOrWhiteSpace(projectId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(projectId => _projectRepository.GetProjectByIdAsync(projectId, cancellationToken));
+
+            var selectedProjects = await Task.WhenAll(projectTasks);
+            return selectedProjects
+                .Where(project => project is not null && !string.IsNullOrWhiteSpace(project.NyraKbNames))
+                .Cast<ProjectConfig>()
+                .ToList();
+        }
+
+        var application = request.Application?.Trim() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(application))
+        {
+            var project = await _projectRepository.GetProjectByApplicationFilterAsync(application, cancellationToken);
+            return project is not null && !string.IsNullOrWhiteSpace(project.NyraKbNames)
+                ? [project]
+                : [];
+        }
+
+        var applicationId = request.ApplicationId?.Trim() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(applicationId))
+        {
+            var project = await _projectRepository.GetProjectByIdAsync(applicationId, cancellationToken);
+            return project is not null && !string.IsNullOrWhiteSpace(project.NyraKbNames)
+                ? [project]
+                : [];
+        }
+
+        var projects = await _projectRepository.GetAllProjectsAsync(cancellationToken);
+        return projects
+            .Where(project => !string.IsNullOrWhiteSpace(project.NyraKbNames))
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> SplitCommaSeparated(string value) =>
+        value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .ToList();
+
+    private sealed record NyraRetrievalScope(
+        IReadOnlyList<string> ProjectLabels,
+        IReadOnlyList<string> KbNames);
+
+    private sealed record NyraDocumentRetrievalOutcome(
+        IReadOnlyList<NyraDocumentResult> Documents,
+        string ErrorMessage);
 
     private sealed class TicketAnalysisResult
     {
@@ -268,6 +509,12 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         public string Component { get; set; } = string.Empty;
         public string FailureType { get; set; } = string.Empty;
         public string ResolutionCategory { get; set; } = string.Empty;
+    }
+
+    private sealed class QueryCategorizationResult
+    {
+        public string Category { get; set; } = "Issue";
+        public string Reasoning { get; set; } = string.Empty;
     }
 
     private static string GetLatestHumanValidatedFix(

@@ -100,6 +100,7 @@ const defaultProjectForm: ProjectConfigInput = {
   poolingEnabled: environment.projectDefaults.poolingEnabled,
   emailRecipients: environment.projectDefaults.emailRecipients,
   applicationFilter: '',
+  nyraKbNames: '',
 }
 
 function createDefaultProjectForm(): ProjectConfigInput {
@@ -627,6 +628,7 @@ export class AppComponent implements OnInit {
       poolingEnabled: project.poolingEnabled,
       emailRecipients: project.emailRecipients,
       applicationFilter: project.applicationFilter,
+      nyraKbNames: project.nyraKbNames,
     }
     this.projectNotice = `Editing ${project.projectName}.`
     this.projectError = ''
@@ -641,10 +643,11 @@ export class AppComponent implements OnInit {
   async handleProjectSubmit() {
     const payload: ProjectConfigInput = {
       ...this.projectForm,
-      projectId: this.editingProjectId ? this.projectForm.projectId.trim() : '',
+      projectId: this.editingProjectId ? this.editingProjectId.trim() : '',
       projectName: this.projectForm.projectName.trim(),
       emailRecipients: this.projectForm.emailRecipients.trim(),
       applicationFilter: this.projectForm.applicationFilter.trim(),
+      nyraKbNames: this.projectForm.nyraKbNames.trim(),
     }
 
     if (!payload.projectName) {
@@ -824,6 +827,10 @@ export class AppComponent implements OnInit {
 
   trackIncident(_index: number, incident: SimilarIncident) {
     return incident.ticketId
+  }
+
+  trackNyraDocument(_index: number, document: { documentId: string; sourceUrl: string; citation: string }) {
+    return document.documentId || document.sourceUrl || document.citation
   }
 
   trackPoolRecommendation(_index: number, report: PoolRecommendationReportListItem) {

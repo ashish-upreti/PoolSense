@@ -741,6 +741,27 @@
     box-shadow: none;
   }
 
+  .thinking-panel {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1rem;
+    border: 1px dashed var(--border);
+    border-radius: 16px;
+    background: var(--panel-subtle);
+  }
+
+  .thinking-line {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.86rem;
+    line-height: 1.5;
+  }
+
+  .thinking-line strong {
+    color: var(--heading-text);
+  }
+
   .feedback-button:disabled,
   .send-button:disabled,
   .prompt-chip:disabled {
@@ -928,6 +949,77 @@
 
   .incident-link:hover {
     color: var(--heading-text);
+  }
+
+  .nyra-doc-panel {
+    display: grid;
+    gap: 0.85rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: var(--panel-subtle);
+  }
+
+  .nyra-kb-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: fit-content;
+    max-width: 100%;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--panel-subtle);
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+
+  .nyra-kb-status-active {
+    border-color: var(--accent-outline);
+    color: var(--heading-text);
+  }
+
+  .nyra-kb-insight {
+    gap: 0.5rem;
+  }
+
+  .nyra-doc-list {
+    display: grid;
+    gap: 0.8rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .nyra-doc-item {
+    display: grid;
+    gap: 0.4rem;
+    min-width: 0;
+  }
+
+  .nyra-doc-title {
+    color: var(--banner-color);
+    font-weight: 800;
+    line-height: 1.35;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+
+  .nyra-doc-title:hover {
+    color: var(--heading-text);
+  }
+
+  .nyra-doc-copy {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.55;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: hidden;
   }
 
   .telemetry-block {

@@ -87,6 +87,7 @@ public class ProjectsController : ControllerBase
         public bool PoolingEnabled { get; set; }
         public string EmailRecipients { get; set; } = string.Empty;
         public string ApplicationFilter { get; set; } = string.Empty;
+        public string NyraKbNames { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
     }
 
@@ -200,6 +201,13 @@ public class ProjectsController : ControllerBase
     [HttpPut("{projectId}")]
     public async Task<IActionResult> UpdateProject(string projectId, [FromBody] ProjectConfig request, CancellationToken cancellationToken)
     {
+        if (request is null)
+        {
+            return BadRequest("Project configuration is required.");
+        }
+
+        request.ProjectId = projectId;
+
         var validationResult = ValidateRequest(request, projectId);
         if (validationResult is not null)
         {
@@ -229,6 +237,7 @@ public class ProjectsController : ControllerBase
             updatedProject.ApplicationFilter = string.IsNullOrWhiteSpace(request.ApplicationFilter)
                 ? existingProject.ApplicationFilter
                 : request.ApplicationFilter.Trim();
+            updatedProject.NyraKbNames = request.NyraKbNames?.Trim() ?? string.Empty;
 
             var savedProject = await _projectRepository.UpdateProjectAsync(updatedProject, cancellationToken);
             if (savedProject is null)
@@ -564,7 +573,8 @@ public class ProjectsController : ControllerBase
             TicketSourceType = string.IsNullOrWhiteSpace(request.TicketSourceType) ? "sql" : request.TicketSourceType.Trim(),
             ConnectionString = request.ConnectionString?.Trim() ?? string.Empty,
             KnowledgeSources = request.KnowledgeSources ?? [],
-            ApplicationFilter = request.ApplicationFilter?.Trim() ?? string.Empty
+            ApplicationFilter = request.ApplicationFilter?.Trim() ?? string.Empty,
+            NyraKbNames = request.NyraKbNames?.Trim() ?? string.Empty
         };
     }
 
@@ -581,6 +591,7 @@ public class ProjectsController : ControllerBase
             PoolingEnabled = project.PoolingEnabled,
             EmailRecipients = project.EmailRecipients,
             ApplicationFilter = project.ApplicationFilter,
+            NyraKbNames = project.NyraKbNames,
             CreatedAt = project.CreatedAt
         };
     }

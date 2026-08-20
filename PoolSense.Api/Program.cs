@@ -46,7 +46,9 @@ builder.Services.AddControllers(options =>
 });
 builder.Services.Configure<AiSettings>(builder.Configuration.GetSection("AiSettings"));
 builder.Services.Configure<NyraSettings>(builder.Configuration.GetSection("Nyra"));
+builder.Services.Configure<NyraRetrievalSettings>(builder.Configuration.GetSection("NyraRetrieval"));
 builder.Services.PostConfigure<NyraSettings>(NyraSettingsResolver.ApplyActiveProfile);
+builder.Services.PostConfigure<NyraRetrievalSettings>(NyraRetrievalSettingsResolver.ApplyDefaults);
 builder.Services.Configure<ActiveDirectoryOptions>(builder.Configuration.GetSection(ActiveDirectoryOptions.SectionName));
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
 builder.Services.Configure<TicketAutomationSettings>(builder.Configuration.GetSection("TicketAutomation"));
@@ -81,6 +83,7 @@ builder.Services.AddScoped<ITicketAnalyzerAgent, TicketAnalyzerAgent>();
 builder.Services.AddScoped<IResolutionAgent, ResolutionAgent>();
 builder.Services.AddScoped<IQueryVariantGeneratorAgent, QueryVariantGeneratorAgent>();
 builder.Services.AddScoped<IFailurePatternAgent, FailurePatternAgent>();
+builder.Services.AddScoped<IQueryCategorizationAgent, QueryCategorizationAgent>();
 
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 builder.Services.AddScoped<ILLMService, LLMService>();
@@ -128,6 +131,7 @@ builder.Services.AddScoped<IUserActivityAuditLogger, UserActivityAuditLogger>();
 builder.Services.AddScoped<SqlTicketConnector>();
 builder.Services.AddScoped<IApplicationSyncService, ApplicationSyncService>();
 builder.Services.AddHttpClient<ApiTicketConnector>();
+builder.Services.AddHttpClient<INyraDocumentRetrievalService, NyraDocumentRetrievalService>();
 
 builder.Services.AddScoped<ITicketWorkflowOrchestrator, TicketWorkflowOrchestrator>();
 builder.Services.AddHostedService<BackgroundTicketPollingService>();
@@ -186,6 +190,11 @@ builder.Services.AddScoped<Kernel>(sp =>
     kernelBuilder.AddAzureOpenAIChatCompletion(
         deploymentName: nyraSettings.Model,
         azureOpenAIClient: nyraClient);
+
+    kernelBuilder.AddAzureOpenAIChatCompletion(
+        deploymentName: nyraSettings.CategorizationModel,
+        azureOpenAIClient: nyraClient,
+        serviceId: QueryCategorizationAgent.CategorizationServiceId);
 
     return kernelBuilder.Build();
 });

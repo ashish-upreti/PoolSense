@@ -74,6 +74,6 @@ public class TicketResolutionService : ITicketResolutionService
 
         var enrichedDescription = $"{description}{Environment.NewLine}{Environment.NewLine}Historical Incident Context:{Environment.NewLine}{incidentContext}";
 
-        return await _resolutionAgent.GenerateResolutionAsync(title, enrichedDescription, incidents);
+        return await _resolutionAgent.GenerateResolutionAsync(title, enrichedDescription, incidents, []);
     }
 }
