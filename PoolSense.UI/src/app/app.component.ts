@@ -2,6 +2,8 @@ import { CommonModule } from '@angular/common'
 import { Component, HostListener, OnInit, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import {
+  ApplicationFeedbackDailyCount,
+  ApplicationFeedbackInsights,
   ApplicationFeedbackRequest,
   AuthenticatedUser,
   ApiService,
@@ -272,6 +274,10 @@ export class AppComponent implements OnInit {
   applicationFeedbackError = ''
   applicationFeedbackNotice = ''
   isApplicationFeedbackSaving = false
+  applicationFeedbackInsights: ApplicationFeedbackInsights | null = null
+  applicationFeedbackInsightsError = ''
+  isApplicationFeedbackInsightsLoading = false
+  applicationFeedbackTimelineDays = 30
   ticketAutomationSettings = defaultTicketAutomationSettings
   ticketAutomationForm = createTicketAutomationSettingsForm()
   deploymentInfo: DeploymentInfo | null = null
@@ -407,6 +413,23 @@ export class AppComponent implements OnInit {
     const start = (this.poolRecommendationReports.page - 1) * this.poolRecommendationReports.pageSize + 1
     const end = Math.min(this.poolRecommendationReports.totalCount, start + this.poolRecommendationReports.items.length - 1)
     return `${start}-${end} of ${this.poolRecommendationReports.totalCount}`
+  }
+
+  get applicationFeedbackActiveApplications() {
+    return this.projects.filter((project) => project.poolingEnabled).length
+  }
+
+  get applicationFeedbackIngestionProgress() {
+    if (this.ingestionStatuses.length === 0) {
+      return 0
+    }
+
+    const totalProgress = this.ingestionStatuses.reduce((sum, status) => sum + this.clampPercentage(status.progressPercentage), 0)
+    return Math.round(totalProgress / this.ingestionStatuses.length)
+  }
+
+  get applicationFeedbackTimelineLabel() {
+    return this.applicationFeedbackTimelineDays === 0 ? 'All time' : `Last ${this.applicationFeedbackTimelineDays} days`
   }
 
   get poolRecommendationProjectOptions() {
@@ -569,6 +592,8 @@ export class AppComponent implements OnInit {
     this.poolRecommendationError = ''
     this.isPoolRecommendationLoading = false
     this.feedbackStateByMessageId = {}
+    this.applicationFeedbackInsights = null
+    this.applicationFeedbackInsightsError = ''
   }
 
   handleComposerKeydown(event: KeyboardEvent) {
@@ -604,6 +629,10 @@ export class AppComponent implements OnInit {
 
     if (section === 'poolRecommendations' && this.currentUser) {
       void this.loadPoolRecommendations()
+    }
+
+    if (section === 'applicationFeedback' && this.currentUser && !this.applicationFeedbackInsights) {
+      void this.loadApplicationFeedbackInsights()
     }
   }
 
@@ -805,11 +834,47 @@ export class AppComponent implements OnInit {
       if (this.currentUser) {
         this.applyAuthenticatedUserToFeedbackForm(this.currentUser)
       }
+      await this.loadApplicationFeedbackInsights()
     } catch (requestError) {
       this.applicationFeedbackError = requestError instanceof Error ? requestError.message : 'Unable to submit application feedback.'
     } finally {
       this.isApplicationFeedbackSaving = false
     }
+  }
+
+  formatApplicationFeedbackDelta(current: number, previous: number) {
+    if (this.applicationFeedbackTimelineDays === 0) {
+      return 'All-time total'
+    }
+
+    if (previous === 0) {
+      return current > 0 ? `+ ${current} new in ${this.applicationFeedbackTimelineDays} days` : `0 vs previous ${this.applicationFeedbackTimelineDays} days`
+    }
+
+    const delta = Math.round(((current - previous) / previous) * 100)
+    const sign = delta >= 0 ? '+' : '-'
+    return `${sign} ${Math.abs(delta)}% vs previous ${this.applicationFeedbackTimelineDays} days`
+  }
+
+  handleApplicationFeedbackTimelineChange(days: string | number) {
+    this.applicationFeedbackTimelineDays = Number(days)
+    void this.loadApplicationFeedbackInsights()
+  }
+
+  isApplicationFeedbackDeltaNegative(current: number, previous: number) {
+    return previous > 0 && current < previous
+  }
+
+  getApplicationFeedbackSparklineHeight(count: number, source: 'feedback' | 'ai') {
+    const dailyCounts = source === 'ai'
+      ? this.applicationFeedbackInsights?.dailyAiFeedbackCounts ?? []
+      : this.applicationFeedbackInsights?.dailyFeedbackCounts ?? []
+    const maxCount = Math.max(1, ...dailyCounts.map((dailyCount) => dailyCount.count))
+    return Math.max(14, Math.round((count / maxCount) * 100))
+  }
+
+  trackApplicationFeedbackDay(_index: number, day: ApplicationFeedbackDailyCount) {
+    return day.date
   }
 
   getProjectStatus(project: ProjectConfig): IngestionStatus {
@@ -856,6 +921,20 @@ export class AppComponent implements OnInit {
       .filter((step) => step.length > 0)
 
     return sentenceSteps.length > 1 ? sentenceSteps.slice(0, 6) : []
+  }
+
+  getReasoningSegments(reasoning: string | undefined | null): string[] {
+    const text = (reasoning || '').replace(/\s+/g, ' ').trim()
+    if (!text) {
+      return ['No reasoning details available.']
+    }
+
+    const sentenceSegments = text
+      .split(/(?<=[.!?])\s+(?=[A-Z(])/)
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0)
+
+    return sentenceSegments.length > 1 ? sentenceSegments.slice(0, 10) : [text]
   }
 
   getRetrievedTicketIds(message: AssistantMessage) {
@@ -1182,7 +1261,24 @@ export class AppComponent implements OnInit {
   }
 
   private async loadAuthenticatedWorkspace() {
-    await Promise.all([this.loadProjectGroups(), this.loadProjectWorkspace()])
+    await Promise.all([this.loadProjectGroups(), this.loadProjectWorkspace(), this.loadApplicationFeedbackInsights()])
+  }
+
+  private async loadApplicationFeedbackInsights() {
+    if (!this.currentUser) {
+      return
+    }
+
+    this.isApplicationFeedbackInsightsLoading = true
+    this.applicationFeedbackInsightsError = ''
+
+    try {
+      this.applicationFeedbackInsights = await this.api.getApplicationFeedbackInsights(this.applicationFeedbackTimelineDays)
+    } catch (requestError) {
+      this.applicationFeedbackInsightsError = requestError instanceof Error ? requestError.message : 'Unable to load application feedback insights.'
+    } finally {
+      this.isApplicationFeedbackInsightsLoading = false
+    }
   }
 
   private async loadPoolRecommendations(page = 1) {

@@ -159,4 +159,21 @@ public class FeedbackController : ControllerBase
             return StatusCode(500, $"An error occurred while storing application feedback: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// Returns aggregate application feedback and AI feedback activity for the feedback dashboard.
+    /// </summary>
+    [HttpGet("application/insights")]
+    public async Task<ActionResult<ApplicationFeedbackInsights>> GetApplicationFeedbackInsights([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var insights = await _feedbackRepository.GetApplicationFeedbackInsightsAsync(days, cancellationToken);
+            return Ok(insights);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"An error occurred while retrieving application feedback insights: {ex.Message}");
+        }
+    }
 }

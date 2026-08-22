@@ -813,6 +813,49 @@
     line-height: 1.55;
   }
 
+  [data-theme='dark'] .conversation-empty-state {
+    border-color: rgba(124, 58, 237, 0.42);
+    background:
+      radial-gradient(circle at 88% 20%, rgba(124, 58, 237, 0.18), transparent 34%),
+      linear-gradient(110deg, rgba(17, 24, 39, 0.98), rgba(15, 23, 42, 0.96) 48%, rgba(30, 27, 75, 0.9)),
+      #0f172a;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      0 18px 42px rgba(2, 6, 23, 0.28);
+  }
+
+  [data-theme='dark'] .conversation-empty-state::after {
+    opacity: 0.26;
+    background-image: radial-gradient(circle, rgba(167, 139, 250, 0.46) 1px, transparent 1px);
+  }
+
+  [data-theme='dark'] .conversation-empty-icon,
+  [data-theme='dark'] .conversation-feature-icon {
+    border-color: rgba(124, 58, 237, 0.48);
+    background: rgba(30, 27, 75, 0.62);
+    color: #a78bfa;
+    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.32);
+  }
+
+  [data-theme='dark'] .conversation-empty-content .panel-kicker {
+    color: #a78bfa;
+  }
+
+  [data-theme='dark'] .conversation-empty-content h3,
+  [data-theme='dark'] .conversation-feature-item h4 {
+    color: #f8fafc;
+    text-shadow: 0 1px 12px rgba(2, 6, 23, 0.42);
+  }
+
+  [data-theme='dark'] .conversation-empty-copy,
+  [data-theme='dark'] .conversation-feature-item p {
+    color: #cbd5e1;
+  }
+
+  [data-theme='dark'] .conversation-feature-item + .conversation-feature-item {
+    border-left-color: rgba(148, 163, 184, 0.34);
+  }
+
   .message-bubble-user {
     align-self: flex-end;
     max-width: min(78%, 44rem);
@@ -1250,6 +1293,26 @@
     line-height: 1.6;
   }
 
+  .reasoning-list {
+    margin: 0;
+    padding-left: 1.05rem;
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .reasoning-list li,
+  .reasoning-single {
+    color: var(--ink);
+    font-size: 0.94rem;
+    line-height: 1.62;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .reasoning-single {
+    margin: 0;
+  }
+
   .assistant-card h3 {
     display: flex;
     align-items: center;
@@ -1624,10 +1687,19 @@
     gap: 0.45rem;
   }
 
-  .pool-recommendation-refresh-button .button-icon {
+  .pool-recommendation-refresh-button .button-icon,
+  .composer-poolsense-button .button-icon,
+  .troubleshoot-send-button .button-icon {
     width: 14px;
     height: 14px;
     flex-shrink: 0;
+  }
+
+  .pool-recommendation-refresh-button .button-icon svg,
+  .composer-poolsense-button .button-icon svg,
+  .troubleshoot-send-button .button-icon svg {
+    width: 100%;
+    height: 100%;
   }
 
   .thinking-panel {
@@ -1757,6 +1829,47 @@
 
   .composer-footer {
     align-items: center;
+  }
+
+  .composer-helper-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.84rem;
+    line-height: 1.45;
+  }
+
+  .composer-helper-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .composer-helper-icon svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .composer-poolsense-button,
+  .troubleshoot-send-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 88%, #ffffff), #8b5cf6);
+    box-shadow: 0 12px 26px rgba(99, 102, 241, 0.28);
+  }
+
+  .composer-poolsense-button {
+    min-height: 2.75rem;
+    padding-inline: 1.2rem;
   }
 
   .error-banner,
@@ -2315,13 +2428,334 @@
     gap: 0.9rem;
   }
 
+  .application-config-card {
+    gap: 0.9rem;
+    padding: 1rem;
+    border-radius: 14px;
+    background: var(--bubble-bg);
+  }
+
+  .application-config-toolbar {
+    justify-content: flex-start;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .application-config-toolbar .feedback-button {
+    margin-left: auto;
+  }
+
+  .application-config-heading-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.35rem;
+    height: 2.35rem;
+    border-radius: 10px;
+    border: 1px solid rgba(139, 92, 246, 0.18);
+    background: rgba(139, 92, 246, 0.1);
+    color: #7c3aed;
+    flex-shrink: 0;
+  }
+
+  .application-config-heading-icon svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+
+  .application-config-heading-copy {
+    display: grid;
+    gap: 0.16rem;
+    min-width: 0;
+  }
+
+  .application-config-heading-copy h3 {
+    margin: 0;
+    font-size: 0.98rem;
+    line-height: 1.25;
+  }
+
+  .application-config-heading-copy p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.74rem;
+    line-height: 1.45;
+  }
+
+  .application-config-grid {
+    column-gap: 1rem;
+    row-gap: 0.72rem;
+  }
+
+  .application-config-card .field-group {
+    gap: 0.32rem;
+  }
+
+  .application-config-card .field-label {
+    color: var(--heading-text);
+    font-family: var(--body-font);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .application-config-card .field-input {
+    min-height: 2.35rem;
+    border-radius: 8px;
+    padding: 0.58rem 0.75rem;
+    font-size: 0.8rem;
+  }
+
+  .application-config-card .field-note,
+  .application-config-card .toggle-card small {
+    font-size: 0.69rem;
+    line-height: 1.45;
+  }
+
+  .application-id-control {
+    position: relative;
+    display: block;
+  }
+
+  .application-id-control .field-input {
+    padding-right: 2rem;
+  }
+
+  .application-id-caret {
+    position: absolute;
+    right: 0.65rem;
+    top: 50%;
+    display: inline-flex;
+    width: 0.9rem;
+    height: 0.9rem;
+    color: var(--muted);
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .application-id-caret svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .application-config-toggle-row {
+    gap: 1rem;
+  }
+
+  .application-config-toggle {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    justify-content: start;
+    align-items: start;
+    gap: 0.7rem;
+    min-height: 4.25rem;
+    padding: 0.75rem;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--panel-subtle) 74%, transparent);
+  }
+
+  .application-config-toggle input {
+    width: 1rem;
+    height: 1rem;
+    margin-top: 0.12rem;
+  }
+
+  .application-config-toggle-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    margin-top: 0.08rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .application-config-toggle-icon svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .application-config-toggle span:last-child {
+    display: grid;
+    gap: 0.18rem;
+  }
+
+  .application-config-toggle strong {
+    font-size: 0.76rem;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .application-config-footer {
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .application-config-helper {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0;
+    font-size: 0.72rem;
+    line-height: 1.45;
+  }
+
+  .application-config-helper-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .application-config-helper-icon svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .application-config-submit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-width: 10.2rem;
+    padding: 0.74rem 1rem;
+    background: linear-gradient(135deg, #7c3aed, #9333ea);
+    box-shadow: 0 12px 24px rgba(124, 58, 237, 0.3);
+  }
+
+  .application-config-submit .button-icon {
+    display: inline-flex;
+    width: 0.9rem;
+    height: 0.9rem;
+    flex-shrink: 0;
+  }
+
+  .application-config-submit .button-icon svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .application-master-card {
+    position: relative;
+    gap: 0;
+    padding: 1.15rem 1.2rem;
+    border-radius: 20px;
+    background: var(--bubble-bg);
+    overflow: hidden;
+  }
+
+  .application-master-card::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 0.34rem;
+    background: linear-gradient(180deg, #7c3aed, #a78bfa);
+  }
+
+  .application-master-toolbar {
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.95rem;
+    padding: 0 0 1rem 0.58rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .application-master-toolbar h3 {
+    margin: 0;
+    font-size: 1.04rem;
+    line-height: 1.28;
+  }
+
+  .application-master-toolbar .workspace-copy {
+    margin: 0.12rem 0 0;
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+
+  .application-master-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 14px;
+    border: 1px solid rgba(139, 92, 246, 0.22);
+    background: linear-gradient(180deg, rgba(167, 139, 250, 0.18), rgba(139, 92, 246, 0.1));
+    color: #7c3aed;
+    box-shadow: 0 10px 22px rgba(124, 58, 237, 0.13);
+    flex-shrink: 0;
+  }
+
+  .application-master-icon svg {
+    width: 1.24rem;
+    height: 1.24rem;
+  }
+
   .application-level-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: start;
+    gap: 0;
+    padding-top: 0.9rem;
   }
 
   .application-level-item {
     min-width: 0;
+    gap: 0.48rem;
+    padding: 0 1rem;
+  }
+
+  .application-level-item:first-child {
+    padding-left: 0;
+  }
+
+  .application-level-item:not(:first-child) {
+    border-left: 1px solid var(--border);
+  }
+
+  .application-master-card .application-level-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.34rem;
+    color: var(--heading-text);
+    font-family: var(--body-font);
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .field-label-info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 0.86rem;
+    height: 0.86rem;
+    border: 1px solid color-mix(in srgb, var(--muted) 34%, transparent);
+    border-radius: 999px;
+    color: var(--muted);
+    font-family: var(--mono-font);
+    font-size: 0.58rem;
+    font-weight: 800;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
+  .application-master-card .field-input {
+    min-height: 2.45rem;
+    border-radius: 8px;
+    padding: 0.62rem 0.75rem;
+    background: var(--input-bg);
+  }
+
+  .application-master-card .field-note,
+  .application-master-card .toggle-card small {
+    font-size: 0.78rem;
+    line-height: 1.45;
   }
 
   .field-group {
@@ -2353,6 +2787,35 @@
     min-height: 100%;
   }
 
+  .application-master-card .application-level-toggle {
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    justify-content: flex-start;
+    align-items: flex-start;
+    gap: 0.55rem;
+  }
+
+  .application-master-card .application-level-toggle input {
+    width: 0.92rem;
+    height: 0.92rem;
+    margin-top: 0.1rem;
+  }
+
+  .application-master-card .application-level-toggle strong {
+    font-size: 0.78rem;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .application-master-card .application-level-toggle span {
+    display: grid;
+    gap: 0.28rem;
+    justify-items: start;
+    text-align: left;
+  }
+
   .toggle-card input {
     width: 1rem;
     height: 1rem;
@@ -2375,6 +2838,230 @@
   .project-card {
     display: grid;
     gap: 0.85rem;
+  }
+
+  .application-list-card {
+    gap: 0.85rem;
+    padding: 1rem;
+    border-radius: 14px;
+    background: var(--bubble-bg);
+  }
+
+  .application-list-toolbar {
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .application-list-heading-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.35rem;
+    height: 2.35rem;
+    border-radius: 10px;
+    border: 1px solid rgba(139, 92, 246, 0.18);
+    background: rgba(139, 92, 246, 0.1);
+    color: #7c3aed;
+    flex-shrink: 0;
+  }
+
+  .application-list-heading-icon svg {
+    width: 1.12rem;
+    height: 1.12rem;
+  }
+
+  .application-list-heading-copy {
+    display: grid;
+    gap: 0.16rem;
+    min-width: 0;
+  }
+
+  .application-list-heading-copy h3 {
+    margin: 0;
+    font-size: 0.98rem;
+    line-height: 1.25;
+  }
+
+  .application-list-heading-copy p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.74rem;
+    line-height: 1.45;
+  }
+
+  .application-list-header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-left: auto;
+  }
+
+  .application-list-refresh-button,
+  .application-card-edit-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-height: 2.2rem;
+    padding: 0.55rem 0.78rem;
+    border-radius: 8px;
+    font-size: 0.72rem;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .application-list-refresh-button .button-icon,
+  .application-card-edit-button .button-icon {
+    display: inline-flex;
+    width: 0.92rem;
+    height: 0.92rem;
+    flex-shrink: 0;
+  }
+
+  .application-list-refresh-button .button-icon svg,
+  .application-card-edit-button .button-icon svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .application-list-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.2rem;
+    height: 2.2rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-subtle);
+    color: var(--heading-text);
+    cursor: pointer;
+    transition:
+      transform 160ms ease,
+      box-shadow 160ms ease,
+      border-color 160ms ease,
+      background-color 160ms ease,
+      color 160ms ease;
+  }
+
+  .application-list-icon-button:hover,
+  .application-list-icon-button:focus-visible {
+    transform: translateY(-1px);
+    border-color: var(--accent-outline);
+    box-shadow: var(--shadow-md);
+  }
+
+  .application-list-icon-button svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .application-list {
+    gap: 0.7rem;
+  }
+
+  .application-card {
+    gap: 0.58rem;
+    padding: 0.78rem 0.85rem;
+    border-radius: 10px;
+    background: var(--bubble-bg);
+  }
+
+  .application-card-header {
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .application-card-title-group {
+    min-width: 0;
+  }
+
+  .application-card-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-left: auto;
+  }
+
+  .application-card-menu-button {
+    width: 2.2rem;
+    height: 2.2rem;
+  }
+
+  .application-card-status-row,
+  .application-card-content-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .application-card-chip {
+    padding: 0.24rem 0.55rem;
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+  }
+
+  .application-card-count {
+    color: var(--heading-text);
+    font-size: 0.76rem;
+    font-weight: 800;
+  }
+
+  .application-card-progress-track {
+    position: relative;
+    height: 0.3rem;
+    border: none;
+    background: color-mix(in srgb, var(--border) 75%, transparent);
+  }
+
+  .application-card-progress-track::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    z-index: 1;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-radius: 999px;
+    background: #7c3aed;
+    transform: translateY(-50%);
+    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.12);
+  }
+
+  .application-card-meta-list {
+    display: grid;
+    gap: 0.38rem;
+    min-width: 0;
+  }
+
+  .application-card .project-card-copy,
+  .application-card .project-card-meta {
+    margin: 0;
+    font-size: 0.72rem;
+    line-height: 1.45;
+  }
+
+  .application-card-confidence {
+    display: grid;
+    justify-items: end;
+    gap: 0.16rem;
+    color: var(--muted);
+    font-family: var(--mono-font);
+    font-size: 0.58rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+
+  .application-card-confidence-value {
+    color: #7c3aed;
+    font-family: var(--body-font);
+    font-size: 1.02rem;
+    line-height: 1;
+    letter-spacing: 0;
+    text-transform: none;
   }
 
   .project-card-title {

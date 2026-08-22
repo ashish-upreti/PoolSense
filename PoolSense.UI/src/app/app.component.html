@@ -264,7 +264,18 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.4L18 9l-4.1 1.6L12 15l-1.9-4.4L6 9l4.1-1.6L12 3Z"></path><path d="M5 17.5 5.7 19l1.5.7-1.5.7L5 22l-.7-1.6L2.8 19.7l1.5-.7Z"></path></svg>
             </span>
             <textarea id="pool-troubleshoot-input" class="troubleshoot-input" name="pool-troubleshoot-input" [(ngModel)]="poolTroubleshootQuestion" (keydown)="handlePoolTroubleshootKeydown($event)" placeholder="Ask about validation, evidence, resolution or escalation..." rows="1" [disabled]="isPoolTroubleshootLoading"></textarea>
-            <button type="button" class="send-button troubleshoot-send-button" (click)="handlePoolTroubleshootSubmit()" [disabled]="isPoolTroubleshootLoading || !poolTroubleshootQuestion.trim()">{{ isPoolTroubleshootLoading ? 'Thinking...' : 'Ask PoolSense' }}</button>
+            <button type="button" class="send-button troubleshoot-send-button" (click)="handlePoolTroubleshootSubmit()" [disabled]="isPoolTroubleshootLoading || !poolTroubleshootQuestion.trim()">
+              <span class="button-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3 9.5 8.5 4 11l5.5 2.5L12 19l2.5-5.5L20 11l-5.5-2.5Z"></path>
+                  <path d="M5 3v4"></path>
+                  <path d="M3 5h4"></path>
+                  <path d="M19 17v4"></path>
+                  <path d="M17 19h4"></path>
+                </svg>
+              </span>
+              <span>{{ isPoolTroubleshootLoading ? 'Thinking...' : 'Ask PoolSense' }}</span>
+            </button>
           </div>          
         </ng-container>
 
@@ -336,14 +347,6 @@
                 <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path>
                 <path d="M8 9h6"></path>
                 <path d="M8 13h4"></path>
-              </svg>
-            </span>
-            <span class="conversation-empty-icon conversation-empty-secondary-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M7 8h10"></path>
-                <path d="M7 12h6"></path>
-                <path d="M12 20H5a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v5"></path>
-                <path d="m16 19 2 2 4-5"></path>
               </svg>
             </span>
           </div>
@@ -640,6 +643,30 @@
             </svg>
           </button>
         </div>
+        <div class="composer-footer">
+          <p class="composer-helper-text">
+            <span class="composer-helper-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 8 11.5c.8.8 1.3 1.5 1.5 2.5"></path>
+                <path d="M9 18h6"></path>
+                <path d="M10 22h4"></path>
+              </svg>
+            </span>
+            Add the service, symptom, and any recent deployment or dependency change.
+          </p>
+          <button type="submit" class="send-button composer-poolsense-button" [disabled]="isLoading || !input.trim()">
+            <span class="button-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3 9.5 8.5 4 11l5.5 2.5L12 19l2.5-5.5L20 11l-5.5-2.5Z"></path>
+                <path d="M5 3v4"></path>
+                <path d="M3 5h4"></path>
+                <path d="M19 17v4"></path>
+                <path d="M17 19h4"></path>
+              </svg>
+            </span>
+            <span>Ask PoolSense</span>
+          </button>
+        </div>
         <p *ngIf="error" class="error-banner">{{ error }}</p>
       </form>
 
@@ -727,7 +754,14 @@
               </div>
               <p class="system-label">Reasoning</p>
             </div>
-            <p>{{ insights.reasoning || 'No reasoning details available.' }}</p>
+            <ng-container *ngIf="getReasoningSegments(insights.reasoning) as reasoningSegments">
+              <ul *ngIf="reasoningSegments.length > 1; else singleReasoningSegment" class="reasoning-list">
+                <li *ngFor="let segment of reasoningSegments">{{ segment }}</li>
+              </ul>
+              <ng-template #singleReasoningSegment>
+                <p class="reasoning-single">{{ reasoningSegments[0] }}</p>
+              </ng-template>
+            </ng-container>
           </div>
 
           <div class="telemetry-block">
@@ -1035,7 +1069,6 @@
       <section class="workspace-panel project-config-screen">
         <div class="project-config-screen-header">
           <div>
-            <p class="panel-kicker">Configuration</p>
             <h2>Application Configuration</h2>
             <p class="workspace-copy">Persist application defaults in SQL Server and monitor ingestion progress per application.</p>
           </div>
@@ -1055,34 +1088,40 @@
         <p *ngIf="projectNotice" class="project-feedback-banner project-feedback-banner-success">{{ projectNotice }}</p>
 
         <section class="project-studio">
-          <form class="project-form-card" (ngSubmit)="handleTicketAutomationSubmit()">
-            <div class="card-heading-row project-toolbar">
+          <form class="project-form-card application-master-card" (ngSubmit)="handleTicketAutomationSubmit()">
+            <div class="card-heading-row project-toolbar application-master-toolbar">
+              <span class="application-master-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.4 1.07V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.07-.4H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .4-1.07V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.39.37.73.6 1 .3.26.68.4 1.07.4H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15Z"></path>
+                </svg>
+              </span>
               <div>
-                <p class="panel-kicker">Application Level</p>
                 <h3>Master polling configuration</h3>
+                <p class="workspace-copy">Global defaults applied to all applications.</p>
               </div>
             </div>
 
             <div class="project-form-grid application-level-grid">
               <label class="field-group application-level-item">
-                <span class="field-label">Poll Interval Seconds</span>
+                <span class="field-label application-level-label">Poll interval (seconds)</span>
                 <input class="field-input" type="number" name="masterPollIntervalSeconds" min="10" max="3600" [(ngModel)]="ticketAutomationForm.pollIntervalSeconds" [disabled]="isTicketAutomationSaving" />
                 <span class="field-note">Allowed range: 10 to 3600 seconds.</span>
               </label>
 
               <div class="field-group application-level-item">
-                <span class="field-label">Pooling Enabled</span>
+                <span class="field-label application-level-label">Master polling <span class="field-label-info" aria-hidden="true">i</span></span>
                 <label class="toggle-card application-level-toggle">
                   <input type="checkbox" name="masterPollingEnabled" [(ngModel)]="ticketAutomationForm.pollingEnabled" [disabled]="isTicketAutomationSaving" />
-                  <span><strong>Master Polling Enabled</strong><small>Pause or resume background polling for all applications.</small></span>
+                  <span><strong>Master polling enabled</strong><small>Pause or resume background polling for all applications.</small></span>
                 </label>
               </div>
 
               <div class="field-group application-level-item">
-                <span class="field-label">PoolSense Email</span>
+                <span class="field-label application-level-label">PoolSense email <span class="field-label-info" aria-hidden="true">i</span></span>
                 <label class="toggle-card application-level-toggle">
                   <input type="checkbox" name="masterPoolSenseEmail" [(ngModel)]="ticketAutomationForm.poolSenseEmail" [disabled]="isTicketAutomationSaving" />
-                  <span><strong>PoolSense Email</strong><small>Master email kill switch. Uncheck to suppress all outbound emails regardless of per-application settings.</small></span>
+                  <span><strong>PoolSense email enabled</strong><small>Master email kill switch. Uncheck to suppress all outbound emails.</small></span>
                 </label>
               </div>
 
@@ -1101,112 +1140,188 @@
           </form>
 
           <div class="project-studio-grid">
-            <form class="project-form-card" (ngSubmit)="handleProjectSubmit()">
-              <div class="card-heading-row project-toolbar">
-                <div>
-                  <p class="panel-kicker">Form</p>
+            <form class="project-form-card application-config-card" (ngSubmit)="handleProjectSubmit()">
+              <div class="card-heading-row project-toolbar application-config-toolbar">
+                <span class="application-config-heading-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
+                    <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"></path>
+                    <path d="M12 12v6"></path>
+                    <path d="M9 15h6"></path>
+                  </svg>
+                </span>
+                <div class="application-config-heading-copy">
                   <h3>{{ editingProjectId ? 'Edit application configuration' : 'Add application configuration' }}</h3>
+                  <p>Define a new application and its polling settings.</p>
                 </div>
                 <button *ngIf="editingProjectId" type="button" class="feedback-button feedback-button-secondary" (click)="cancelProjectEdit()">Cancel edit</button>
               </div>
 
-              <div class="project-form-grid">
-                <label class="field-group">
-                  <span class="field-label">Application Name</span>
+              <div class="project-form-grid application-config-grid">
+                <label class="field-group field-group-full">
+                  <span class="field-label">Application name</span>
                   <input class="field-input" type="text" name="projectName" [(ngModel)]="projectForm.projectName" placeholder="FSCO-Fab" [disabled]="isProjectSaving" />
                 </label>
 
                 <label class="field-group field-group-full">
-                  <span class="field-label">Application Filter(Pool Application)</span>
+                  <span class="field-label">Application filter (Pool Application)</span>
                   <input class="field-input" type="text" name="applicationFilter" [(ngModel)]="projectForm.applicationFilter" placeholder="FSCO-FAB" [disabled]="isProjectSaving" />
-                  <span class="field-note">Use an exact application name for one app</span>
+                  <span class="field-note">Use an exact application name for one app.</span>
                 </label>
 
                 <label class="field-group field-group-full">
-                  <span class="field-label">NYRA KB Names</span>
-                  <input class="field-input" type="text" name="nyraKbNames" [(ngModel)]="projectForm.nyraKbNames" placeholder="FSCOUserGuide, FSCO_Wiki" [disabled]="isProjectSaving" />
-                  <span class="field-note">Optional, comma-separated. NYRA document retrieval runs only when this value is populated for the selected application.</span>
+                  <span class="field-label">NYRA KB NAMES</span>
+                  <input class="field-input" type="text" name="nyraKbNames" [(ngModel)]="projectForm.nyraKbNames" placeholder="FSCOUserGuide, FSCO_WIN" [disabled]="isProjectSaving" />
+                  <span class="field-note">Optional, comma-separated. NYRA document retrieval runs only when populated.</span>
                 </label>
 
                 <label class="field-group">
-                  <span class="field-label">Application Id</span>
-                  <input class="field-input" type="text" [value]="editingProjectId ? projectForm.projectId : generatedProjectId" placeholder="Auto-generated" readonly [disabled]="isProjectSaving" />
-                  <span class="field-note">{{ editingProjectId ? 'Stable identifier used for scoping, ingestion status, and updates.' : generatedProjectId ? 'Generated automatically from Application Name when you create the application.' : 'Will be auto-generated from Application Name when you create the application.' }}</span>
+                  <span class="field-label">Application ID</span>
+                  <span class="application-id-control">
+                    <input class="field-input" type="text" [value]="editingProjectId ? projectForm.projectId : generatedProjectId" placeholder="Auto-generated" readonly [disabled]="isProjectSaving" />
+                    <span class="application-id-caret" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m6 9 6 6 6-6"></path>
+                      </svg>
+                    </span>
+                  </span>
+                  <span class="field-note">Will be auto-generated from Application Name.</span>
                 </label>
 
                 <label class="field-group">
-                  <span class="field-label">Knowledge Lookback Years</span>
+                  <span class="field-label">Knowledge lookback years</span>
                   <input class="field-input" type="number" name="knowledgeLookbackYears" min="0" [(ngModel)]="projectForm.knowledgeLookbackYears" [disabled]="isProjectSaving" />
+                  <span class="field-note">Years of lookback for knowledge retrieval.</span>
                 </label>
 
                 <label class="field-group">
-                  <span class="field-label">Similarity Search Limit</span>
+                  <span class="field-label">Serialized items limit</span>
                   <input class="field-input" type="number" name="similaritySearchLimit" min="1" max="20" [(ngModel)]="projectForm.similaritySearchLimit" [disabled]="isProjectSaving" />
-                  <span class="field-note">Allowed range: 1 to 20</span>
+                  <span class="field-note">Allowed range: 1 to 20.</span>
                 </label>
 
-                <label class="field-group field-group-full">
-                  <span class="field-label">Email Recipients</span>
-                  <input class="field-input" type="text" name="emailRecipients" [(ngModel)]="projectForm.emailRecipients" placeholder="ashish.upreti@intel.com; jane.doe@intel.com" [disabled]="isProjectSaving" />
+                <label class="field-group">
+                  <span class="field-label">Email recipients</span>
+                  <input class="field-input" type="text" name="emailRecipients" [(ngModel)]="projectForm.emailRecipients" placeholder="ashish.user@gmail.com; jane.doe@intel.com" [disabled]="isProjectSaving" />
                   <span class="field-note">Optional, semicolon-separated email addresses.</span>
                 </label>
               </div>
 
-              <div class="toggle-row">
-                <label class="toggle-card">
+              <div class="toggle-row application-config-toggle-row">
+                <label class="toggle-card application-config-toggle">
                   <input type="checkbox" name="sendEmail" [(ngModel)]="projectForm.sendEmail" [disabled]="isProjectSaving" />
-                  <span><strong>Send Email</strong><small>Keep notification delivery enabled for this application.</small></span>
+                  <span class="application-config-toggle-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+                      <path d="m3 7 9 6 9-6"></path>
+                    </svg>
+                  </span>
+                  <span><strong>Send email</strong><small>Keep notification delivery enabled for this application.</small></span>
                 </label>
 
-                <label class="toggle-card">
+                <label class="toggle-card application-config-toggle">
                   <input type="checkbox" name="poolingEnabled" [(ngModel)]="projectForm.poolingEnabled" [disabled]="isProjectSaving" />
-                  <span><strong>Pooling Enabled</strong><small>Allow ingestion to process this application during scheduled runs.</small></span>
+                  <span class="application-config-toggle-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 8v4l3 2"></path>
+                      <circle cx="12" cy="12" r="9"></circle>
+                    </svg>
+                  </span>
+                  <span><strong>Polling enabled</strong><small>Allow ingestion to process this application on schedule.</small></span>
                 </label>
               </div>
 
-              <div class="composer-footer">
-                <p class="helper-text">Application ID is auto-generated on create and remains immutable to keep application scoping and ingestion status stable.</p>
-                <button type="submit" class="send-button" [disabled]="isProjectSaving">{{ isProjectSaving ? 'Saving...' : editingProjectId ? 'Update Application' : 'Create Application' }}</button>
+              <div class="composer-footer application-config-footer">
+                <p class="helper-text application-config-helper">
+                  <span class="application-config-helper-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path>
+                      <path d="m9 12 2 2 4-4"></path>
+                    </svg>
+                  </span>
+                  Application ID is auto-generated on create and remains immutable to keep application scoping and ingestion status stable.
+                </p>
+                <button type="submit" class="send-button application-config-submit" [disabled]="isProjectSaving">
+                  <span class="button-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 5v14"></path>
+                      <path d="M5 12h14"></path>
+                    </svg>
+                  </span>
+                  <span>{{ isProjectSaving ? 'Saving...' : editingProjectId ? 'Update Application' : 'Create Application' }}</span>
+                </button>
               </div>
             </form>
 
-            <div class="project-list-card">
-              <div class="card-heading-row project-toolbar">
-                <div>
-                  <p class="panel-kicker">Status</p>
+            <div class="project-list-card application-list-card">
+              <div class="card-heading-row project-toolbar application-list-toolbar">
+                <span class="application-list-heading-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m12 3 8 4-8 4-8-4 8-4Z"></path>
+                    <path d="m4 12 8 4 8-4"></path>
+                    <path d="m4 17 8 4 8-4"></path>
+                  </svg>
+                </span>
+                <div class="application-list-heading-copy">
                   <h3>Configured applications</h3>
+                  <p>Monitor ingestion progress and configuration status.</p>
                 </div>
-                <button type="button" class="feedback-button feedback-button-secondary" (click)="loadProjectWorkspace(true)" [disabled]="isProjectLoading">Refresh</button>
+                <div class="application-list-header-actions">
+                  <button type="button" class="feedback-button feedback-button-secondary application-list-refresh-button" (click)="loadProjectWorkspace(true)" [disabled]="isProjectLoading">
+                    <span class="button-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                        <path d="M3 21v-5h5"></path>
+                        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                        <path d="M16 8h5V3"></path>
+                      </svg>
+                    </span>
+                    <span>Refresh</span>
+                  </button>
+                </div>
               </div>
 
               <div *ngIf="isProjectLoading" class="project-empty"><p class="empty-copy">Loading application configuration and ingestion status...</p></div>
               <div *ngIf="!isProjectLoading && projects.length === 0" class="project-empty"><p class="empty-copy">No applications are configured yet. Create the first application from the form.</p></div>
 
-              <div *ngIf="!isProjectLoading && projects.length > 0" class="project-list">
-                <article *ngFor="let project of projects" class="project-card">
-                  <div class="project-card-header">
-                    <div>
+              <div *ngIf="!isProjectLoading && projects.length > 0" class="project-list application-list">
+                <article *ngFor="let project of projects" class="project-card application-card">
+                  <div class="project-card-header application-card-header">
+                    <div class="application-card-title-group">
                       <p class="project-card-title">{{ project.projectName }}</p>
                       <p class="project-card-meta">{{ project.projectId }}</p>
                     </div>
-                    <button type="button" class="feedback-button feedback-button-secondary project-edit-button" (click)="handleEditProject(project)">Edit</button>
+                    <div class="application-card-actions">
+                      <button type="button" class="feedback-button feedback-button-secondary project-edit-button application-card-edit-button" (click)="handleEditProject(project)">
+                        <span class="button-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 20h9"></path>
+                            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+                          </svg>
+                        </span>
+                        <span>Edit</span>
+                      </button>
+                    </div>
                   </div>
 
-                  <div class="project-status-row">
-                    <span class="project-chip">Ingestion Status</span>
-                    <span class="data-mono">{{ getProjectStatus(project).ingested }} / {{ getProjectStatus(project).total }}</span>
+                  <div class="application-card-status-row">
+                    <span class="project-chip application-card-chip">Ingester Status</span>
+                    <span class="data-mono application-card-count">{{ getProjectStatus(project).ingested }} / {{ getProjectStatus(project).total }}</span>
                   </div>
 
-                  <div class="project-progress-track" aria-hidden="true"><span class="project-progress-fill" [style.width.%]="clampPercentage(getProjectStatus(project).progressPercentage)"></span></div>
+                  <div class="project-progress-track application-card-progress-track" aria-hidden="true"><span class="project-progress-fill" [style.width.%]="clampPercentage(getProjectStatus(project).progressPercentage)"></span></div>
 
-                  <div class="project-status-row">
-                    <span class="helper-text">Progress</span>
-                    <span class="confidence-value">{{ getProjectStatus(project).progressPercentage }}%</span>
+                  <div class="application-card-content-row">
+                    <div class="application-card-meta-list">
+                      <p class="project-card-copy">Lookback: {{ project.knowledgeLookbackYears }} year{{ project.knowledgeLookbackYears === 1 ? '' : 's' }} &bull; Similarity limit: {{ project.similaritySearchLimit }} &bull; Email: {{ project.sendEmail ? 'On' : 'Off' }} &bull; Pooling: {{ project.poolingEnabled ? 'On' : 'Off' }}</p>
+                      <p class="project-card-meta">Filter: {{ project.applicationFilter || project.projectName }}</p>
+                      <p class="project-card-meta">WHA File: {{ project.nyraKbNames || 'Not configured' }}</p>
+                    </div>
+                    <div class="application-card-confidence">
+                      <strong class="application-card-confidence-value">{{ getProjectStatus(project).progressPercentage }}%</strong>
+                      <span>Confidence</span>
+                    </div>
                   </div>
-
-                  <p class="project-card-copy">Lookback: {{ project.knowledgeLookbackYears }} year{{ project.knowledgeLookbackYears === 1 ? '' : 's' }} &bull; Similarity limit: {{ project.similaritySearchLimit }} &bull; Email: {{ project.sendEmail ? 'On' : 'Off' }} &bull; Pooling: {{ project.poolingEnabled ? 'On' : 'Off' }}</p>
-                  <p class="project-card-meta">Filter: {{ project.applicationFilter || project.projectName }}</p>
-                  <p class="project-card-meta">NYRA KBs: {{ project.nyraKbNames || 'Not configured' }}</p>
                 </article>
               </div>
             </div>
@@ -1265,6 +1380,7 @@
         <p *ngIf="applicationFeedbackNotice" class="project-feedback-banner project-feedback-banner-success">{{ applicationFeedbackNotice }}</p>
 
         <section class="project-studio application-feedback-studio">
+          <div class="application-feedback-studio-grid">
           <form class="project-form-card application-feedback-form-card" (ngSubmit)="handleApplicationFeedbackSubmit()">
             <div class="card-heading-row project-toolbar application-feedback-form-header">
               <div class="application-feedback-submission-row">
@@ -1319,6 +1435,115 @@
               </button>
             </div>
           </form>
+
+          <aside class="application-feedback-insights-card" aria-label="PoolSense feedback insights">
+            <div class="application-feedback-insights-header">
+              <span class="application-feedback-insights-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 19V9"></path>
+                  <path d="M10 19V5"></path>
+                  <path d="M16 19v-7"></path>
+                  <path d="M22 19H2"></path>
+                  <path d="m4 9 6-4 6 7 6-3"></path>
+                </svg>
+              </span>
+              <div>
+                <h3>PoolSense Insights</h3>
+                <p>Usage overview and feedback metrics.</p>
+              </div>
+              <label class="application-feedback-date-select" aria-label="Insights time range">
+                <select name="applicationFeedbackTimeline" [(ngModel)]="applicationFeedbackTimelineDays" (ngModelChange)="handleApplicationFeedbackTimelineChange($event)">
+                  <option [ngValue]="7">Last 7 days</option>
+                  <option [ngValue]="30">Last 30 days</option>
+                  <option [ngValue]="90">Last 90 days</option>
+                  <option [ngValue]="0">All time</option>
+                </select>
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m6 9 6 6 6-6"></path>
+                  </svg>
+                </span>
+              </label>
+            </div>
+
+            <p *ngIf="applicationFeedbackInsightsError" class="project-feedback-banner">{{ applicationFeedbackInsightsError }}</p>
+            <div *ngIf="isApplicationFeedbackInsightsLoading" class="application-feedback-insights-loading">Loading feedback insights...</div>
+
+            <ng-container *ngIf="applicationFeedbackInsights as feedbackInsights">
+              <div class="application-feedback-metric-grid">
+                <article class="application-feedback-metric-card">
+                  <span class="application-feedback-metric-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="9" cy="7" r="4"></circle>
+                      <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                  </span>
+                  <p>Unique users</p>
+                  <strong>{{ feedbackInsights.uniqueSubmittersLast30Days }}</strong>
+                  <small [class.metric-trend-negative]="isApplicationFeedbackDeltaNegative(feedbackInsights.uniqueSubmittersLast30Days, feedbackInsights.previousUniqueSubmitters30Days)">{{ formatApplicationFeedbackDelta(feedbackInsights.uniqueSubmittersLast30Days, feedbackInsights.previousUniqueSubmitters30Days) }}</small>
+                  <div class="application-feedback-sparkline" aria-hidden="true">
+                    <span *ngFor="let day of feedbackInsights.dailyFeedbackCounts; trackBy: trackApplicationFeedbackDay" [style.height.%]="getApplicationFeedbackSparklineHeight(day.count, 'feedback')"></span>
+                  </div>
+                </article>
+
+                <article class="application-feedback-metric-card">
+                  <span class="application-feedback-metric-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
+                      <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"></path>
+                      <path d="M9 13h6"></path>
+                      <path d="M9 17h6"></path>
+                    </svg>
+                  </span>
+                  <p>Feedback submitted</p>
+                  <strong>{{ feedbackInsights.feedbackLast30Days }}</strong>
+                  <small [class.metric-trend-negative]="isApplicationFeedbackDeltaNegative(feedbackInsights.feedbackLast30Days, feedbackInsights.previousFeedback30Days)">{{ formatApplicationFeedbackDelta(feedbackInsights.feedbackLast30Days, feedbackInsights.previousFeedback30Days) }}</small>
+                  <div class="application-feedback-sparkline" aria-hidden="true">
+                    <span *ngFor="let day of feedbackInsights.dailyFeedbackCounts; trackBy: trackApplicationFeedbackDay" [style.height.%]="getApplicationFeedbackSparklineHeight(day.count, 'feedback')"></span>
+                  </div>
+                </article>
+
+                <article class="application-feedback-metric-card">
+                  <span class="application-feedback-metric-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m12 3 1.9 4.4L18 9l-4.1 1.6L12 15l-1.9-4.4L6 9l4.1-1.6L12 3Z"></path>
+                      <path d="M5 17.5 5.7 19l1.5.7-1.5.7L5 22l-.7-1.6L2.8 19.7l1.5-.7Z"></path>
+                    </svg>
+                  </span>
+                  <p>Helpful AI feedback</p>
+                  <strong>{{ feedbackInsights.helpfulAiFeedbackLast30Days }}</strong>
+                  <small [class.metric-trend-negative]="isApplicationFeedbackDeltaNegative(feedbackInsights.helpfulAiFeedbackLast30Days, feedbackInsights.previousHelpfulAiFeedback30Days)">{{ formatApplicationFeedbackDelta(feedbackInsights.helpfulAiFeedbackLast30Days, feedbackInsights.previousHelpfulAiFeedback30Days) }}</small>
+                  <div class="application-feedback-sparkline" aria-hidden="true">
+                    <span *ngFor="let day of feedbackInsights.dailyAiFeedbackCounts; trackBy: trackApplicationFeedbackDay" [style.height.%]="getApplicationFeedbackSparklineHeight(day.count, 'ai')"></span>
+                  </div>
+                </article>
+
+                <article class="application-feedback-metric-card">
+                  <span class="application-feedback-metric-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 21h18"></path>
+                      <path d="M5 21V7l8-4v18"></path>
+                      <path d="M19 21V11l-6-4"></path>
+                      <path d="M9 9h.01"></path>
+                      <path d="M9 13h.01"></path>
+                      <path d="M9 17h.01"></path>
+                    </svg>
+                  </span>
+                  <p>Active applications</p>
+                  <strong>{{ applicationFeedbackActiveApplications }}</strong>
+                  <small>{{ projects.length }} configured applications</small>
+                  <div class="application-feedback-mini-progress" aria-hidden="true"><span [style.width.%]="applicationFeedbackIngestionProgress"></span></div>
+                </article>
+              </div>
+
+              <div class="application-feedback-type-row" *ngIf="feedbackInsights.feedbackTypes.length > 0" aria-label="Top feedback types">
+                <span *ngFor="let type of feedbackInsights.feedbackTypes" class="application-feedback-type-pill">{{ type.feedbackType }} {{ type.count }}</span>
+              </div>
+            </ng-container>
+          </aside>
+          </div>
         </section>
       </section>
     </ng-template>

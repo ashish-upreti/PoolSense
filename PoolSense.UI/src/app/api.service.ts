@@ -214,6 +214,33 @@ export interface ApplicationFeedbackRequest {
   message: string
 }
 
+export interface ApplicationFeedbackTypeSummary {
+  feedbackType: string
+  count: number
+}
+
+export interface ApplicationFeedbackDailyCount {
+  date: string
+  count: number
+}
+
+export interface ApplicationFeedbackInsights {
+  rangeDays: number
+  totalFeedback: number
+  feedbackLast30Days: number
+  previousFeedback30Days: number
+  uniqueSubmittersLast30Days: number
+  previousUniqueSubmitters30Days: number
+  helpfulAiFeedbackLast30Days: number
+  previousHelpfulAiFeedback30Days: number
+  totalAiFeedbackLast30Days: number
+  notHelpfulAiFeedbackLast30Days: number
+  feedbackTypes: ApplicationFeedbackTypeSummary[]
+  dailyFeedbackCounts: ApplicationFeedbackDailyCount[]
+  dailyAiFeedbackCounts: ApplicationFeedbackDailyCount[]
+  generatedAtUtc: string
+}
+
 export interface AuthenticatedUser {
   username: string
   authPrincipal: string
@@ -426,6 +453,18 @@ export class ApiService {
     if (!response.ok) {
       throw new Error(await this.readErrorMessage(response, 'Unable to submit application feedback.'))
     }
+  }
+
+  async getApplicationFeedbackInsights(days = 30): Promise<ApplicationFeedbackInsights> {
+    const response = await fetch(this.apiUrl(`/feedback/application/insights?days=${encodeURIComponent(days)}`), {
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      throw new Error(await this.readErrorMessage(response, 'Unable to load application feedback insights.'))
+    }
+
+    return (await response.json()) as ApplicationFeedbackInsights
   }
 
   async askPoolSense(message: string, selectedGroupIds?: string[]): Promise<TicketWorkflowResult> {

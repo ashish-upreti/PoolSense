@@ -7,6 +7,7 @@ public interface IFeedbackRepository
 {
     Task<int> AddAsync(FeedbackLog feedback, CancellationToken cancellationToken = default);
     Task<int> AddApplicationFeedbackAsync(ApplicationFeedbackLog feedback, CancellationToken cancellationToken = default);
+    Task<ApplicationFeedbackInsights> GetApplicationFeedbackInsightsAsync(int rangeDays = 30, CancellationToken cancellationToken = default);
     Task<double> GetFeedbackScore(string ticketId, CancellationToken cancellationToken = default);
     Task<IReadOnlyDictionary<string, FeedbackEvidence>> GetFeedbackEvidence(IReadOnlyCollection<string> ticketIds, CancellationToken cancellationToken = default);
     Task<IReadOnlyDictionary<string, double>> GetFeedbackScores(IReadOnlyCollection<string> ticketIds, CancellationToken cancellationToken = default);
@@ -121,6 +122,169 @@ public sealed class FeedbackRepository : IFeedbackRepository
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt32(result ?? 0);
     }
+
+    public async Task<ApplicationFeedbackInsights> GetApplicationFeedbackInsightsAsync(int rangeDays = 30, CancellationToken cancellationToken = default)
+    {
+        rangeDays = NormalizeApplicationFeedbackRangeDays(rangeDays);
+        var isAllTime = rangeDays == 0;
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await EnsureApplicationFeedbackTableAsync(connection, cancellationToken);
+        await EnsureTableAsync(connection, cancellationToken);
+
+        var now = DateTime.UtcNow;
+        var rangeStart = isAllTime ? DateTime.MinValue : now.AddDays(-rangeDays);
+        var previousRangeStart = isAllTime ? DateTime.MinValue : now.AddDays(-(rangeDays * 2));
+        var chartDays = isAllTime ? 90 : rangeDays;
+        var chartStart = now.Date.AddDays(-(chartDays - 1));
+
+        const string sql = """
+            SELECT
+                COUNT(*) AS total_feedback,
+                ISNULL(SUM(CASE WHEN @isAllTime = 1 OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS feedback_last_30_days,
+                ISNULL(SUM(CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart THEN 1 ELSE 0 END), 0) AS previous_feedback_30_days,
+                COUNT(DISTINCT CASE WHEN @isAllTime = 1 OR created_at >= @rangeStart THEN NULLIF(LOWER(LTRIM(RTRIM(user_email))), '') END) AS unique_submitters_last_30_days,
+                COUNT(DISTINCT CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart THEN NULLIF(LOWER(LTRIM(RTRIM(user_email))), '') END) AS previous_unique_submitters_30_days
+            FROM dbo.application_feedback_logs;
+
+            SELECT
+                ISNULL(SUM(CASE WHEN (@isAllTime = 1 OR created_at >= @rangeStart) AND feedback_type = 1 THEN 1 ELSE 0 END), 0) AS helpful_ai_feedback_last_30_days,
+                ISNULL(SUM(CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart AND feedback_type = 1 THEN 1 ELSE 0 END), 0) AS previous_helpful_ai_feedback_30_days,
+                ISNULL(SUM(CASE WHEN @isAllTime = 1 OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS total_ai_feedback_last_30_days,
+                ISNULL(SUM(CASE WHEN (@isAllTime = 1 OR created_at >= @rangeStart) AND feedback_type = -1 THEN 1 ELSE 0 END), 0) AS not_helpful_ai_feedback_last_30_days
+            FROM dbo.feedback_logs;
+
+            SELECT TOP (4)
+                COALESCE(NULLIF(LTRIM(RTRIM(feedback_type)), ''), 'Unclassified') AS feedback_type,
+                COUNT(*) AS feedback_count
+            FROM dbo.application_feedback_logs
+            WHERE @isAllTime = 1 OR created_at >= @rangeStart
+            GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(feedback_type)), ''), 'Unclassified')
+            ORDER BY feedback_count DESC, feedback_type ASC;
+
+            WITH days AS (
+                SELECT CAST(@chartStart AS date) AS day_start
+                UNION ALL
+                SELECT DATEADD(day, 1, day_start)
+                FROM days
+                WHERE day_start < CAST(@now AS date)
+            )
+            SELECT
+                CONVERT(char(10), days.day_start, 23) AS feedback_date,
+                COUNT(feedback.id) AS feedback_count
+            FROM days
+            LEFT JOIN dbo.application_feedback_logs feedback
+                ON feedback.created_at >= days.day_start
+                AND feedback.created_at < DATEADD(day, 1, days.day_start)
+            GROUP BY days.day_start
+            ORDER BY days.day_start
+            OPTION (MAXRECURSION 100);
+
+            WITH days AS (
+                SELECT CAST(@chartStart AS date) AS day_start
+                UNION ALL
+                SELECT DATEADD(day, 1, day_start)
+                FROM days
+                WHERE day_start < CAST(@now AS date)
+            )
+            SELECT
+                CONVERT(char(10), days.day_start, 23) AS feedback_date,
+                COUNT(feedback.id) AS feedback_count
+            FROM days
+            LEFT JOIN dbo.feedback_logs feedback
+                ON feedback.created_at >= days.day_start
+                AND feedback.created_at < DATEADD(day, 1, days.day_start)
+            GROUP BY days.day_start
+            ORDER BY days.day_start
+            OPTION (MAXRECURSION 100);
+            """;
+
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@now", now);
+        command.Parameters.AddWithValue("@rangeStart", rangeStart);
+        command.Parameters.AddWithValue("@previousRangeStart", previousRangeStart);
+        command.Parameters.AddWithValue("@chartStart", chartStart);
+        command.Parameters.AddWithValue("@isAllTime", isAllTime);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var totalFeedback = 0;
+        var feedbackLast30Days = 0;
+        var previousFeedback30Days = 0;
+        var uniqueSubmittersLast30Days = 0;
+        var previousUniqueSubmitters30Days = 0;
+
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            totalFeedback = reader.GetInt32(0);
+            feedbackLast30Days = reader.GetInt32(1);
+            previousFeedback30Days = reader.GetInt32(2);
+            uniqueSubmittersLast30Days = reader.GetInt32(3);
+            previousUniqueSubmitters30Days = reader.GetInt32(4);
+        }
+
+        await reader.NextResultAsync(cancellationToken);
+
+        var helpfulAiFeedbackLast30Days = 0;
+        var previousHelpfulAiFeedback30Days = 0;
+        var totalAiFeedbackLast30Days = 0;
+        var notHelpfulAiFeedbackLast30Days = 0;
+
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            helpfulAiFeedbackLast30Days = reader.GetInt32(0);
+            previousHelpfulAiFeedback30Days = reader.GetInt32(1);
+            totalAiFeedbackLast30Days = reader.GetInt32(2);
+            notHelpfulAiFeedbackLast30Days = reader.GetInt32(3);
+        }
+
+        await reader.NextResultAsync(cancellationToken);
+
+        var feedbackTypes = new List<ApplicationFeedbackTypeSummary>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            feedbackTypes.Add(new ApplicationFeedbackTypeSummary(reader.GetString(0), reader.GetInt32(1)));
+        }
+
+        await reader.NextResultAsync(cancellationToken);
+
+        var dailyFeedbackCounts = new List<ApplicationFeedbackDailyCount>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            dailyFeedbackCounts.Add(new ApplicationFeedbackDailyCount(reader.GetString(0), reader.GetInt32(1)));
+        }
+
+        await reader.NextResultAsync(cancellationToken);
+
+        var dailyAiFeedbackCounts = new List<ApplicationFeedbackDailyCount>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            dailyAiFeedbackCounts.Add(new ApplicationFeedbackDailyCount(reader.GetString(0), reader.GetInt32(1)));
+        }
+
+        return new ApplicationFeedbackInsights(
+            rangeDays,
+            totalFeedback,
+            feedbackLast30Days,
+            previousFeedback30Days,
+            uniqueSubmittersLast30Days,
+            previousUniqueSubmitters30Days,
+            helpfulAiFeedbackLast30Days,
+            previousHelpfulAiFeedback30Days,
+            totalAiFeedbackLast30Days,
+            notHelpfulAiFeedbackLast30Days,
+            feedbackTypes,
+            dailyFeedbackCounts,
+            dailyAiFeedbackCounts,
+            now);
+    }
+
+    private static int NormalizeApplicationFeedbackRangeDays(int rangeDays) => rangeDays switch
+    {
+        0 or 7 or 30 or 90 => rangeDays,
+        _ => 30
+    };
 
     public async Task<double> GetFeedbackScore(string ticketId, CancellationToken cancellationToken = default)
     {
