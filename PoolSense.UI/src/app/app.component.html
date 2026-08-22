@@ -407,6 +407,39 @@
           <article *ngIf="message.role === 'assistant'" class="message-bubble message-bubble-assistant">
             <p class="message-label">PoolSense</p>
 
+            <div *ngIf="message.workflowProgress.length > 0" class="workflow-activity-panel" [class.workflow-activity-panel-expanded]="isWorkflowActivityExpanded(message.id)">
+              <button
+                type="button"
+                class="workflow-activity-toggle"
+                (click)="toggleWorkflowActivity(message.id)"
+                [attr.aria-expanded]="isWorkflowActivityExpanded(message.id)"
+                [attr.aria-controls]="'workflow-activity-' + message.id">
+                <span class="workflow-activity-toggle-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 18l6-6-6-6"></path>
+                  </svg>
+                </span>
+                <span class="workflow-activity-toggle-copy">
+                  <strong>Workflow activity</strong>
+                  <small>{{ message.workflowProgress.length }} backend update{{ message.workflowProgress.length === 1 ? '' : 's' }} captured for this answer</small>
+                </span>
+              </button>
+
+              <div *ngIf="isWorkflowActivityExpanded(message.id)" [id]="'workflow-activity-' + message.id" class="workflow-activity-list">
+                <div
+                  *ngFor="let step of message.workflowProgress; trackBy: trackWorkflowProgress"
+                  class="workflow-activity-item"
+                  [class.workflow-activity-item-skipped]="step.state === 'skipped'">
+                  <span class="workflow-activity-dot" aria-hidden="true"></span>
+                  <div>
+                    <p>{{ step.title }}</p>
+                    <small>{{ step.detail }}</small>
+                  </div>
+                  <span class="workflow-activity-state">{{ step.state }}</span>
+                </div>
+              </div>
+            </div>
+
             <div class="thinking-panel" *ngIf="message.result.queryCategory">
               <p class="thinking-line"><strong>Query type:</strong> {{ message.result.queryCategory }}<span *ngIf="message.result.queryCategorizationReasoning"> — {{ message.result.queryCategorizationReasoning }}</span></p>
               <p class="thinking-line">
@@ -528,9 +561,60 @@
           </article>
         </ng-container>
 
-        <article *ngIf="isLoading" class="message-bubble message-bubble-loading">
-          <p class="message-label">PoolSense</p>
-          <p class="message-body">PoolSense is analyzing incidents...</p>
+        <article *ngIf="isLoading" class="message-bubble message-bubble-loading loading-status-card">
+          <div class="loading-status-content">
+            <span class="loading-status-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3 9.5 8.5 4 11l5.5 2.5L12 19l2.5-5.5L20 11l-5.5-2.5Z"></path>
+                <path d="M5 3v4"></path>
+                <path d="M3 5h4"></path>
+              </svg>
+            </span>
+
+            <div class="loading-status-main">
+              <p class="message-label">PoolSense</p>
+              <h3>{{ loadingStatusTitle }}</h3>
+              <p class="loading-status-copy">{{ loadingStatusCopy }}</p>
+
+              <div class="loading-progress-track" aria-label="Analysis progress" [style.--loading-progress-percent]="loadingProgressPercent + '%'">
+                <div class="loading-progress-line" aria-hidden="true"></div>
+                <div
+                  *ngFor="let step of loadingStatusSteps"
+                  class="loading-progress-step"
+                  [class.loading-progress-step-active]="step.state === 'active' || step.state === 'completed'"
+                  [class.loading-progress-step-pulse]="step.state === 'active'"
+                  [class.loading-progress-step-skipped]="step.state === 'skipped'">
+                  <span class="loading-progress-dot" aria-hidden="true"></span>
+                  <strong>{{ step.title }}</strong>
+                  <small>{{ step.detail }}</small>
+                </div>
+              </div>
+
+              <div class="loading-status-note">
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="9"></circle>
+                    <path d="M12 7v5l3 2"></path>
+                  </svg>
+                </span>
+                <p>Live workflow status for {{ loadingScopeLabel }}.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="loading-status-visual" aria-hidden="true">
+            <div class="loading-data-stack">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <div class="loading-search-badge">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="6"></circle>
+                <path d="m16 16 4 4"></path>
+              </svg>
+            </div>
+          </div>
         </article>
       </div>
 

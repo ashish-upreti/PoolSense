@@ -18,6 +18,7 @@ public interface ITicketWorkflowOrchestrator
     Task<TicketWorkflowResult> ProcessAsync(string title, string description, string? ticketId = null, CancellationToken cancellationToken = default);
     Task<TicketWorkflowResult> ProcessAsync(TicketRequest request, CancellationToken cancellationToken = default);
     Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, CancellationToken cancellationToken = default);
+    Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken = default);
 }
 
 public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
@@ -87,20 +88,25 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             TicketId = ticketId ?? string.Empty,
             Title = title,
             Description = description
-        }, persistKnowledge: true, cancellationToken);
+        }, persistKnowledge: true, progressCallback: null, cancellationToken);
     }
 
     public async Task<TicketWorkflowResult> ProcessAsync(TicketRequest request, CancellationToken cancellationToken = default)
     {
-        return await ProcessInternalAsync(request, persistKnowledge: true, cancellationToken);
+        return await ProcessInternalAsync(request, persistKnowledge: true, progressCallback: null, cancellationToken);
     }
 
     public async Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, CancellationToken cancellationToken = default)
     {
-        return await ProcessInternalAsync(request, persistKnowledge: false, cancellationToken);
+        return await ProcessInternalAsync(request, persistKnowledge: false, progressCallback: null, cancellationToken);
     }
 
-    private async Task<TicketWorkflowResult> ProcessInternalAsync(TicketRequest request, bool persistKnowledge, CancellationToken cancellationToken)
+    public async Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken = default)
+    {
+        return await ProcessInternalAsync(request, persistKnowledge: false, progressCallback, cancellationToken);
+    }
+
+    private async Task<TicketWorkflowResult> ProcessInternalAsync(TicketRequest request, bool persistKnowledge, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -116,6 +122,8 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         var title = request.GetWorkflowTitle();
         var description = request.GetWorkflowDescription();
 
+        await ReportProgressAsync(progressCallback, "categorize", "Classifying request", "Determining whether to use pool data, NYRA Wiki, or both.", "active", 1, cancellationToken);
+
         _logger.LogInformation("Categorizing query for ticket {TicketId}.", request.TicketId);
         var categorizationJson = await _queryCategorizationAgent.CategorizeQueryAsync(title, description);
         var categorization = JsonSerializer.Deserialize<QueryCategorizationResult>(AiJsonResponseSanitizer.Normalize(categorizationJson), JsonOptions)
@@ -125,21 +133,25 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             categorization.Category,
             request.TicketId,
             categorization.Reasoning);
+        await ReportProgressAsync(progressCallback, "categorize", "Classifying request", $"Detected {categorization.Category} query.", "completed", 1, cancellationToken);
 
         var isInfoOnlyQuery = !persistKnowledge && categorization.Category.Equals("Info", StringComparison.OrdinalIgnoreCase);
         if (isInfoOnlyQuery)
         {
-            return await ProcessInfoQueryAsync(request, title, description, categorization, processingStopwatch, cancellationToken);
+            return await ProcessInfoQueryAsync(request, title, description, categorization, processingStopwatch, progressCallback, cancellationToken);
         }
 
+        await ReportProgressAsync(progressCallback, "analyze", "Analyzing issue", "Extracting problem details, symptoms, and keywords.", "active", 2, cancellationToken);
         _logger.LogInformation("Analyzing ticket {TicketId}.", request.TicketId);
         var analysisJson = await _ticketAnalyzerAgent.AnalyzeTicketAsync(title, description);
         var analysis = JsonSerializer.Deserialize<TicketAnalysisResult>(AiJsonResponseSanitizer.Normalize(analysisJson), JsonOptions)
             ?? throw new InvalidOperationException("The ticket analyzer returned an empty result.");
+        await ReportProgressAsync(progressCallback, "analyze", "Analyzing issue", "Problem summary extracted for retrieval.", "completed", 2, cancellationToken);
 
         var searchText = string.IsNullOrWhiteSpace(analysis.Problem)
             ? $"Title: {title}{Environment.NewLine}Description: {description}"
             : analysis.Problem;
+        await ReportProgressAsync(progressCallback, "pool-data", "Pulling pool data", "Generating an embedding and searching scoped incident history.", "active", 3, cancellationToken);
         _logger.LogInformation("Generating search embedding for ticket {TicketId}.", request.TicketId);
         var nyraScopeTask = ResolveNyraRetrievalScopeAsync(request, cancellationToken);
         var searchEmbedding = await _embeddingService.GenerateEmbedding(searchText);
@@ -152,11 +164,30 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         var nyraRetrievalTask = RetrieveNyraDocumentsAsync(searchText, nyraScope.KbNames, cancellationToken);
 
         var similarTickets = await similarTicketsTask;
+        await ReportProgressAsync(progressCallback, "pool-data", "Pulling pool data", $"Found {similarTickets.Count} similar incident candidate(s).", "completed", 3, cancellationToken);
+
+        await ReportProgressAsync(
+            progressCallback,
+            "nyra-wiki",
+            "Querying NYRA Wiki",
+            nyraScope.KbNames.Count > 0 ? $"Searching {string.Join(", ", nyraScope.KbNames)}." : "No NYRA Wiki scope matched this request.",
+            nyraScope.KbNames.Count > 0 ? "active" : "skipped",
+            4,
+            cancellationToken);
         var nyraRetrieval = await nyraRetrievalTask;
         var nyraDocuments = nyraRetrieval.Documents;
+        await ReportProgressAsync(
+            progressCallback,
+            "nyra-wiki",
+            "Querying NYRA Wiki",
+            nyraScope.KbNames.Count > 0 ? $"Retrieved {nyraDocuments.Count} NYRA document(s)." : "NYRA Wiki was not used for this request.",
+            nyraScope.KbNames.Count > 0 ? "completed" : "skipped",
+            4,
+            cancellationToken);
         _logger.LogInformation("Found {SimilarTicketCount} similar tickets for ticket {TicketId}.", similarTickets.Count, request.TicketId);
         _logger.LogInformation("Found {NyraDocumentCount} NYRA document(s) for ticket {TicketId}.", nyraDocuments.Count, request.TicketId);
 
+        await ReportProgressAsync(progressCallback, "enrich", "Enriching context", "Applying feedback evidence and human-validated fixes.", "active", 5, cancellationToken);
         var feedbackEvidenceByTicketId = await _feedbackRepository.GetFeedbackEvidence(
             similarTickets.Select(ticket => ticket.TicketId).ToArray(),
             cancellationToken);
@@ -183,7 +214,9 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
                 };
             })
             .ToList();
+        await ReportProgressAsync(progressCallback, "enrich", "Enriching context", "Context package is ready for recommendation.", "completed", 5, cancellationToken);
 
+        await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Generating root cause, recommended fix, and reasoning.", "active", 6, cancellationToken);
         _logger.LogInformation("Generating resolution for ticket {TicketId}.", request.TicketId);
         var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, description, resolutionIncidents.Take(5).ToList(), nyraDocuments.Take(5).ToList());
         var resolution = JsonSerializer.Deserialize<ResolutionResult>(AiJsonResponseSanitizer.Normalize(resolutionJson), JsonOptions)
@@ -255,6 +288,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
 
         var patternFrequency = await _failurePatternRepository.CountPatternOccurrences(
             failurePattern.System, failurePattern.FailureType, cancellationToken);
+        await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Recommendation is ready.", "completed", 6, cancellationToken);
 
         _logger.LogInformation(
             "Completed workflow mode {WorkflowMode} for ticket {TicketId}. Similar incidents: {SimilarTicketCount}.",
@@ -296,17 +330,29 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         string description,
         QueryCategorizationResult categorization,
         Stopwatch processingStopwatch,
+        Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation("Skipping PoolSense database retrieval for ticket {TicketId}; query categorized as Info.", request.TicketId);
 
         var searchText = $"Title: {title}{Environment.NewLine}Description: {description}";
+        await ReportProgressAsync(progressCallback, "pool-data", "Pulling pool data", "Skipped because this was classified as an informational query.", "skipped", 3, cancellationToken);
+        await ReportProgressAsync(progressCallback, "nyra-wiki", "Querying NYRA Wiki", "Resolving configured knowledge bases for this request.", "active", 4, cancellationToken);
         var nyraScope = await ResolveNyraRetrievalScopeAsync(request, cancellationToken);
         LogNyraRetrievalScope(request, nyraScope);
         var nyraRetrieval = await RetrieveNyraDocumentsAsync(searchText, nyraScope.KbNames, cancellationToken);
         var nyraDocuments = nyraRetrieval.Documents;
+        await ReportProgressAsync(
+            progressCallback,
+            "nyra-wiki",
+            "Querying NYRA Wiki",
+            nyraScope.KbNames.Count > 0 ? $"Retrieved {nyraDocuments.Count} NYRA document(s)." : "No NYRA Wiki scope matched this request.",
+            nyraScope.KbNames.Count > 0 ? "completed" : "skipped",
+            4,
+            cancellationToken);
         _logger.LogInformation("Found {NyraDocumentCount} NYRA document(s) for ticket {TicketId}.", nyraDocuments.Count, request.TicketId);
 
+        await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Generating response from available knowledge context.", "active", 6, cancellationToken);
         var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, description, [], nyraDocuments.Take(5).ToList());
         var resolution = JsonSerializer.Deserialize<ResolutionResult>(AiJsonResponseSanitizer.Normalize(resolutionJson), JsonOptions)
             ?? throw new InvalidOperationException("The resolution agent returned an empty result.");
@@ -321,6 +367,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             cancellationToken);
 
         _logger.LogInformation("Completed workflow mode Recommend (Info) for ticket {TicketId}.", request.TicketId);
+    await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Recommendation is ready.", "completed", 6, cancellationToken);
 
         return new TicketWorkflowResult
         {
@@ -341,6 +388,31 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             Reasoning = resolution.Reasoning,
             FailurePatternFrequency = 0
         };
+    }
+
+    private static async Task ReportProgressAsync(
+        Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback,
+        string stage,
+        string title,
+        string detail,
+        string state,
+        int order,
+        CancellationToken cancellationToken)
+    {
+        if (progressCallback is null)
+        {
+            return;
+        }
+
+        await progressCallback(new TicketWorkflowProgress
+        {
+            Stage = stage,
+            Title = title,
+            Detail = detail,
+            State = state,
+            Order = order,
+            TimestampUtc = DateTimeOffset.UtcNow
+        }, cancellationToken);
     }
 
     private async Task<NyraDocumentRetrievalOutcome> RetrieveNyraDocumentsAsync(

@@ -16,6 +16,7 @@ import {
   ProjectConfigInput,
   ProjectGroup,
   SimilarIncident,
+  TicketWorkflowProgress,
   TicketAutomationSettings,
   TicketAutomationSettingsInput,
   TicketWorkflowResult,
@@ -34,6 +35,7 @@ type AssistantMessage = {
   text: string
   query: string
   result: TicketWorkflowResult
+  workflowProgress: TicketWorkflowProgress[]
 }
 
 type ChatMessage = UserMessage | AssistantMessage
@@ -206,6 +208,16 @@ function formatDateInput(date: Date) {
   return date.toISOString().slice(0, 10)
 }
 
+function findLastStepIndex(steps: TicketWorkflowProgress[], predicate: (step: TicketWorkflowProgress) => boolean) {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    if (predicate(steps[index])) {
+      return index
+    }
+  }
+
+  return -1
+}
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -235,7 +247,11 @@ export class AppComponent implements OnInit {
   activeEvidenceTab: 'incidents' | 'nyra' = 'incidents'
   isEvidencePanelCollapsed = false
   isTroubleshootPanelCollapsed = false
+  expandedWorkflowActivityMessageId: number | null = null
   isLoading = false
+  loadingQuery = ''
+  loadingScopeGroupIds: string[] = []
+  loadingProgressEvents: TicketWorkflowProgress[] = []
   error = ''
   input = ''
   groups: ProjectGroup[] = []
@@ -397,6 +413,41 @@ export class AppComponent implements OnInit {
     return this.projects.filter((project) => project.applicationFilter.trim().length > 0)
   }
 
+  get loadingStatusSteps() {
+    return [...this.loadingProgressEvents].sort((first, second) => first.order - second.order)
+  }
+
+  get loadingActiveStep() {
+    return [...this.loadingStatusSteps].reverse().find((step) => step.state === 'active') ?? this.loadingStatusSteps.at(-1) ?? null
+  }
+
+  get loadingStatusTitle() {
+    return this.loadingActiveStep?.title ? `${this.loadingActiveStep.title}...` : 'Preparing request...'
+  }
+
+  get loadingStatusCopy() {
+    return this.loadingActiveStep?.detail || `Submitting query for ${this.loadingScopeLabel}.`
+  }
+
+  get loadingScopeLabel() {
+    if (this.loadingScopeGroupIds.length === 0) {
+      return 'all applications'
+    }
+
+    return this.loadingScopeGroupIds.map((groupId) => this.getGroupDisplayName(groupId)).join(', ')
+  }
+
+  get loadingProgressPercent() {
+    const steps = this.loadingStatusSteps
+    if (steps.length <= 1) {
+      return 0
+    }
+
+    const activeIndex = Math.max(0, findLastStepIndex(steps, (step) => step.state === 'active'))
+    const completedIndex = Math.max(0, findLastStepIndex(steps, (step) => step.state === 'completed' || step.state === 'skipped'))
+    return Math.round((Math.max(activeIndex, completedIndex) / (steps.length - 1)) * 100)
+  }
+
   get isPoolReportWorkspace() {
     return this.poolReportSourceEventId.trim().length > 0 || this.poolReport !== null || this.isPoolReportLoading
   }
@@ -409,18 +460,34 @@ export class AppComponent implements OnInit {
     }
 
     const userMessage: UserMessage = { id: Date.now(), role: 'user', text: message }
+    const requestGroupIds = [...this.selectedGroupIds]
     this.messages = [...this.messages, userMessage]
     this.error = ''
     this.isLoading = true
+    this.loadingQuery = message
+    this.loadingScopeGroupIds = requestGroupIds
+    this.loadingProgressEvents = [
+      {
+        stage: 'request',
+        title: 'Submitting request',
+        detail: `Sending query for ${this.loadingScopeLabel}.`,
+        state: 'completed',
+        order: 0,
+        timestampUtc: new Date().toISOString(),
+      },
+    ]
 
     try {
-      const result = await this.api.askPoolSense(message, this.selectedGroupIds)
+      const result = await this.api.askPoolSenseWithProgress(message, requestGroupIds, (progress) => {
+        this.upsertLoadingProgress(progress)
+      })
       const assistantMessage: AssistantMessage = {
         id: userMessage.id + 1,
         role: 'assistant',
         text: result.suggestedResolution,
         query: message,
         result,
+        workflowProgress: this.getSortedLoadingProgressEvents(),
       }
 
       this.feedbackStateByMessageId[assistantMessage.id] = createFeedbackState(
@@ -434,7 +501,19 @@ export class AppComponent implements OnInit {
       this.error = requestError instanceof Error ? requestError.message : 'Unable to reach PoolSense.'
     } finally {
       this.isLoading = false
+      this.loadingProgressEvents = []
+      this.loadingQuery = ''
+      this.loadingScopeGroupIds = []
     }
+  }
+
+  private upsertLoadingProgress(progress: TicketWorkflowProgress) {
+    const nextEvents = this.loadingProgressEvents.filter((event) => event.stage !== progress.stage)
+    this.loadingProgressEvents = [...nextEvents, progress]
+  }
+
+  private getSortedLoadingProgressEvents() {
+    return [...this.loadingProgressEvents].sort((first, second) => first.order - second.order)
   }
 
   async handleLoginSubmit() {
@@ -932,6 +1011,18 @@ export class AppComponent implements OnInit {
     return message.id
   }
 
+  trackWorkflowProgress(_index: number, progress: TicketWorkflowProgress) {
+    return progress.stage
+  }
+
+  isWorkflowActivityExpanded(messageId: number) {
+    return this.expandedWorkflowActivityMessageId === messageId
+  }
+
+  toggleWorkflowActivity(messageId: number) {
+    this.expandedWorkflowActivityMessageId = this.isWorkflowActivityExpanded(messageId) ? null : messageId
+  }
+
   trackIncident(_index: number, incident: SimilarIncident) {
     return incident.ticketId
   }
@@ -1190,6 +1281,7 @@ export class AppComponent implements OnInit {
       text: result.suggestedResolution,
       query: userMessage.text,
       result,
+      workflowProgress: [],
     }
 
     this.feedbackStateByMessageId[assistantMessage.id] = createFeedbackState(

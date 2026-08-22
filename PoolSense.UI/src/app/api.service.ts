@@ -38,6 +38,20 @@ export interface TicketWorkflowResult {
   failurePatternFrequency: number
 }
 
+export interface TicketWorkflowProgress {
+  stage: string
+  title: string
+  detail: string
+  state: 'active' | 'completed' | 'skipped'
+  order: number
+  timestampUtc: string
+}
+
+type TicketWorkflowStreamEvent =
+  | { type: 'progress'; progress: TicketWorkflowProgress }
+  | { type: 'result'; result: TicketWorkflowResult }
+  | { type: 'error'; error: { message?: string } }
+
 export interface NyraDocumentResult {
   documentId: string
   kbName: string
@@ -434,6 +448,84 @@ export class ApiService {
     }
 
     return (await response.json()) as TicketWorkflowResult
+  }
+
+  async askPoolSenseWithProgress(
+    message: string,
+    selectedGroupIds: string[] | undefined,
+    onProgress: (progress: TicketWorkflowProgress) => void,
+  ): Promise<TicketWorkflowResult> {
+    const response = await fetch(this.apiUrl('/ticket/process-progress'), {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: message,
+        description: message,
+        selectedGroupIds: selectedGroupIds ?? null,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(errorText || 'PoolSense request failed.')
+    }
+
+    if (!response.body) {
+      return await this.askPoolSense(message, selectedGroupIds)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let pending = ''
+    let result: TicketWorkflowResult | null = null
+
+    while (true) {
+      const { value, done } = await reader.read()
+      pending += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+
+      const lines = pending.split('\n')
+      pending = lines.pop() ?? ''
+
+      for (const line of lines) {
+        const trimmedLine = line.trim()
+        if (!trimmedLine) {
+          continue
+        }
+
+        const streamEvent = JSON.parse(trimmedLine) as TicketWorkflowStreamEvent
+        if (streamEvent.type === 'progress') {
+          onProgress(streamEvent.progress)
+        } else if (streamEvent.type === 'result') {
+          result = streamEvent.result
+        } else if (streamEvent.type === 'error') {
+          throw new Error(streamEvent.error.message || 'PoolSense request failed.')
+        }
+      }
+
+      if (done) {
+        break
+      }
+    }
+
+    if (pending.trim()) {
+      const streamEvent = JSON.parse(pending.trim()) as TicketWorkflowStreamEvent
+      if (streamEvent.type === 'result') {
+        result = streamEvent.result
+      } else if (streamEvent.type === 'error') {
+        throw new Error(streamEvent.error.message || 'PoolSense request failed.')
+      } else if (streamEvent.type === 'progress') {
+        onProgress(streamEvent.progress)
+      }
+    }
+
+    if (!result) {
+      throw new Error('PoolSense request completed without a result.')
+    }
+
+    return result
   }
 
   async getPoolReport(poolId: string): Promise<PoolReport> {
