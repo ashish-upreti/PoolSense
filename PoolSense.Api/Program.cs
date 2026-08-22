@@ -87,6 +87,7 @@ builder.Services.AddScoped<IQueryCategorizationAgent, QueryCategorizationAgent>(
 
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 builder.Services.AddScoped<ILLMService, LLMService>();
+builder.Services.AddScoped<IPoolTroubleshootEvidenceService, PoolTroubleshootEvidenceService>();
 builder.Services.AddScoped<IKnowledgeEnrichmentService, KnowledgeEnrichmentService>();
 builder.Services.AddScoped<IFailurePatternService, FailurePatternService>();
 builder.Services.AddScoped<ITicketIngestionService, TicketIngestionService>();

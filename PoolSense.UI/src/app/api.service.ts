@@ -103,6 +103,11 @@ export interface PoolTroubleshootResponse {
   question: string
   answer: string
   generatedAt: string
+  retrievedSimilarIncidentCount?: number
+  retrievedNyraDocumentCount?: number
+  nyraKnowledgeBaseUsed?: boolean
+  nyraKnowledgeBaseNames?: string[]
+  nyraDocuments?: NyraDocumentResult[]
 }
 
 export interface ProjectGroup {

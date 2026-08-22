@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common'
-import { Component, OnInit, inject } from '@angular/core'
+import { Component, HostListener, OnInit, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import {
   ApplicationFeedbackRequest,
@@ -7,6 +7,7 @@ import {
   ApiService,
   DeploymentInfo,
   IngestionStatus,
+  NyraDocumentResult,
   PoolReport,
   PoolRecommendationReportListItem,
   PoolRecommendationReportListResponse,
@@ -231,12 +232,15 @@ export class AppComponent implements OnInit {
   loginError = ''
   messages: ChatMessage[] = []
   insights: TicketWorkflowResult | null = null
+  activeEvidenceTab: 'incidents' | 'nyra' = 'incidents'
+  isEvidencePanelCollapsed = false
+  isTroubleshootPanelCollapsed = false
   isLoading = false
   error = ''
   input = ''
   groups: ProjectGroup[] = []
   selectedGroupIds: string[] = []
-  selectedGroupScopeValues: string[] = [this.allGroupValue]
+  scopeAddSelectValue = ''
   activeSection: AppSection = 'main'
   isSidebarCollapsed = true
   isDark = localStorage.getItem('theme') === 'dark'
@@ -275,6 +279,7 @@ export class AppComponent implements OnInit {
   isPoolRecommendationLoading = false
   poolRecommendationError = ''
   feedbackStateByMessageId: Record<number, FeedbackState> = {}
+  openFeedbackTargetMessageId: number | null = null
 
   ngOnInit() {
     this.applyTheme()
@@ -287,6 +292,20 @@ export class AppComponent implements OnInit {
 
   get isAllGroupsSelected() {
     return this.selectedGroupIds.length === 0
+  }
+
+  get scopeModeSelectValue() {
+    if (this.isAllGroupsSelected) {
+      return this.allGroupValue
+    }
+
+    // Only an exact single selection maps to a real <option>; otherwise fall back to a value
+    // that matches no option so the native select doesn't default to highlighting "All Applications".
+    return this.selectedGroupIds.length === 1 ? this.selectedGroupIds[0] : ''
+  }
+
+  get unselectedGroups() {
+    return this.groups.filter((group) => !this.selectedGroupIds.includes(group.groupId))
   }
 
   get generatedProjectId() {
@@ -513,10 +532,6 @@ export class AppComponent implements OnInit {
     this.isSidebarCollapsed = !this.isSidebarCollapsed
   }
 
-  handleAllGroupChange(checked: boolean) {
-    this.setSelectedGroupIds(checked ? [] : this.groups.map((group) => group.groupId))
-  }
-
   handleGroupChange(groupId: string, checked: boolean) {
     const next = checked
       ? [...this.selectedGroupIds, groupId]
@@ -525,28 +540,38 @@ export class AppComponent implements OnInit {
     this.setSelectedGroupIds(next.length === 0 ? [] : next)
   }
 
-  isGroupChecked(groupId: string) {
-    return !this.isAllGroupsSelected && this.selectedGroupIds.includes(groupId)
-  }
-
-  handleGroupMultiSelectChange(selectedValues: string[] | string) {
-    const values = Array.isArray(selectedValues) ? selectedValues : [selectedValues]
-    const normalizedValues = values
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0)
-
-    if (normalizedValues.length === 0 || normalizedValues.includes(this.allGroupValue)) {
+  handleScopeSelectChange(value: string) {
+    if (!value || value === this.allGroupValue) {
       this.setSelectedGroupIds([])
       return
     }
 
-    const validGroupIds = new Set(this.groups.map((group) => group.groupId))
-    this.setSelectedGroupIds(Array.from(new Set(normalizedValues.filter((value) => validGroupIds.has(value)))))
+    this.setSelectedGroupIds([value])
+  }
+
+  handleAddGroupSelect(groupId: string) {
+    if (!groupId) {
+      return
+    }
+
+    this.handleGroupChange(groupId, true)
+  }
+
+  getGroupDisplayName(groupId: string) {
+    return this.groups.find((group) => group.groupId === groupId)?.displayName ?? groupId
   }
 
   private setSelectedGroupIds(groupIds: string[]) {
     this.selectedGroupIds = groupIds
-    this.selectedGroupScopeValues = groupIds.length === 0 ? [this.allGroupValue] : [...groupIds]
+    this.scopeAddSelectValue = ''
+  }
+
+  trackGroupId(_index: number, groupId: string) {
+    return groupId
+  }
+
+  trackGroupById(_index: number, group: { groupId: string }) {
+    return group.groupId
   }
 
   private clearPoolReportWorkspace() {
@@ -726,6 +751,34 @@ export class AppComponent implements OnInit {
     return resolution.length > 60 ? `${resolution.slice(0, 60).trimEnd()}...` : resolution
   }
 
+  truncateNyraContent(content: string) {
+    if (!content) return ''
+    return content.length > 200 ? `${content.slice(0, 200).trimEnd()}...` : content
+  }
+
+  getTroubleshootingSteps(resolution: string): string[] {
+    const text = (resolution || '').trim()
+    if (!text) {
+      return []
+    }
+
+    const numberedSteps = text
+      .split(/\s*\d+[.)]\s+/)
+      .map((step) => step.trim())
+      .filter((step) => step.length > 0)
+
+    if (numberedSteps.length > 1) {
+      return numberedSteps.slice(0, 8)
+    }
+
+    const sentenceSteps = text
+      .split(/(?<=[.!?])\s+(?=[A-Z])/)
+      .map((step) => step.trim())
+      .filter((step) => step.length > 0)
+
+    return sentenceSteps.length > 1 ? sentenceSteps.slice(0, 6) : []
+  }
+
   getRetrievedTicketIds(message: AssistantMessage) {
     return message.result.similarIncidents.map((incident) => incident.ticketId).filter((ticketId) => ticketId.trim().length > 0)
   }
@@ -734,6 +787,59 @@ export class AppComponent implements OnInit {
     this.feedbackStateByMessageId[messageId] ??= createFeedbackState()
 
     return this.feedbackStateByMessageId[messageId]
+  }
+
+  getFeedbackTargetOptionLabel(incident: SimilarIncident) {
+    const ticketId = incident.ticketId.trim()
+    if (!ticketId) {
+      return 'Historical incident'
+    }
+
+    const matchLabel = incident.similarity > 0 ? `${Math.round(incident.similarity * 100)}% match` : 'Historical incident'
+    return `${ticketId} - ${matchLabel}`
+  }
+
+  getFeedbackTargetSelectedLabel(message: AssistantMessage) {
+    const state = this.getFeedbackState(message.id)
+    const selected = message.result.similarIncidents.find((incident) => incident.ticketId === state.selectedTicketId)
+    if (selected) {
+      return this.getFeedbackTargetOptionLabel(selected)
+    }
+
+    if (state.selectedTicketId.trim()) {
+      return `${state.selectedTicketId} - Historical incident`
+    }
+
+    return 'Select an incident'
+  }
+
+  isFeedbackTargetSelected(messageId: number, ticketId: string) {
+    return this.getFeedbackState(messageId).selectedTicketId === ticketId
+  }
+
+  isFeedbackTargetOpen(messageId: number) {
+    return this.openFeedbackTargetMessageId === messageId
+  }
+
+  toggleFeedbackTargetMenu(messageId: number) {
+    this.openFeedbackTargetMessageId = this.openFeedbackTargetMessageId === messageId ? null : messageId
+  }
+
+  selectFeedbackTarget(messageId: number, ticketId: string) {
+    this.getFeedbackState(messageId).selectedTicketId = ticketId
+    this.openFeedbackTargetMessageId = null
+  }
+
+  @HostListener('document:click', ['$event'])
+  handleDocumentClick(event: MouseEvent) {
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return
+    }
+
+    if (!target.closest('.feedback-target-control')) {
+      this.openFeedbackTargetMessageId = null
+    }
   }
 
   isFeedbackDisabled(message: AssistantMessage) {
@@ -781,6 +887,7 @@ export class AppComponent implements OnInit {
     }
 
     const state = this.getFeedbackState(message.id)
+    this.openFeedbackTargetMessageId = null
     const note = state.currentPoolResolutionNote.trim()
 
     if (feedbackType === -1 && !note) {
@@ -833,6 +940,18 @@ export class AppComponent implements OnInit {
     return document.documentId || document.sourceUrl || document.citation
   }
 
+  setEvidenceTab(tab: 'incidents' | 'nyra') {
+    this.activeEvidenceTab = tab
+  }
+
+  toggleEvidencePanel() {
+    this.isEvidencePanelCollapsed = !this.isEvidencePanelCollapsed
+  }
+
+  toggleTroubleshootPanel() {
+    this.isTroubleshootPanelCollapsed = !this.isTroubleshootPanelCollapsed
+  }
+
   trackPoolRecommendation(_index: number, report: PoolRecommendationReportListItem) {
     return report.sourceEventId
   }
@@ -874,12 +993,43 @@ export class AppComponent implements OnInit {
     try {
       const response = await this.api.troubleshootPool(poolId, question)
       this.poolTroubleshootEntries = [{ ...response, id: Date.now() }, ...this.poolTroubleshootEntries]
+      this.mergeTroubleshootNyraEvidence(response)
       this.poolTroubleshootQuestion = ''
     } catch (requestError) {
       this.poolTroubleshootError = requestError instanceof Error ? requestError.message : 'Unable to troubleshoot this pool.'
     } finally {
       this.isPoolTroubleshootLoading = false
     }
+  }
+
+  private mergeTroubleshootNyraEvidence(response: PoolTroubleshootResponse) {
+    if (!this.insights) {
+      return
+    }
+
+    const newDocuments = response.nyraDocuments ?? []
+    if (newDocuments.length === 0) {
+      return
+    }
+
+    const documentKey = (document: NyraDocumentResult) => document.documentId || document.sourceUrl || document.citation
+    const existingDocuments = this.insights.nyraDocuments ?? []
+    const existingKeys = new Set(existingDocuments.map(documentKey))
+    const mergedDocuments = [
+      ...existingDocuments,
+      ...newDocuments.filter((document) => !existingKeys.has(documentKey(document))),
+    ]
+
+    this.insights = {
+      ...this.insights,
+      nyraDocuments: mergedDocuments,
+      nyraKnowledgeBaseUsed: this.insights.nyraKnowledgeBaseUsed || !!response.nyraKnowledgeBaseUsed,
+      nyraKnowledgeBaseNames: Array.from(
+        new Set([...(this.insights.nyraKnowledgeBaseNames ?? []), ...(response.nyraKnowledgeBaseNames ?? [])]),
+      ),
+    }
+
+    this.activeEvidenceTab = 'nyra'
   }
 
   retryPoolReportLoad() {

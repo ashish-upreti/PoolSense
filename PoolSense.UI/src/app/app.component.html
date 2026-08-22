@@ -232,26 +232,41 @@
         </div>
       </section>
 
-      <section *ngIf="poolReport && poolReport.isReady" class="pool-troubleshoot-panel">
-        <div class="card-heading-row project-toolbar">
-          <div>
-            <p class="panel-kicker">Troubleshoot</p>
-            <h3>Pool {{ poolReport.sourceEventId }}</h3>
-          </div>
+      <section *ngIf="poolReport && poolReport.isReady" class="pool-troubleshoot-panel troubleshoot-compact">
+        <div class="troubleshoot-header">
+          <span class="troubleshoot-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+          </span>
+          <h3>Troubleshooting Assistant <span class="troubleshoot-pool-tag">Pool {{ poolReport.sourceEventId }}</span></h3>
           <span class="section-count data-mono">{{ poolTroubleshootEntries.length }}</span>
+          <button type="button" class="evidence-collapse-toggle" (click)="toggleTroubleshootPanel()" [attr.aria-expanded]="!isTroubleshootPanelCollapsed" aria-label="Toggle troubleshooting assistant">
+            <span class="evidence-collapse-icon" [class.evidence-collapse-icon-collapsed]="isTroubleshootPanelCollapsed">&#9650;</span>
+          </button>
         </div>
 
-        <div class="prompt-strip" aria-label="Troubleshooting prompts">
-          <button *ngFor="let prompt of poolTroubleshootPrompts" type="button" class="prompt-chip" (click)="handlePoolTroubleshootSubmit(prompt)" [disabled]="isPoolTroubleshootLoading">{{ prompt }}</button>
-        </div>
+        <ng-container *ngIf="!isTroubleshootPanelCollapsed">
+          <div class="troubleshoot-prompt-row" aria-label="Troubleshooting prompts">
+            <button *ngFor="let prompt of poolTroubleshootPrompts; let i = index" type="button" class="troubleshoot-prompt-chip" (click)="handlePoolTroubleshootSubmit(prompt)" [disabled]="isPoolTroubleshootLoading">
+              <span class="troubleshoot-prompt-icon" aria-hidden="true">
+                <svg *ngIf="i === 0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg>
+                <svg *ngIf="i === 1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"></path><path d="m9 12 2 2 4-4"></path></svg>
+                <svg *ngIf="i === 2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"></path><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"></path><path d="M9 13h6"></path><path d="M9 17h6"></path></svg>
+                <svg *ngIf="i === 3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 7 9 6 9-6"></path></svg>
+                <svg *ngIf="i === 4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
+              </span>
+              {{ prompt }}
+            </button>
+          </div>
 
-        <label class="sr-only" for="pool-troubleshoot-input">Ask a follow-up about this pool</label>
-        <textarea id="pool-troubleshoot-input" class="composer-input pool-troubleshoot-input" name="pool-troubleshoot-input" [(ngModel)]="poolTroubleshootQuestion" (keydown)="handlePoolTroubleshootKeydown($event)" placeholder="Ask a follow-up about this pool..." rows="2" [disabled]="isPoolTroubleshootLoading"></textarea>
-
-        <div class="composer-footer">
-          <p class="helper-text">Answers use the saved recommendation, reasoning, failure pattern, and similar incidents.</p>
-          <button type="button" class="send-button" (click)="handlePoolTroubleshootSubmit()" [disabled]="isPoolTroubleshootLoading || !poolTroubleshootQuestion.trim()">{{ isPoolTroubleshootLoading ? 'Thinking...' : 'Troubleshoot' }}</button>
-        </div>
+          <label class="sr-only" for="pool-troubleshoot-input">Ask a follow-up about this pool</label>
+          <div class="troubleshoot-input-row">
+            <span class="troubleshoot-input-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.4L18 9l-4.1 1.6L12 15l-1.9-4.4L6 9l4.1-1.6L12 3Z"></path><path d="M5 17.5 5.7 19l1.5.7-1.5.7L5 22l-.7-1.6L2.8 19.7l1.5-.7Z"></path></svg>
+            </span>
+            <textarea id="pool-troubleshoot-input" class="troubleshoot-input" name="pool-troubleshoot-input" [(ngModel)]="poolTroubleshootQuestion" (keydown)="handlePoolTroubleshootKeydown($event)" placeholder="Ask about validation, evidence, resolution or escalation..." rows="1" [disabled]="isPoolTroubleshootLoading"></textarea>
+            <button type="button" class="send-button troubleshoot-send-button" (click)="handlePoolTroubleshootSubmit()" [disabled]="isPoolTroubleshootLoading || !poolTroubleshootQuestion.trim()">{{ isPoolTroubleshootLoading ? 'Thinking...' : 'Ask PoolSense' }}</button>
+          </div>          
+        </ng-container>
 
         <p *ngIf="poolTroubleshootError" class="error-banner">{{ poolTroubleshootError }}</p>
         <article *ngIf="isPoolTroubleshootLoading" class="pool-troubleshoot-answer">
@@ -262,33 +277,125 @@
           <article *ngFor="let entry of poolTroubleshootEntries" class="pool-troubleshoot-answer">
             <p class="message-label">{{ entry.question }}</p>
             <p class="message-body">{{ entry.answer }}</p>
-            <p class="helper-text">{{ entry.generatedAt | date: 'medium' }}</p>
+            <p class="helper-text">{{ entry.generatedAt | date: 'medium' }} · Checked {{ entry.retrievedSimilarIncidentCount ?? 0 }} fresh incident{{ (entry.retrievedSimilarIncidentCount ?? 0) === 1 ? '' : 's' }}<span *ngIf="entry.nyraKnowledgeBaseUsed"> + NYRA KB ({{ (entry.nyraKnowledgeBaseNames ?? []).join(', ') }}, {{ entry.retrievedNyraDocumentCount ?? 0 }} doc{{ (entry.retrievedNyraDocumentCount ?? 0) === 1 ? '' : 's' }})</span></p>
+            <ul *ngIf="(entry.nyraDocuments ?? []).length > 0" class="troubleshoot-doc-list">
+              <li *ngFor="let document of entry.nyraDocuments ?? []; trackBy: trackNyraDocument">
+                <a *ngIf="document.sourceUrl; else plainTroubleshootCitation" [href]="document.sourceUrl" target="_blank" rel="noopener noreferrer">{{ document.title || document.citation }}</a>
+                <ng-template #plainTroubleshootCitation>{{ document.title || document.citation }}</ng-template>
+                <span> · {{ document.kbName || 'NYRA KB' }}</span>
+              </li>
+            </ul>
           </article>
         </div>
       </section>
 
       <div *ngIf="groups.length > 0 && !isPoolReportWorkspace" class="group-selector" role="group" aria-label="Application group filter">
         <p class="group-selector-label">Search scope</p>
-        <div class="field-group field-group-full">
-          <select
-            class="field-input"
-            name="searchScopeMultiSelect"
-            [ngModel]="selectedGroupScopeValues"
-            (ngModelChange)="handleGroupMultiSelectChange($event)"
-            [disabled]="isLoading"
-            multiple>
-            <option [value]="allGroupValue">All applications</option>
-            <option *ngFor="let group of groups" [value]="group.groupId">{{ group.displayName }}</option>
-          </select>
-          <span class="field-note">Use Ctrl/Cmd + click to select multiple applications.</span>
+        <div class="scope-row">
+          <div class="scope-control-row">
+            <div class="scope-mode-control">
+              <span class="scope-mode-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+              </span>
+              <select
+                class="scope-mode-select"
+                name="searchScopeMode"
+                [ngModel]="scopeModeSelectValue"
+                (ngModelChange)="handleScopeSelectChange($event)"
+                [disabled]="isLoading">
+                <option [value]="allGroupValue">All Applications</option>
+                <option *ngFor="let group of groups; trackBy: trackGroupById" [value]="group.groupId">{{ group.displayName }}</option>
+              </select>
+            </div>
+
+            <span *ngFor="let groupId of selectedGroupIds; trackBy: trackGroupId" class="scope-chip">
+              {{ getGroupDisplayName(groupId) }}
+              <button type="button" class="scope-chip-remove" (click)="handleGroupChange(groupId, false)" [disabled]="isLoading" aria-label="Remove application from search scope">&times;</button>
+            </span>
+
+            <select
+              *ngIf="unselectedGroups.length > 0"
+              class="scope-add-select"
+              name="searchScopeAdd"
+              [(ngModel)]="scopeAddSelectValue"
+              (ngModelChange)="handleAddGroupSelect($event)"
+              [disabled]="isLoading">
+              <option value="">+ Add</option>
+              <option *ngFor="let group of unselectedGroups; trackBy: trackGroupById" [value]="group.groupId">{{ group.displayName }}</option>
+            </select>
+          </div>
         </div>
+        <span class="field-note">Search scope defaults to all applications. Pick one from the dropdown or use + Add to include more.</span>
       </div>
 
       <div class="conversation-panel" role="log" aria-live="polite">
-        <div *ngIf="messages.length === 0" class="empty-state">
-          <p class="panel-kicker">Conversation</p>
-          <h3>Describe an issue to start the investigation</h3>
-          <p>Users should be able to see the conversation, suggested fix, similar incidents, and system insights together on one screen.</p>
+        <div *ngIf="messages.length === 0" class="empty-state conversation-empty-state">
+          <div class="conversation-empty-rail" aria-hidden="true">
+            <span class="conversation-empty-icon conversation-empty-primary-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path>
+                <path d="M8 9h6"></path>
+                <path d="M8 13h4"></path>
+              </svg>
+            </span>
+            <span class="conversation-empty-icon conversation-empty-secondary-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 8h10"></path>
+                <path d="M7 12h6"></path>
+                <path d="M12 20H5a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v5"></path>
+                <path d="m16 19 2 2 4-5"></path>
+              </svg>
+            </span>
+          </div>
+          <div class="conversation-empty-content">
+            <p class="panel-kicker">Conversation</p>
+            <h3>Describe an issue to start the investigation</h3>
+            <p class="conversation-empty-copy">Users should be able to see the conversation, suggested fix, similar incidents, and system insights together on one screen.</p>
+
+            <div class="conversation-feature-grid" aria-label="Conversation capabilities">
+              <div class="conversation-feature-item">
+                <span class="conversation-feature-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3v18"></path>
+                    <path d="M4 9h16"></path>
+                    <path d="M4 15h16"></path>
+                  </svg>
+                </span>
+                <div>
+                  <h4>One place, full context</h4>
+                  <p>Keep the entire investigation-conversation, suggestions, incidents, and insights-in one view.</p>
+                </div>
+              </div>
+              <div class="conversation-feature-item">
+                <span class="conversation-feature-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3 9.5 8.5 4 11l5.5 2.5L12 19l2.5-5.5L20 11l-5.5-2.5Z"></path>
+                    <path d="M5 3v4"></path>
+                    <path d="M3 5h4"></path>
+                    <path d="M19 17v4"></path>
+                    <path d="M17 19h4"></path>
+                  </svg>
+                </span>
+                <div>
+                  <h4>Smarter suggestions</h4>
+                  <p>Get recommended fixes and similar incidents as you describe the issue.</p>
+                </div>
+              </div>
+              <div class="conversation-feature-item">
+                <span class="conversation-feature-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 20V10"></path>
+                    <path d="M12 20V4"></path>
+                    <path d="M19 20v-7"></path>
+                  </svg>
+                </span>
+                <div>
+                  <h4>Actionable insights</h4>
+                  <p>Surface system insights and recent changes to speed up resolution.</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <ng-container *ngFor="let message of messages; trackBy: trackMessage">
@@ -312,13 +419,18 @@
             </div>
 
             <div class="assistant-summary">
-              <section>
-                <h3>Root Cause</h3>
+              <section class="assistant-card assistant-card-rootcause">
+                <h3><span class="assistant-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path></svg></span>Root Cause</h3>
                 <p>{{ message.result.suggestedRootCause || 'Not provided' }}</p>
               </section>
-              <section>
-                <h3>Resolution</h3>
-                <p>{{ message.result.suggestedResolution || 'Not provided' }}</p>
+              <section class="assistant-card assistant-card-resolution">
+                <h3><span class="assistant-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>Recommended Resolution</h3>
+                <ng-container *ngIf="getTroubleshootingSteps(message.result.suggestedResolution) as resolutionSteps">
+                  <ol *ngIf="resolutionSteps.length > 0; else plainResolution" class="assistant-steps-list">
+                    <li *ngFor="let step of resolutionSteps; let i = index"><span class="assistant-step-index">{{ i + 1 }}</span><span>{{ step }}</span></li>
+                  </ol>
+                </ng-container>
+                <ng-template #plainResolution><p>{{ message.result.suggestedResolution || 'Not provided' }}</p></ng-template>
               </section>
             </div>
 
@@ -330,27 +442,80 @@
             <p *ngIf="message.result.nyraKnowledgeBaseMessage" class="project-card-meta">{{ message.result.nyraKnowledgeBaseMessage }}</p>
 
             <div class="feedback-panel">
-              <div *ngIf="message.result.similarIncidents.length > 0" class="feedback-ticket-selector">
-                <p class="feedback-label">Which similar incident should receive this Helpful or Not Helpful impact?</p>
-                <p class="helper-text">Select the historical incident that influenced this answer. Helpful boosts it for similar pools; Not Helpful lowers it.</p>
-                <div class="feedback-ticket-options">
-                  <label *ngFor="let incident of message.result.similarIncidents" class="feedback-ticket-option" [class.feedback-ticket-option-active]="getFeedbackState(message.id).selectedTicketId === incident.ticketId">
-                    <input type="radio" [name]="'feedback-target-' + message.id" [value]="incident.ticketId" [(ngModel)]="getFeedbackState(message.id).selectedTicketId" [disabled]="isFeedbackDisabled(message)" />
-                    <span class="feedback-ticket-copy">
-                      <strong>{{ incident.ticketId }}</strong>
-                      <small>{{ incident.similarity > 0 ? (incident.similarity * 100 | number: '1.0-0') + '% match' : 'Historical incident' }}</small>
+              <div *ngIf="message.result.similarIncidents.length > 0" class="feedback-target-row">
+                <div class="feedback-target-label-row">
+                  <label class="feedback-label" [for]="'feedback-target-' + message.id">Feedback target</label>
+                  <span class="feedback-target-label-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="9"></circle>
+                      <path d="M12 8v4"></path>
+                      <circle cx="12" cy="16" r="0.85" fill="currentColor" stroke="none"></circle>
+                    </svg>
+                  </span>
+                </div>
+                <div class="feedback-target-control" [class.feedback-target-control-open]="isFeedbackTargetOpen(message.id)">
+                  <button
+                    [id]="'feedback-target-' + message.id"
+                    type="button"
+                    class="feedback-target-trigger"
+                    [name]="'feedback-target-' + message.id"
+                    [disabled]="isFeedbackDisabled(message)"
+                    [attr.aria-expanded]="isFeedbackTargetOpen(message.id)"
+                    [attr.aria-controls]="'feedback-target-menu-' + message.id"
+                    aria-haspopup="listbox"
+                    (click)="toggleFeedbackTargetMenu(message.id)">
+                    <span class="feedback-target-trigger-leading" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="7.5"></circle>
+                        <circle cx="12" cy="12" r="2.2"></circle>
+                        <path d="M12 2v2.8M12 19.2V22M2 12h2.8M19.2 12H22"></path>
+                      </svg>
                     </span>
-                  </label>
+                    <span class="feedback-target-trigger-text">{{ getFeedbackTargetSelectedLabel(message) }}</span>
+                    <span class="feedback-target-trigger-caret" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m6 9 6 6 6-6"></path>
+                      </svg>
+                    </span>
+                  </button>
+
+                  <ul
+                    *ngIf="isFeedbackTargetOpen(message.id)"
+                    [id]="'feedback-target-menu-' + message.id"
+                    class="feedback-target-menu"
+                    role="listbox"
+                    [attr.aria-label]="'Feedback targets for message ' + message.id">
+                    <li *ngFor="let incident of message.result.similarIncidents; trackBy: trackIncident" class="feedback-target-option-wrap">
+                      <button
+                        type="button"
+                        class="feedback-target-option"
+                        [class.feedback-target-option-selected]="isFeedbackTargetSelected(message.id, incident.ticketId)"
+                        [attr.aria-selected]="isFeedbackTargetSelected(message.id, incident.ticketId)"
+                        role="option"
+                        (click)="selectFeedbackTarget(message.id, incident.ticketId)">
+                        <span class="feedback-target-option-check" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="m5 13 4 4L19 7"></path>
+                          </svg>
+                        </span>
+                        <span class="feedback-target-option-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="7.5"></circle>
+                            <circle cx="12" cy="12" r="2.2"></circle>
+                            <path d="M12 2v2.8M12 19.2V22M2 12h2.8M19.2 12H22"></path>
+                          </svg>
+                        </span>
+                        <span class="feedback-target-option-text">{{ getFeedbackTargetOptionLabel(incident) }}</span>
+                      </button>
+                    </li>
+                  </ul>
                 </div>
               </div>
               <label class="feedback-label" [for]="'feedback-comment-' + message.id">Current pool cause or exact fix</label>
               <textarea [id]="'feedback-comment-' + message.id" class="feedback-comment-input" [(ngModel)]="getFeedbackState(message.id).currentPoolResolutionNote" [name]="'feedback-comment-' + message.id" placeholder="Example: root cause was a stuck validation job; reran DataLoad and refreshed the VG mapping." rows="2" [disabled]="isFeedbackDisabled(message)"></textarea>
-              <label class="feedback-usage-option" [for]="'feedback-used-' + message.id">
+              <label class="feedback-usage-inline" [for]="'feedback-used-' + message.id">
                 <input [id]="'feedback-used-' + message.id" type="checkbox" [(ngModel)]="getFeedbackState(message.id).wasUsed" [name]="'feedback-used-' + message.id" [disabled]="isFeedbackDisabled(message)" />
-                <span class="feedback-usage-copy">
-                  <strong>I used this resolution</strong>
-                  <small>Requires the note above. Stores it as the strongest positive evidence for future similar issues.</small>
-                </span>
+                <span>I used this resolution <small>(requires the note above)</small></span>
               </label>
               <div class="feedback-actions">
                 <button type="button" class="feedback-button" (click)="submitMessageFeedback(message, 1)" [disabled]="isFeedbackSubmitDisabled(message)">Helpful</button>
@@ -370,14 +535,26 @@
       </div>
 
       <form *ngIf="!poolReportSourceEventId" class="composer" (ngSubmit)="handleSend()">
+        <p class="panel-kicker composer-heading">Start the conversation</p>
         <div class="prompt-strip" aria-label="Suggested prompts">
-          <button *ngFor="let prompt of quickPrompts" type="button" class="prompt-chip" (click)="handleSend(prompt)" [disabled]="isLoading">{{ prompt }}</button>
+          <button *ngFor="let prompt of quickPrompts; let i = index" type="button" class="prompt-chip" (click)="handleSend(prompt)" [disabled]="isLoading">
+            <span class="prompt-chip-icon" aria-hidden="true">
+              <svg *ngIf="i === 0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+              <svg *ngIf="i === 1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path><path d="M8 6v12"></path></svg>
+              <svg *ngIf="i === 2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 21h8"></path><path d="M12 18v3"></path></svg>
+            </span>
+            {{ prompt }}
+          </button>
         </div>
         <label class="sr-only" for="incident-input">Describe your issue</label>
-        <textarea id="incident-input" class="composer-input" name="incident-input" [(ngModel)]="input" (keydown)="handleComposerKeydown($event)" placeholder="Describe your issue... (Enter to send, Shift+Enter for new line)" rows="3" [disabled]="isLoading"></textarea>
-        <div class="composer-footer">
-          <p class="helper-text">Add the service, symptom, and any recent deployment or dependency change.</p>
-          <button type="submit" class="send-button" [disabled]="isLoading || !input.trim()">Ask PoolSense</button>
+        <div class="composer-input-row">
+          <textarea id="incident-input" class="composer-input" name="incident-input" [(ngModel)]="input" (keydown)="handleComposerKeydown($event)" placeholder="Describe your issue... (Enter to send, Shift+Enter for new line)" rows="2" [disabled]="isLoading"></textarea>
+          <button type="submit" class="composer-send-icon-button" [disabled]="isLoading || !input.trim()" aria-label="Ask PoolSense">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m22 2-7 20-4-9-9-4Z"></path>
+              <path d="M22 2 11 13"></path>
+            </svg>
+          </button>
         </div>
         <p *ngIf="error" class="error-banner">{{ error }}</p>
       </form>
@@ -399,20 +576,6 @@
       </section>
 
       <ng-container *ngIf="insights">
-        <section class="insight-card thinking-panel" *ngIf="insights.queryCategory">
-          <p class="panel-kicker">Thinking</p>
-          <h3>Query classification &amp; sources</h3>
-          <p class="thinking-line"><strong>Query type:</strong> {{ insights.queryCategory }}</p>
-          <p class="thinking-line" *ngIf="insights.queryCategorizationReasoning">{{ insights.queryCategorizationReasoning }}</p>
-          <p class="thinking-line">
-            <strong>Sources used:</strong>
-            <span *ngIf="insights.usedPoolDatabase">Pool database</span>
-            <span *ngIf="insights.usedPoolDatabase && insights.nyraKnowledgeBaseUsed"> + </span>
-            <span *ngIf="insights.nyraKnowledgeBaseUsed">NYRA KB ({{ (insights.nyraKnowledgeBaseNames ?? []).join(', ') }})</span>
-            <span *ngIf="!insights.usedPoolDatabase && !insights.nyraKnowledgeBaseUsed">Ticket details only</span>
-          </p>
-        </section>
-
         <section class="insight-card">
           <div class="card-heading-row">
             <div>
@@ -425,26 +588,61 @@
           <div class="confidence-track" aria-hidden="true"><span class="confidence-fill" [style.width.%]="confidence"></span></div>
 
           <div class="system-grid">
-            <div>
+            <div class="system-grid-item">
+              <div class="system-grid-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+              </div>
               <p class="system-label">System</p>
               <p class="data-mono">{{ insights.failurePattern.system || 'Unknown system' }}</p>
             </div>
-            <div>
+            <div class="system-grid-item">
+              <div class="system-grid-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="1"></circle>
+                  <circle cx="19" cy="12" r="1"></circle>
+                  <circle cx="5" cy="12" r="1"></circle>
+                  <path d="M12 5v14M19 9v6M5 9v6"></path>
+                </svg>
+              </div>
               <p class="system-label">Component</p>
               <p class="data-mono">{{ insights.failurePattern.component || 'Unknown component' }}</p>
             </div>
-            <div>
+            <div class="system-grid-item">
+              <div class="system-grid-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="9" y1="9" x2="15" y2="9"></line>
+                  <line x1="9" y1="15" x2="15" y2="15"></line>
+                </svg>
+              </div>
               <p class="system-label">Resolution Category</p>
               <p>{{ insights.failurePattern.resolutionCategory || 'Unclassified' }}</p>
             </div>
-            <div>
+            <div class="system-grid-item">
+              <div class="system-grid-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                </svg>
+              </div>
               <p class="system-label">Pattern Ticket</p>
               <p class="data-mono">{{ insights.failurePattern.ticketId || 'Not linked' }}</p>
             </div>
           </div>
 
           <div class="reasoning-block">
-            <p class="system-label">Reasoning</p>
+            <div class="reasoning-header">
+              <div class="reasoning-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21h6M12 3a6 6 0 0 0-6 6c0 3 1.5 5.5 3 7.5h6c1.5-2 3-4.5 3-7.5a6 6 0 0 0-6-6z"></path>
+                  <line x1="9" y1="21" x2="15" y2="21"></line>
+                </svg>
+              </div>
+              <p class="system-label">Reasoning</p>
+            </div>
             <p>{{ insights.reasoning || 'No reasoning details available.' }}</p>
           </div>
 
@@ -457,57 +655,100 @@
               <span class="section-count data-mono">LIVE</span>
             </div>
 
-            <div class="telemetry-chart telemetry-bars" aria-label="Telemetry snapshot">
-              <div *ngFor="let datum of telemetry" class="telemetry-bar-item">
-                <div class="telemetry-bar-track"><span class="telemetry-bar-fill" [style.height.%]="datum.value" [style.background]="datum.color"></span></div>
-                <p class="telemetry-bar-label">{{ datum.name }}</p>
-                <p class="data-mono telemetry-bar-value">{{ datum.value }}%</p>
+            <div class="telemetry-chart telemetry-cards" aria-label="Telemetry snapshot">
+              <div class="telemetry-card-item">
+                <div class="telemetry-card-icon" [style.background]="telemetry[0].color">
+                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  </svg>
+                </div>
+                <div class="telemetry-card-content">
+                  <p class="telemetry-card-label">{{ telemetry[0].name }}</p>
+                  <p class="data-mono telemetry-card-value">{{ telemetry[0].value }}%</p>
+                  <div class="telemetry-card-bar">
+                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[0].value" [style.background]="telemetry[0].color"></span>
+                  </div>
+                </div>
+              </div>
+              <div class="telemetry-card-item">
+                <div class="telemetry-card-icon" [style.background]="telemetry[1].color">
+                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 17"></polyline>
+                    <polyline points="17 6 23 6 23 12"></polyline>
+                  </svg>
+                </div>
+                <div class="telemetry-card-content">
+                  <p class="telemetry-card-label">{{ telemetry[1].name }}</p>
+                  <p class="data-mono telemetry-card-value">{{ telemetry[1].value }}%</p>
+                  <div class="telemetry-card-bar">
+                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[1].value" [style.background]="telemetry[1].color"></span>
+                  </div>
+                </div>
+              </div>
+              <div class="telemetry-card-item">
+                <div class="telemetry-card-icon" [style.background]="telemetry[2].color">
+                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="1"></circle>
+                    <path d="M12 8v-4m0 16v-4m-4-4h-4m16 0h-4m-8.485-7.07l-2.828 2.828m11.314 0l2.828-2.828m-14.314 14.314l-2.828-2.828m11.314 0l2.828 2.828"></path>
+                    <circle cx="12" cy="12" r="8"></circle>
+                  </svg>
+                </div>
+                <div class="telemetry-card-content">
+                  <p class="telemetry-card-label">{{ telemetry[2].name }}</p>
+                  <p class="data-mono telemetry-card-value">{{ telemetry[2].value }}%</p>
+                  <div class="telemetry-card-bar">
+                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[2].value" [style.background]="telemetry[2].color"></span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </section>
 
-        <section class="insight-card">
-          <div class="card-heading-row">
-            <div>
-              <p class="panel-kicker">Similar Incidents</p>
-              <h3>Historical matches</h3>
-            </div>
-            <span class="section-count data-mono">{{ insights.similarIncidents.length }}</span>
+        <section class="insight-card evidence-panel">
+          <div class="evidence-panel-header">
+            <p class="panel-kicker">Evidence &amp; Supporting Documents</p>
+            <button type="button" class="evidence-collapse-toggle" (click)="toggleEvidencePanel()" [attr.aria-expanded]="!isEvidencePanelCollapsed" aria-label="Toggle evidence panel">
+              <span class="evidence-collapse-icon" [class.evidence-collapse-icon-collapsed]="isEvidencePanelCollapsed">&#9650;</span>
+            </button>
           </div>
 
-          <p *ngIf="insights.similarIncidents.length === 0" class="empty-copy">No related incidents were returned.</p>
-          <ul *ngIf="insights.similarIncidents.length > 0" class="insight-list">
-            <li *ngFor="let incident of insights.similarIncidents; trackBy: trackIncident" class="insight-list-item">
-              <div>
-                <p class="insight-item-title data-mono">{{ incident.ticketId }} <span *ngIf="incident.similarity > 0" class="similarity-badge">{{ incident.similarity * 100 | number: '1.0-0' }}% match</span></p>
-                <p class="insight-item-copy">{{ incident.problem }}</p>
-              </div>
-              <div class="incident-meta">
-                <span class="incident-tag" [title]="incident.resolution">{{ truncateResolution(incident.resolution) }}</span>
-                <a class="incident-link data-mono" [href]="'https://pool.intel.com/Edit/' + incident.ticketId" target="_blank" rel="noopener noreferrer">View ticket {{ incident.ticketId }}</a>
-              </div>
-            </li>
-          </ul>
-        </section>
-
-        <section class="insight-card" *ngIf="(insights.nyraDocuments ?? []).length > 0">
-          <div class="card-heading-row">
-            <div>
-              <p class="panel-kicker">NYRA Wiki</p>
-              <h3>Document matches</h3>
+          <ng-container *ngIf="!isEvidencePanelCollapsed">
+            <div class="evidence-tabs" role="tablist">
+              <button type="button" class="evidence-tab" [class.evidence-tab-active]="activeEvidenceTab === 'incidents'" (click)="setEvidenceTab('incidents')" role="tab">
+                Similar Incidents <span class="evidence-tab-count">{{ insights.similarIncidents.length }}</span>
+              </button>
+              <button type="button" class="evidence-tab" [class.evidence-tab-active]="activeEvidenceTab === 'nyra'" (click)="setEvidenceTab('nyra')" role="tab">
+                NYRA KB (Wiki) <span class="evidence-tab-count">{{ (insights.nyraDocuments ?? []).length }}</span>
+              </button>
             </div>
-            <span class="section-count data-mono">{{ (insights.nyraDocuments ?? []).length }}</span>
-          </div>
 
-          <ul class="nyra-doc-list">
-            <li *ngFor="let document of insights.nyraDocuments ?? []; trackBy: trackNyraDocument" class="nyra-doc-item">
-              <a *ngIf="document.sourceUrl; else plainInsightCitation" class="nyra-doc-title" [href]="document.sourceUrl" target="_blank" rel="noopener noreferrer">{{ document.title || document.citation }}</a>
-              <ng-template #plainInsightCitation><span class="nyra-doc-title">{{ document.title || document.citation }}</span></ng-template>
-              <p class="nyra-doc-copy">{{ document.content }}</p>
-              <p class="project-card-meta">{{ document.kbName || 'NYRA KB' }}<span *ngIf="document.score > 0"> &bull; {{ document.score | number: '1.2-2' }}</span></p>
-            </li>
-          </ul>
+            <ng-container *ngIf="activeEvidenceTab === 'incidents'">
+              <p *ngIf="insights.similarIncidents.length === 0" class="empty-copy">No related incidents were returned.</p>
+              <div *ngIf="insights.similarIncidents.length > 0" class="evidence-card-grid">
+                <article *ngFor="let incident of insights.similarIncidents; trackBy: trackIncident" class="evidence-card">
+                  <p *ngIf="incident.similarity > 0" class="evidence-match-badge">{{ incident.similarity * 100 | number: '1.0-0' }}%<span>match</span></p>
+                  <p class="evidence-card-id data-mono">#{{ incident.ticketId }}</p>
+                  <p class="evidence-card-copy">{{ incident.problem }}</p>
+                  <p class="evidence-card-meta" [title]="incident.resolution">{{ truncateResolution(incident.resolution) }}</p>
+                  <a class="evidence-card-action" [href]="'https://pool.intel.com/Edit/' + incident.ticketId" target="_blank" rel="noopener noreferrer">View details</a>
+                </article>
+              </div>
+            </ng-container>
+
+            <ng-container *ngIf="activeEvidenceTab === 'nyra'">
+              <p *ngIf="(insights.nyraDocuments ?? []).length === 0" class="empty-copy">No NYRA KB documents were returned.</p>
+              <div *ngIf="(insights.nyraDocuments ?? []).length > 0" class="evidence-card-grid">
+                <article *ngFor="let document of insights.nyraDocuments ?? []; trackBy: trackNyraDocument" class="evidence-card">
+                  <p *ngIf="document.score > 0" class="evidence-match-badge">{{ document.score * 100 | number: '1.0-0' }}%<span>match</span></p>
+                  <p class="evidence-card-id data-mono">{{ document.kbName || 'NYRA KB' }}</p>
+                  <p class="evidence-card-copy">{{ document.title || document.citation }}</p>
+                  <p class="evidence-card-meta">{{ truncateNyraContent(document.content) }}</p>
+                  <a *ngIf="document.sourceUrl" class="evidence-card-action" [href]="document.sourceUrl" target="_blank" rel="noopener noreferrer">View details</a>
+                </article>
+              </div>
+            </ng-container>
+          </ng-container>
         </section>
 
         <section class="insight-card nyra-kb-insight" *ngIf="insights.nyraKnowledgeBaseUsed">
@@ -537,7 +778,15 @@
       <section class="workspace-panel project-config-screen pool-recommendations-screen">
         <div class="project-config-screen-header">
           <div>
-            <p class="panel-kicker">Reports</p>
+            <p class="panel-kicker pool-recommendations-kicker">
+              <svg class="panel-kicker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <path d="M14 2v6h6"></path>
+                <path d="M9 13h6"></path>
+                <path d="M9 17h4"></path>
+              </svg>
+              Reports
+            </p>
             <h2>Pool Recommendations</h2>
             <p class="workspace-copy">Review saved AI recommendations that were generated for new pools and open their analysis reports.</p>
           </div>
@@ -546,7 +795,15 @@
               <span class="workspace-dot"></span>
               <span>{{ poolRecommendationRangeLabel }}</span>
             </div>
-            <button type="button" class="feedback-button feedback-button-secondary" (click)="refreshPoolRecommendations()" [disabled]="isPoolRecommendationLoading">Refresh</button>
+            <button type="button" class="feedback-button feedback-button-secondary pool-recommendation-refresh-button" (click)="refreshPoolRecommendations()" [disabled]="isPoolRecommendationLoading">
+              <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 12a9 9 0 0 1-15.3 6.4L3 15"></path>
+                <path d="M3 12a9 9 0 0 1 15.3-6.4L21 9"></path>
+                <path d="M3 15v4h4"></path>
+                <path d="M21 9V5h-4"></path>
+              </svg>
+              Refresh
+            </button>
           </div>
         </div>
 
@@ -556,7 +813,13 @@
           <div class="project-form-card pool-recommendation-filters">
             <div class="project-form-grid pool-recommendation-filter-grid">
               <label class="field-group">
-                <span class="field-label">Application</span>
+                <span class="field-label">
+                  <svg class="field-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                  </svg>
+                  Application
+                </span>
                 <select class="field-input" name="poolRecommendationProject" [(ngModel)]="poolRecommendationFilters.projectId" (ngModelChange)="handlePoolRecommendationFilterChange()" [disabled]="isPoolRecommendationLoading">
                   <option value="">All applications</option>
                   <option *ngFor="let project of poolRecommendationProjectOptions" [value]="project.projectId">{{ project.projectName }}</option>
@@ -564,12 +827,26 @@
               </label>
 
               <label class="field-group">
-                <span class="field-label">Search</span>
+                <span class="field-label">
+                  <svg class="field-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                  </svg>
+                  Search
+                </span>
                 <input class="field-input" type="search" name="poolRecommendationSearch" [(ngModel)]="poolRecommendationFilters.searchTerm" (keyup.enter)="handlePoolRecommendationFilterChange()" placeholder="Pool, application, summary" [disabled]="isPoolRecommendationLoading" />
               </label>
 
               <label class="field-group">
-                <span class="field-label">Email Status</span>
+                <span class="field-label">
+                  <svg class="field-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                  Email status
+                </span>
                 <select class="field-input" name="poolRecommendationEmailStatus" [(ngModel)]="poolRecommendationFilters.emailSent" (ngModelChange)="handlePoolRecommendationFilterChange()" [disabled]="isPoolRecommendationLoading">
                   <option value="all">All</option>
                   <option value="sent">Sent</option>
@@ -578,7 +855,15 @@
               </label>
 
               <label class="field-group">
-                <span class="field-label">Processed Date</span>
+                <span class="field-label">
+                  <svg class="field-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                  Processed date
+                </span>
                 <select class="field-input" name="poolRecommendationDateRange" [(ngModel)]="poolRecommendationFilters.dateRange" (ngModelChange)="handlePoolRecommendationFilterChange()" [disabled]="isPoolRecommendationLoading">
                   <option value="7">Last 7 days</option>
                   <option value="30">Last 30 days</option>
@@ -586,21 +871,29 @@
                   <option value="all">All time</option>
                 </select>
               </label>
+
+              <button type="button" class="send-button pool-recommendation-filter-action" (click)="handlePoolRecommendationFilterChange()" [disabled]="isPoolRecommendationLoading">
+                <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"></path>
+                </svg>
+                Apply Filters
+              </button>
             </div>
 
             <div class="composer-footer">
               <p class="helper-text">Press Enter in search or change filters to refresh the report list.</p>
-              <button type="button" class="send-button" (click)="handlePoolRecommendationFilterChange()" [disabled]="isPoolRecommendationLoading">Apply Filters</button>
             </div>
           </div>
 
           <div class="project-list-card pool-recommendation-list-card">
             <div class="card-heading-row project-toolbar">
-              <div>
-                <p class="panel-kicker">NewRecommendation</p>
+              <div class="pool-recommendation-list-heading">
+                <svg class="saved-recommendation-heading-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                  <path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                </svg>
                 <h3>Saved recommendation reports</h3>
               </div>
-              <span class="section-count data-mono">{{ poolRecommendationReports.totalCount }}</span>
+              <span class="section-count data-mono">{{ poolRecommendationReports.totalCount }} result{{ poolRecommendationReports.totalCount === 1 ? '' : 's' }}</span>
             </div>
 
             <div *ngIf="isPoolRecommendationLoading" class="project-empty"><p class="empty-copy">Loading Pool Recommendations...</p></div>
@@ -608,21 +901,35 @@
 
             <div *ngIf="!isPoolRecommendationLoading && poolRecommendationReports.items.length > 0" class="pool-recommendation-list">
               <article *ngFor="let report of poolRecommendationReports.items; trackBy: trackPoolRecommendation" class="pool-recommendation-row">
-                <button type="button" class="pool-recommendation-link" (click)="openPoolRecommendation(report)">
-                  <span class="data-mono">{{ report.sourceEventId }}</span>
-                  <small>Open report</small>
-                </button>
-                <div class="pool-recommendation-main">
+                <div class="pool-recommendation-icon-section">
+                  <button type="button" class="pool-recommendation-icon-button" (click)="openPoolRecommendation(report)" [attr.aria-label]="'Open report for pool ' + report.sourceEventId">
+                    <span class="pool-recommendation-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
+                        <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"></path>
+                        <path d="M9 13h6"></path>
+                        <path d="M9 17h4"></path>
+                      </svg>
+                    </span>
+                  </button>
+                  <div class="pool-recommendation-icon-label">
+                    <p class="pool-recommendation-report-id data-mono">{{ report.sourceEventId }}</p>
+                  </div>
+                </div>
+                <div class="pool-recommendation-content">
                   <div class="pool-recommendation-title-row">
                     <p class="pool-recommendation-title">{{ report.application || report.projectName || 'Unknown application' }}</p>
-                    <span class="project-chip">{{ report.emailSent ? 'Sent' : 'Not Sent' }}</span>
+                    <span class="project-chip">{{ report.emailSent ? 'SENT' : '75%' }}</span>
                     <span class="similarity-badge">{{ formatPercent(report.confidence) }}</span>
                   </div>
                   <p class="pool-recommendation-summary">{{ report.summary || 'No summary available.' }}</p>
                   <div class="pool-recommendation-meta">
                     <span>{{ report.projectName || report.projectId || 'Unmapped project' }}</span>
+                    <span class="meta-separator">•</span>
                     <span>{{ report.similarIncidentCount }} similar incident{{ report.similarIncidentCount === 1 ? '' : 's' }}</span>
+                    <span class="meta-separator">•</span>
                     <span>{{ report.processedAt | date: 'medium' }}</span>
+                    <span *ngIf="report.failureType" class="meta-separator">•</span>
                     <span *ngIf="report.failureType">{{ report.failureType }}</span>
                   </div>
                 </div>
@@ -826,67 +1133,108 @@
     </ng-template>
 
     <ng-template #applicationFeedbackView>
-      <section class="workspace-panel project-config-screen">
-        <div class="project-config-screen-header">
-          <div>
-            <p class="panel-kicker">Feedback</p>
-            <h2>Application Feedback</h2>
-            <p class="workspace-copy">Capture overall product feedback, issues, and suggestions along with submitter details.</p>
-          </div>
-          <div class="settings-banner-group">
-            <div class="workspace-banner">
-              <span class="workspace-dot"></span>
-              <span>{{ projects.length }} application{{ projects.length === 1 ? '' : 's' }} available</span>
+      <section class="workspace-panel project-config-screen application-feedback-screen">
+        <section class="application-feedback-hero" aria-label="Application feedback overview">
+          <div class="application-feedback-hero-content">
+            <div class="application-feedback-heading-row">
+              <span class="application-feedback-heading-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  <path d="M8 9h8"></path>
+                  <path d="M8 13h5"></path>
+                </svg>
+              </span>
+              <div>
+                <p class="panel-kicker">Feedback</p>
+                <h2>Application Feedback</h2>
+                <p class="workspace-copy">Capture overall product feedback, issues, and suggestions along with submitter details.</p>
+              </div>
             </div>
           </div>
-        </div>
+
+          <div class="application-feedback-hero-side">
+            <div class="application-feedback-pill">
+              <span class="application-feedback-pill-dot" aria-hidden="true"></span>
+              <span>{{ projects.length }} application{{ projects.length === 1 ? '' : 's' }} available</span>
+            </div>
+            <div class="application-feedback-illustration" aria-hidden="true">
+              <svg viewBox="0 0 140 118" role="presentation" focusable="false">
+                <defs>
+                  <linearGradient id="feedbackBoardGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#a78bfa" />
+                    <stop offset="100%" stop-color="#7c3aed" />
+                  </linearGradient>
+                </defs>
+                <path d="M46 8h48a14 14 0 0 1 14 14v66a14 14 0 0 1-14 14H46a14 14 0 0 1-14-14V22A14 14 0 0 1 46 8Z" fill="none" stroke="url(#feedbackBoardGlow)" stroke-width="3" opacity="0.8" />
+                <rect x="56" y="0" width="28" height="16" rx="7" fill="url(#feedbackBoardGlow)" opacity="0.28" />
+                <path d="M52 35h36M52 53h28M52 71h32" stroke="url(#feedbackBoardGlow)" stroke-width="3" stroke-linecap="round" opacity="0.85" />
+                <circle cx="48" cy="35" r="4" fill="#8b5cf6" opacity="0.85" />
+                <circle cx="48" cy="53" r="4" fill="#8b5cf6" opacity="0.85" />
+                <circle cx="48" cy="71" r="4" fill="#8b5cf6" opacity="0.85" />
+                <path d="M102 86h24a10 10 0 0 1 10 10v6a10 10 0 0 1-10 10h-8l-7 6v-6h-9a10 10 0 0 1-10-10v-6a10 10 0 0 1 10-10Z" fill="none" stroke="url(#feedbackBoardGlow)" stroke-width="3" opacity="0.7" />
+              </svg>
+            </div>
+          </div>
+        </section>
 
         <p *ngIf="applicationFeedbackError" class="project-feedback-banner">{{ applicationFeedbackError }}</p>
         <p *ngIf="applicationFeedbackNotice" class="project-feedback-banner project-feedback-banner-success">{{ applicationFeedbackNotice }}</p>
 
-        <section class="project-studio">
-          <div class="project-studio-grid">
-            <form class="project-form-card" (ngSubmit)="handleApplicationFeedbackSubmit()">
-              <div class="card-heading-row project-toolbar">
-                <div>
+        <section class="project-studio application-feedback-studio">
+          <form class="project-form-card application-feedback-form-card" (ngSubmit)="handleApplicationFeedbackSubmit()">
+            <div class="card-heading-row project-toolbar application-feedback-form-header">
+              <div class="application-feedback-submission-row">
+                <span class="application-feedback-heading-icon application-feedback-heading-icon-submission" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 2 11 13"></path>
+                    <path d="m22 2-7 20-4-9-9-4Z"></path>
+                  </svg>
+                </span>
+                <div class="application-feedback-submission-copy">
                   <p class="panel-kicker">Submission</p>
                   <h3>Send application feedback</h3>
                 </div>
               </div>
+            </div>
 
-              <div class="project-form-grid">
-                <label class="field-group">
-                  <span class="field-label">Your Name</span>
-                  <input class="field-input" type="text" name="feedbackUserName" [(ngModel)]="applicationFeedbackForm.userName" placeholder="Ashish Upreti" [disabled]="isApplicationFeedbackSaving" />
-                </label>
+            <div class="project-form-grid application-feedback-form-grid">
+              <label class="field-group application-feedback-field">
+                <span class="field-label">Your Name <span class="required-indicator">*</span></span>
+                <input class="field-input" type="text" name="feedbackUserName" [(ngModel)]="applicationFeedbackForm.userName" placeholder="Ashish Upreti" [disabled]="isApplicationFeedbackSaving" />
+              </label>
 
-                <label class="field-group">
-                  <span class="field-label">Your Email</span>
-                  <input class="field-input" type="email" name="feedbackUserEmail" [(ngModel)]="applicationFeedbackForm.userEmail" placeholder="name@intel.com" [disabled]="isApplicationFeedbackSaving" />
-                </label>
+              <label class="field-group application-feedback-field">
+                <span class="field-label">Your Email <span class="required-indicator">*</span></span>
+                <input class="field-input" type="email" name="feedbackUserEmail" [(ngModel)]="applicationFeedbackForm.userEmail" placeholder="name@intel.com" [disabled]="isApplicationFeedbackSaving" />
+              </label>
 
-                <label class="field-group">
-                  <span class="field-label">Feedback Type</span>
-                  <select class="field-input" name="feedbackType" [(ngModel)]="applicationFeedbackForm.feedbackType" [disabled]="isApplicationFeedbackSaving">
-                    <option value="Suggestion">Suggestion</option>
-                    <option value="Issue">Issue</option>
-                    <option value="Feature Request">Feature Request</option>
-                    <option value="Appreciation">Appreciation</option>
-                  </select>
-                </label>
+              <label class="field-group application-feedback-field field-group-full">
+                <span class="field-label">Feedback Type <span class="required-indicator">*</span></span>
+                <select class="field-input" name="feedbackType" [(ngModel)]="applicationFeedbackForm.feedbackType" [disabled]="isApplicationFeedbackSaving">
+                  <option value="Suggestion">Suggestion</option>
+                  <option value="Issue">Issue</option>
+                  <option value="Feature Request">Feature Request</option>
+                  <option value="Appreciation">Appreciation</option>
+                </select>
+              </label>
 
-                <label class="field-group field-group-full">
-                  <span class="field-label">Feedback Details</span>
-                  <textarea class="feedback-comment-input" name="feedbackMessage" [(ngModel)]="applicationFeedbackForm.message" placeholder="Describe the issue, suggestion, or enhancement you want tracked for this application." rows="6" [disabled]="isApplicationFeedbackSaving"></textarea>
-                </label>
-              </div>
+              <label class="field-group field-group-full application-feedback-field">
+                <span class="field-label">Feedback Details <span class="required-indicator">*</span></span>
+                <textarea class="feedback-comment-input application-feedback-textarea" name="feedbackMessage" [(ngModel)]="applicationFeedbackForm.message" placeholder="Describe the issue, suggestion, or enhancement you want tracked for this application." rows="6" [disabled]="isApplicationFeedbackSaving"></textarea>
+              </label>
+            </div>
 
-              <div class="composer-footer">
-                <p class="helper-text">This feedback is stored in the PoolSense database with your contact details for follow-up.</p>
-                <button type="submit" class="send-button" [disabled]="isApplicationFeedbackSaving">{{ isApplicationFeedbackSaving ? 'Submitting...' : 'Submit Feedback' }}</button>
-              </div>
-            </form>
-          </div>
+            <div class="composer-footer application-feedback-footer">
+              <p class="helper-text application-feedback-helper">
+                <span class="application-feedback-helper-icon" aria-hidden="true"></span>
+                This feedback is stored in the PoolSense database with your contact details for follow-up.
+              </p>
+              <button type="submit" class="send-button application-feedback-submit" [disabled]="isApplicationFeedbackSaving">
+                <span aria-hidden="true">&#10148;</span>
+                <span>{{ isApplicationFeedbackSaving ? 'Submitting...' : 'Submit Feedback' }}</span>
+              </button>
+            </div>
+          </form>
         </section>
       </section>
     </ng-template>

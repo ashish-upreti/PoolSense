@@ -14,11 +14,16 @@ public sealed class PoolReportController : ControllerBase
 
     private readonly IProcessedSourceEventRepository _processedSourceEventRepository;
     private readonly ILLMService _llmService;
+    private readonly IPoolTroubleshootEvidenceService _evidenceService;
 
-    public PoolReportController(IProcessedSourceEventRepository processedSourceEventRepository, ILLMService llmService)
+    public PoolReportController(
+        IProcessedSourceEventRepository processedSourceEventRepository,
+        ILLMService llmService,
+        IPoolTroubleshootEvidenceService evidenceService)
     {
         _processedSourceEventRepository = processedSourceEventRepository;
         _llmService = llmService;
+        _evidenceService = evidenceService;
     }
 
     [HttpGet("reports")]
@@ -112,25 +117,49 @@ public sealed class PoolReportController : ControllerBase
             return NotFound($"No PoolSense report was found for pool {sourceEventId}.");
         }
 
-        var answer = await _llmService.GetResponseAsync(BuildTroubleshootPrompt(report, request.Question.Trim()));
+        var question = request.Question.Trim();
+        var evidence = await _evidenceService.RetrieveAsync(question, report.Application, report.ProjectId, cancellationToken);
+        var answer = await _llmService.GetResponseAsync(BuildTroubleshootPrompt(report, question, evidence));
 
         return Ok(new PoolTroubleshootResponse
         {
             SourceEventId = report.SourceEventId,
-            Question = request.Question.Trim(),
+            Question = question,
             Answer = answer.Trim(),
-            GeneratedAt = DateTime.UtcNow
+            GeneratedAt = DateTime.UtcNow,
+            RetrievedSimilarIncidentCount = evidence.SimilarIncidents.Count,
+            RetrievedNyraDocumentCount = evidence.NyraDocuments.Count,
+            NyraKnowledgeBaseUsed = evidence.NyraKnowledgeBaseUsed,
+            NyraKnowledgeBaseNames = evidence.NyraKnowledgeBaseNames,
+            NyraDocuments = evidence.NyraDocuments
         });
     }
 
-    private static string BuildTroubleshootPrompt(ProcessedSourceEventRecord report, string question)
+    private static string BuildTroubleshootPrompt(ProcessedSourceEventRecord report, string question, PoolTroubleshootEvidence evidence)
     {
         var reportJson = JsonSerializer.Serialize(report.WorkflowResult, JsonOptions);
+        var freshIncidentsJson = JsonSerializer.Serialize(evidence.SimilarIncidents.Select(incident => new
+        {
+            incident.TicketId,
+            incident.Problem,
+            incident.RootCause,
+            incident.Resolution,
+            incident.Similarity
+        }), JsonOptions);
+        var freshNyraDocumentsJson = JsonSerializer.Serialize(evidence.NyraDocuments.Select(document => new
+        {
+            document.KbName,
+            document.Title,
+            document.Content,
+            document.SourceUrl,
+            document.Citation,
+            document.Score
+        }), JsonOptions);
 
         return $$"""
             You are PoolSense, an operational troubleshooting assistant for engineering support pools.
 
-            Answer the user's follow-up question using only the saved PoolSense report context below. The report came from an already processed NewRecommendation workflow.
+            Answer the user's follow-up question using the saved PoolSense report context below, plus any fresh evidence retrieved specifically for this follow-up question.
 
             Pool Number: {{report.SourceEventId}}
             Processing Kind: {{report.ProcessingKind}}
@@ -141,17 +170,25 @@ public sealed class PoolReportController : ControllerBase
             Saved PoolSense Report JSON:
             {{reportJson}}
 
+            Fresh Similar Incidents Retrieved For This Follow-Up (Pool DB, most similar first; may be empty):
+            {{freshIncidentsJson}}
+
+            Fresh NYRA KB Documents Retrieved For This Follow-Up (wiki, most relevant first; may be empty):
+            {{freshNyraDocumentsJson}}
+
             User Follow-Up Question:
             {{question}}
 
             Instructions:
+            - Treat the saved report as the primary source of truth for this pool.
+            - Use the fresh similar incidents and NYRA KB documents above when they add relevant detail not already in the saved report, or when the question needs a fresh lookup (e.g. "what does the wiki say about X", "any other similar tickets").
+            - Cite ticket IDs from fresh similar incidents and titles/citations from fresh NYRA documents when you use them.
             - Be specific to this pool and the saved report.
             - Start with the most practical next checks.
-            - Use similar incidents only as supporting evidence; identify ticket IDs when helpful.
             - If asked for a checklist, provide an ordered checklist.
             - If asked for an update or escalation, write concise copy that can be pasted into a ticket/email.
-            - If documentation would be needed to answer confidently, state exactly what documentation or data source should be checked next.
-            - Do not invent systems, links, people, or documentation not present in the report.
+            - If documentation would still be needed beyond what is provided above, state exactly what documentation or data source should be checked next.
+            - Do not invent systems, links, people, or documentation not present in the report or fresh evidence.
             - Keep the answer concise and action-oriented.
             """;
     }
@@ -214,4 +251,9 @@ public sealed class PoolTroubleshootResponse
     public string Question { get; set; } = string.Empty;
     public string Answer { get; set; } = string.Empty;
     public DateTime GeneratedAt { get; set; }
+    public int RetrievedSimilarIncidentCount { get; set; }
+    public int RetrievedNyraDocumentCount { get; set; }
+    public bool NyraKnowledgeBaseUsed { get; set; }
+    public IReadOnlyList<string> NyraKnowledgeBaseNames { get; set; } = [];
+    public IReadOnlyList<NyraDocumentResult> NyraDocuments { get; set; } = [];
 }
