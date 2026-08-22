@@ -20,6 +20,8 @@ out-tsc
 .cache
 .vite
 coverage
+artifacts
+.playwright-mcp
 
 # Editor directories and files
 .vscode/*

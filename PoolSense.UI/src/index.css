@@ -135,7 +135,9 @@ body {
 
 app-root {
   display: block;
-  min-height: 100vh;
+  width: calc(100% / var(--app-ui-scale));
+  min-height: calc(100vh / var(--app-ui-scale));
+  zoom: var(--app-ui-scale);
 }
 
 a {

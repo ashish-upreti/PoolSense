@@ -57,6 +57,8 @@ lerna-debug.log*
 **/TestResults/
 **/TestResults*/
 **/publish/
+artifacts/publish/
+artifacts/validation/
 *.trx
 *.coverage
 *.coveragexml
@@ -90,6 +92,7 @@ $RECYCLE.BIN/
 
 # ── Local configuration and secrets ──────────────────────────
 PoolSense.Api/appsettings*.json
+PoolSense.Api/artifacts/
 PoolSense.Api/artifacts/auth-state/
 .playwright-mcp/
 **/appsettings.Local.json

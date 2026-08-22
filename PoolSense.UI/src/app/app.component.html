@@ -1315,7 +1315,7 @@
                     <div class="application-card-meta-list">
                       <p class="project-card-copy">Lookback: {{ project.knowledgeLookbackYears }} year{{ project.knowledgeLookbackYears === 1 ? '' : 's' }} &bull; Similarity limit: {{ project.similaritySearchLimit }} &bull; Email: {{ project.sendEmail ? 'On' : 'Off' }} &bull; Pooling: {{ project.poolingEnabled ? 'On' : 'Off' }}</p>
                       <p class="project-card-meta">Filter: {{ project.applicationFilter || project.projectName }}</p>
-                      <p class="project-card-meta">WHA File: {{ project.nyraKbNames || 'Not configured' }}</p>
+                      <p class="project-card-meta">NYRA KBs: {{ project.nyraKbNames || 'Not configured' }}</p>
                     </div>
                     <div class="application-card-confidence">
                       <strong class="application-card-confidence-value">{{ getProjectStatus(project).progressPercentage }}%</strong>
