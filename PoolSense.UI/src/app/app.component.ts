@@ -44,6 +44,8 @@ type ChatMessage = UserMessage | AssistantMessage
 
 type PoolTroubleshootEntry = PoolTroubleshootResponse & {
   id: number
+  renderedAnswer: string
+  workflowProgress: TicketWorkflowProgress[]
 }
 
 type FeedbackState = {
@@ -210,6 +212,156 @@ function formatDateInput(date: Date) {
   return date.toISOString().slice(0, 10)
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function renderStrongText(value: string) {
+  return escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+}
+
+function renderAutoLinkedText(value: string) {
+  const urlPattern = /https?:\/\/[^\s<)]+/g
+  let rendered = ''
+  let lastIndex = 0
+
+  for (const match of value.matchAll(urlPattern)) {
+    const url = match[0]
+    const index = match.index ?? 0
+    rendered += renderStrongText(value.slice(lastIndex, index))
+    rendered += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`
+    lastIndex = index + url.length
+  }
+
+  return rendered + renderStrongText(value.slice(lastIndex))
+}
+
+function renderInlineText(value: string) {
+  const codePattern = /`([^`]+)`/g
+  let rendered = ''
+  let lastIndex = 0
+
+  for (const match of value.matchAll(codePattern)) {
+    const code = match[1]
+    const index = match.index ?? 0
+    rendered += renderAutoLinkedText(value.slice(lastIndex, index))
+    rendered += `<code>${escapeHtml(code)}</code>`
+    lastIndex = index + match[0].length
+  }
+
+  return rendered + renderAutoLinkedText(value.slice(lastIndex))
+}
+
+function renderInlineMarkdown(value: string) {
+  const markdownLinkPattern = /\[([^\]]+)]\((https?:\/\/[^)\s]+)\)/g
+  let rendered = ''
+  let lastIndex = 0
+
+  for (const match of value.matchAll(markdownLinkPattern)) {
+    const linkText = match[1]
+    const url = match[2]
+    const index = match.index ?? 0
+    rendered += renderInlineText(value.slice(lastIndex, index))
+    rendered += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${renderInlineText(linkText)}</a>`
+    lastIndex = index + match[0].length
+  }
+
+  return rendered + renderInlineText(value.slice(lastIndex))
+}
+
+function renderMarkdown(value: string) {
+  const blocks: string[] = []
+  const paragraphLines: string[] = []
+  const listItems: string[] = []
+  let activeListTag: 'ol' | 'ul' | null = null
+
+  const flushParagraph = () => {
+    if (paragraphLines.length === 0) {
+      return
+    }
+
+    blocks.push(`<p>${paragraphLines.map(renderInlineMarkdown).join('<br>')}</p>`)
+    paragraphLines.length = 0
+  }
+
+  const flushList = () => {
+    if (!activeListTag || listItems.length === 0) {
+      return
+    }
+
+    blocks.push(`<${activeListTag}>${listItems.map((item) => `<li>${item}</li>`).join('')}</${activeListTag}>`)
+    listItems.length = 0
+    activeListTag = null
+  }
+
+  for (const line of value.replace(/\r\n/g, '\n').split('\n')) {
+    const trimmedLine = line.trim()
+
+    if (!trimmedLine) {
+      flushParagraph()
+      flushList()
+      continue
+    }
+
+    const headingMatch = trimmedLine.match(/^(#{1,6})\s+(.+)$/)
+    if (headingMatch) {
+      flushParagraph()
+      flushList()
+      const headingLevel = Math.min(6, Math.max(3, headingMatch[1].length + 1))
+      blocks.push(`<h${headingLevel}>${renderInlineMarkdown(headingMatch[2])}</h${headingLevel}>`)
+      continue
+    }
+
+    const unorderedMatch = trimmedLine.match(/^[-*]\s+(.+)$/)
+    if (unorderedMatch) {
+      flushParagraph()
+      if (activeListTag && activeListTag !== 'ul') {
+        flushList()
+      }
+
+      activeListTag = 'ul'
+      listItems.push(renderInlineMarkdown(unorderedMatch[1]))
+      continue
+    }
+
+    const orderedMatch = trimmedLine.match(/^\d+[.)]\s+(.+)$/)
+    if (orderedMatch) {
+      flushParagraph()
+      if (activeListTag && activeListTag !== 'ol') {
+        flushList()
+      }
+
+      activeListTag = 'ol'
+      listItems.push(renderInlineMarkdown(orderedMatch[1]))
+      continue
+    }
+
+    flushList()
+    paragraphLines.push(trimmedLine)
+  }
+
+  flushParagraph()
+  flushList()
+
+  return blocks.join('')
+}
+
+function createPoolTroubleshootEntry(response: PoolTroubleshootResponse, workflowProgress: TicketWorkflowProgress[] = []): PoolTroubleshootEntry {
+  return {
+    ...response,
+    id: Date.now(),
+    renderedAnswer: renderMarkdown(response.answer),
+    workflowProgress,
+  }
+}
+
 function findLastStepIndex(steps: TicketWorkflowProgress[], predicate: (step: TicketWorkflowProgress) => boolean) {
   for (let index = steps.length - 1; index >= 0; index -= 1) {
     if (predicate(steps[index])) {
@@ -290,6 +442,7 @@ export class AppComponent implements OnInit {
   poolTroubleshootEntries: PoolTroubleshootEntry[] = []
   isPoolTroubleshootLoading = false
   poolTroubleshootError = ''
+  poolTroubleshootProgressEvents: TicketWorkflowProgress[] = []
   poolRecommendationReports = createDefaultPoolRecommendationResponse()
   poolRecommendationFilters = {
     projectId: '',
@@ -471,6 +624,33 @@ export class AppComponent implements OnInit {
     return Math.round((Math.max(activeIndex, completedIndex) / (steps.length - 1)) * 100)
   }
 
+  get poolTroubleshootStatusSteps() {
+    return [...this.poolTroubleshootProgressEvents].sort((first, second) => first.order - second.order)
+  }
+
+  get poolTroubleshootActiveStep() {
+    return [...this.poolTroubleshootStatusSteps].reverse().find((step) => step.state === 'active') ?? this.poolTroubleshootStatusSteps.at(-1) ?? null
+  }
+
+  get poolTroubleshootStatusTitle() {
+    return this.poolTroubleshootActiveStep?.title ? `${this.poolTroubleshootActiveStep.title}...` : 'Preparing troubleshoot request...'
+  }
+
+  get poolTroubleshootStatusCopy() {
+    return this.poolTroubleshootActiveStep?.detail || 'Working through the saved report and fresh evidence.'
+  }
+
+  get poolTroubleshootProgressPercent() {
+    const steps = this.poolTroubleshootStatusSteps
+    if (steps.length <= 1) {
+      return 0
+    }
+
+    const activeIndex = Math.max(0, findLastStepIndex(steps, (step) => step.state === 'active'))
+    const completedIndex = Math.max(0, findLastStepIndex(steps, (step) => step.state === 'completed' || step.state === 'skipped'))
+    return Math.round((Math.max(activeIndex, completedIndex) / (steps.length - 1)) * 100)
+  }
+
   get isPoolReportWorkspace() {
     return this.poolReportSourceEventId.trim().length > 0 || this.poolReport !== null || this.isPoolReportLoading
   }
@@ -535,6 +715,11 @@ export class AppComponent implements OnInit {
     this.loadingProgressEvents = [...nextEvents, progress]
   }
 
+  private upsertPoolTroubleshootProgress(progress: TicketWorkflowProgress) {
+    const nextEvents = this.poolTroubleshootProgressEvents.filter((event) => event.stage !== progress.stage)
+    this.poolTroubleshootProgressEvents = [...nextEvents, progress]
+  }
+
   private getSortedLoadingProgressEvents() {
     return [...this.loadingProgressEvents].sort((first, second) => first.order - second.order)
   }
@@ -588,6 +773,7 @@ export class AppComponent implements OnInit {
     this.poolTroubleshootEntries = []
     this.poolTroubleshootError = ''
     this.isPoolTroubleshootLoading = false
+    this.poolTroubleshootProgressEvents = []
     this.poolRecommendationReports = createDefaultPoolRecommendationResponse()
     this.poolRecommendationError = ''
     this.isPoolRecommendationLoading = false
@@ -691,6 +877,7 @@ export class AppComponent implements OnInit {
     this.poolTroubleshootEntries = []
     this.poolTroubleshootError = ''
     this.isPoolTroubleshootLoading = false
+    this.poolTroubleshootProgressEvents = []
     this.messages = []
     this.insights = null
   }
@@ -1159,16 +1346,29 @@ export class AppComponent implements OnInit {
 
     this.poolTroubleshootError = ''
     this.isPoolTroubleshootLoading = true
+    this.poolTroubleshootProgressEvents = [
+      {
+        stage: 'request',
+        title: 'Submitting follow-up',
+        detail: `Sending troubleshooting question for pool ${poolId}.`,
+        state: 'completed',
+        order: 0,
+        timestampUtc: new Date().toISOString(),
+      },
+    ]
 
     try {
-      const response = await this.api.troubleshootPool(poolId, question)
-      this.poolTroubleshootEntries = [{ ...response, id: Date.now() }, ...this.poolTroubleshootEntries]
+      const response = await this.api.troubleshootPoolWithProgress(poolId, question, (progress) => {
+        this.upsertPoolTroubleshootProgress(progress)
+      })
+      this.poolTroubleshootEntries = [createPoolTroubleshootEntry(response, this.poolTroubleshootStatusSteps), ...this.poolTroubleshootEntries]
       this.mergeTroubleshootNyraEvidence(response)
       this.poolTroubleshootQuestion = ''
     } catch (requestError) {
       this.poolTroubleshootError = requestError instanceof Error ? requestError.message : 'Unable to troubleshoot this pool.'
     } finally {
       this.isPoolTroubleshootLoading = false
+      this.poolTroubleshootProgressEvents = []
     }
   }
 
@@ -1339,6 +1539,7 @@ export class AppComponent implements OnInit {
     this.poolTroubleshootQuestion = ''
     this.poolTroubleshootEntries = []
     this.poolTroubleshootError = ''
+    this.poolTroubleshootProgressEvents = []
     this.isPoolReportLoading = true
 
     try {

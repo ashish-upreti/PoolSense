@@ -52,6 +52,11 @@ type TicketWorkflowStreamEvent =
   | { type: 'result'; result: TicketWorkflowResult }
   | { type: 'error'; error: { message?: string } }
 
+type PoolTroubleshootStreamEvent =
+  | { type: 'progress'; progress: TicketWorkflowProgress }
+  | { type: 'result'; result: PoolTroubleshootResponse }
+  | { type: 'error'; error: { message?: string } }
+
 export interface NyraDocumentResult {
   documentId: string
   kbName: string
@@ -616,6 +621,79 @@ export class ApiService {
     }
 
     return (await response.json()) as PoolTroubleshootResponse
+  }
+
+  async troubleshootPoolWithProgress(
+    poolId: string,
+    question: string,
+    onProgress: (progress: TicketWorkflowProgress) => void,
+  ): Promise<PoolTroubleshootResponse> {
+    const response = await fetch(this.apiUrl(`/pool/${encodeURIComponent(poolId)}/troubleshoot-progress`), {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ question }),
+    })
+
+    if (!response.ok) {
+      throw new Error(await this.readErrorMessage(response, `Unable to troubleshoot pool ${poolId}.`))
+    }
+
+    if (!response.body) {
+      return await this.troubleshootPool(poolId, question)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let pending = ''
+    let result: PoolTroubleshootResponse | null = null
+
+    while (true) {
+      const { value, done } = await reader.read()
+      pending += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+
+      const lines = pending.split('\n')
+      pending = lines.pop() ?? ''
+
+      for (const line of lines) {
+        const trimmedLine = line.trim()
+        if (!trimmedLine) {
+          continue
+        }
+
+        const streamEvent = JSON.parse(trimmedLine) as PoolTroubleshootStreamEvent
+        if (streamEvent.type === 'progress') {
+          onProgress(streamEvent.progress)
+        } else if (streamEvent.type === 'result') {
+          result = streamEvent.result
+        } else if (streamEvent.type === 'error') {
+          throw new Error(streamEvent.error.message || 'PoolSense troubleshoot request failed.')
+        }
+      }
+
+      if (done) {
+        break
+      }
+    }
+
+    if (pending.trim()) {
+      const streamEvent = JSON.parse(pending.trim()) as PoolTroubleshootStreamEvent
+      if (streamEvent.type === 'result') {
+        result = streamEvent.result
+      } else if (streamEvent.type === 'error') {
+        throw new Error(streamEvent.error.message || 'PoolSense troubleshoot request failed.')
+      } else if (streamEvent.type === 'progress') {
+        onProgress(streamEvent.progress)
+      }
+    }
+
+    if (!result) {
+      throw new Error('PoolSense troubleshoot request completed without a result.')
+    }
+
+    return result
   }
 
   private async encryptPassword(password: string): Promise<string | null> {

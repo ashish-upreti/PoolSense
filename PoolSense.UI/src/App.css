@@ -3935,7 +3935,70 @@
   }
 
   .pool-troubleshoot-answer .message-body {
-    white-space: pre-wrap;
+    white-space: normal;
+  }
+
+  .pool-troubleshoot-loading.loading-status-card {
+    min-height: 12rem;
+    border-radius: 18px;
+  }
+
+  .troubleshoot-progress-track {
+    grid-template-columns: repeat(auto-fit, minmax(6.4rem, 1fr));
+  }
+
+  .markdown-body {
+    display: grid;
+    gap: 0.55rem;
+  }
+
+  .markdown-body :is(p, ul, ol, h3, h4, h5, h6) {
+    margin: 0;
+  }
+
+  .markdown-body :is(h3, h4, h5, h6) {
+    color: var(--heading-text);
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    line-height: 1.35;
+    text-transform: uppercase;
+  }
+
+  .markdown-body :is(ul, ol) {
+    display: grid;
+    gap: 0.3rem;
+    padding-left: 1.15rem;
+  }
+
+  .markdown-body li {
+    padding-left: 0.1rem;
+  }
+
+  .markdown-body strong {
+    color: var(--heading-text);
+    font-weight: 800;
+  }
+
+  .markdown-body code {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.08rem 0.28rem;
+    background: var(--panel-subtle);
+    color: var(--heading-text);
+    font-family: var(--mono-font);
+    font-size: 0.9em;
+  }
+
+  .markdown-body a {
+    color: var(--accent);
+    font-weight: 700;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+
+  .markdown-body a:hover {
+    text-decoration: underline;
   }
 
   .troubleshoot-doc-list {

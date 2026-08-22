@@ -11,19 +11,23 @@ namespace PoolSense.Api.Controllers;
 public sealed class PoolReportController : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions StreamJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IProcessedSourceEventRepository _processedSourceEventRepository;
     private readonly ILLMService _llmService;
     private readonly IPoolTroubleshootEvidenceService _evidenceService;
+    private readonly ILogger<PoolReportController> _logger;
 
     public PoolReportController(
         IProcessedSourceEventRepository processedSourceEventRepository,
         ILLMService llmService,
-        IPoolTroubleshootEvidenceService evidenceService)
+        IPoolTroubleshootEvidenceService evidenceService,
+        ILogger<PoolReportController> logger)
     {
         _processedSourceEventRepository = processedSourceEventRepository;
         _llmService = llmService;
         _evidenceService = evidenceService;
+        _logger = logger;
     }
 
     [HttpGet("reports")]
@@ -117,11 +121,123 @@ public sealed class PoolReportController : ControllerBase
             return NotFound($"No PoolSense report was found for pool {sourceEventId}.");
         }
 
-        var question = request.Question.Trim();
+        return Ok(await CreateTroubleshootResponseAsync(report, request.Question.Trim(), cancellationToken));
+    }
+
+    [HttpPost("{sourceEventId}/troubleshoot-progress")]
+    public async Task<IActionResult> TroubleshootWithProgress(
+        string sourceEventId,
+        [FromBody] PoolTroubleshootRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sourceEventId))
+        {
+            return BadRequest("Pool number is required.");
+        }
+
+        if (request is null || string.IsNullOrWhiteSpace(request.Question))
+        {
+            return BadRequest("A troubleshooting question is required.");
+        }
+
+        Response.ContentType = "application/x-ndjson";
+        Response.Headers.CacheControl = "no-cache";
+        Response.Headers.XContentTypeOptions = "nosniff";
+
+        try
+        {
+            await WriteStreamEventAsync("progress", CreateProgress(
+                "pool-report",
+                "Loading saved report",
+                $"Finding the latest PoolSense report for pool {sourceEventId}.",
+                "active",
+                1), cancellationToken);
+
+            var report = await _processedSourceEventRepository.GetLatestReportAsync(sourceEventId, cancellationToken);
+            if (report?.WorkflowResult is null)
+            {
+                await WriteStreamEventAsync("error", new { message = $"No PoolSense report was found for pool {sourceEventId}." }, cancellationToken);
+                return new EmptyResult();
+            }
+
+            await WriteStreamEventAsync("progress", CreateProgress(
+                "pool-report",
+                "Loading saved report",
+                "Saved report context is ready.",
+                "completed",
+                1), cancellationToken);
+
+            var response = await CreateTroubleshootResponseAsync(
+                report,
+                request.Question.Trim(),
+                cancellationToken,
+                async (progress, token) => await WriteStreamEventAsync("progress", progress, token));
+
+            await WriteStreamEventAsync("result", response, cancellationToken);
+            return new EmptyResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error troubleshooting pool {SourceEventId} through streaming workflow.", sourceEventId);
+            var message = $"An error occurred while troubleshooting pool {sourceEventId}: {ex.Message}";
+
+            if (!Response.HasStarted)
+            {
+                return StatusCode(500, message);
+            }
+
+            await WriteStreamEventAsync("error", new { message }, cancellationToken);
+            return new EmptyResult();
+        }
+    }
+
+    private async Task<PoolTroubleshootResponse> CreateTroubleshootResponseAsync(
+        ProcessedSourceEventRecord report,
+        string question,
+        CancellationToken cancellationToken,
+        Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback = null)
+    {
+        await ReportProgressAsync(
+            progressCallback,
+            "fresh-evidence",
+            "Retrieving fresh evidence",
+            "Searching recent incidents and configured NYRA Wiki knowledge bases for this follow-up.",
+            "active",
+            2,
+            cancellationToken);
+
         var evidence = await _evidenceService.RetrieveAsync(question, report.Application, report.ProjectId, cancellationToken);
+
+        await ReportProgressAsync(
+            progressCallback,
+            "fresh-evidence",
+            "Retrieving fresh evidence",
+            $"Found {evidence.SimilarIncidents.Count} incident(s) and {evidence.NyraDocuments.Count} NYRA document(s).",
+            "completed",
+            2,
+            cancellationToken);
+
+        await ReportProgressAsync(
+            progressCallback,
+            "troubleshoot-answer",
+            "Preparing answer",
+            "Combining saved report context with fresh evidence.",
+            "active",
+            3,
+            cancellationToken);
+
         var answer = await _llmService.GetResponseAsync(BuildTroubleshootPrompt(report, question, evidence));
 
-        return Ok(new PoolTroubleshootResponse
+        await ReportProgressAsync(
+            progressCallback,
+            "troubleshoot-answer",
+            "Preparing answer",
+            "Troubleshooting answer is ready.",
+            "completed",
+            3,
+            cancellationToken);
+
+        return new PoolTroubleshootResponse
         {
             SourceEventId = report.SourceEventId,
             Question = question,
@@ -132,7 +248,50 @@ public sealed class PoolReportController : ControllerBase
             NyraKnowledgeBaseUsed = evidence.NyraKnowledgeBaseUsed,
             NyraKnowledgeBaseNames = evidence.NyraKnowledgeBaseNames,
             NyraDocuments = evidence.NyraDocuments
-        });
+        };
+    }
+
+    private async Task WriteStreamEventAsync(string type, object payload, CancellationToken cancellationToken)
+    {
+        var streamEvent = new Dictionary<string, object?>
+        {
+            ["type"] = type,
+            [type] = payload
+        };
+
+        await JsonSerializer.SerializeAsync(Response.Body, streamEvent, StreamJsonOptions, cancellationToken);
+        await Response.WriteAsync("\n", cancellationToken);
+        await Response.Body.FlushAsync(cancellationToken);
+    }
+
+    private static async Task ReportProgressAsync(
+        Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback,
+        string stage,
+        string title,
+        string detail,
+        string state,
+        int order,
+        CancellationToken cancellationToken)
+    {
+        if (progressCallback is null)
+        {
+            return;
+        }
+
+        await progressCallback(CreateProgress(stage, title, detail, state, order), cancellationToken);
+    }
+
+    private static TicketWorkflowProgress CreateProgress(string stage, string title, string detail, string state, int order)
+    {
+        return new TicketWorkflowProgress
+        {
+            Stage = stage,
+            Title = title,
+            Detail = detail,
+            State = state,
+            Order = order,
+            TimestampUtc = DateTimeOffset.UtcNow
+        };
     }
 
     private static string BuildTroubleshootPrompt(ProcessedSourceEventRecord report, string question, PoolTroubleshootEvidence evidence)
