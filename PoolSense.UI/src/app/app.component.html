@@ -1402,6 +1402,7 @@
                     </div>
                     <div class="application-card-confidence">
                       <strong class="application-card-confidence-value">{{ getProjectStatus(project).progressPercentage }}%</strong>
+                      <span>Confidence</span>
                     </div>
                   </div>
                 </article>
@@ -1518,7 +1519,7 @@
             </div>
           </form>
 
-          <aside *ngIf="enableApplicationFeedbackInsights" class="application-feedback-insights-card" aria-label="PoolSense feedback insights">
+          <aside class="application-feedback-insights-card" aria-label="PoolSense feedback insights">
             <div class="application-feedback-insights-header">
               <span class="application-feedback-insights-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

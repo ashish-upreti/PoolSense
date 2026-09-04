@@ -426,7 +426,6 @@ export class AppComponent implements OnInit {
   applicationFeedbackError = ''
   applicationFeedbackNotice = ''
   isApplicationFeedbackSaving = false
-  enableApplicationFeedbackInsights = false
   applicationFeedbackInsights: ApplicationFeedbackInsights | null = null
   applicationFeedbackInsightsError = ''
   isApplicationFeedbackInsightsLoading = false
