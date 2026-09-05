@@ -122,24 +122,23 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         var title = request.GetWorkflowTitle();
         var description = request.GetWorkflowDescription();
 
-        await ReportProgressAsync(progressCallback, "categorize", "Classifying request", "Determining whether to use pool data, NYRA Wiki, or both.", "active", 1, cancellationToken);
+        await ReportProgressAsync(progressCallback, "categorize", "Classifying request", "Hybrid search is always enabled: querying pool data and NYRA Wiki.", "active", 1, cancellationToken);
 
-        _logger.LogInformation("Categorizing query for ticket {TicketId}.", request.TicketId);
-        var categorizationJson = await _queryCategorizationAgent.CategorizeQueryAsync(title, description);
-        var categorization = JsonSerializer.Deserialize<QueryCategorizationResult>(AiJsonResponseSanitizer.Normalize(categorizationJson), JsonOptions)
-            ?? new QueryCategorizationResult { Category = "Issue" };
-        _logger.LogInformation(
-            "Query categorized as {QueryCategory} for ticket {TicketId}: {QueryCategorizationReasoning}",
-            categorization.Category,
-            request.TicketId,
-            categorization.Reasoning);
-        await ReportProgressAsync(progressCallback, "categorize", "Classifying request", $"Detected {categorization.Category} query.", "completed", 1, cancellationToken);
+        // Query categorization is temporarily disabled; always run the full hybrid search (Pool DB + NYRA Wiki).
+        // _logger.LogInformation("Categorizing query for ticket {TicketId}.", request.TicketId);
+        // var categorizationJson = await _queryCategorizationAgent.CategorizeQueryAsync(title, description);
+        // var categorization = JsonSerializer.Deserialize<QueryCategorizationResult>(AiJsonResponseSanitizer.Normalize(categorizationJson), JsonOptions)
+        //     ?? new QueryCategorizationResult { Category = "Issue" };
+        var categorization = new QueryCategorizationResult { Category = "Issue", Reasoning = "Classification disabled; hybrid search always runs." };
+        _logger.LogInformation("Query categorization is disabled for ticket {TicketId}; always using hybrid search (Pool DB + NYRA Wiki).", request.TicketId);
+        await ReportProgressAsync(progressCallback, "categorize", "Classifying request", "Hybrid search enabled (pool data + NYRA Wiki).", "completed", 1, cancellationToken);
 
-        var isInfoOnlyQuery = !persistKnowledge && categorization.Category.Equals("Info", StringComparison.OrdinalIgnoreCase);
-        if (isInfoOnlyQuery)
-        {
-            return await ProcessInfoQueryAsync(request, title, description, categorization, processingStopwatch, progressCallback, cancellationToken);
-        }
+        // Info-only branch disabled so every request queries both the Pool DB and NYRA Wiki.
+        // var isInfoOnlyQuery = !persistKnowledge && categorization.Category.Equals("Info", StringComparison.OrdinalIgnoreCase);
+        // if (isInfoOnlyQuery)
+        // {
+        //     return await ProcessInfoQueryAsync(request, title, description, categorization, processingStopwatch, progressCallback, cancellationToken);
+        // }
 
         await ReportProgressAsync(progressCallback, "analyze", "Analyzing issue", "Extracting problem details, symptoms, and keywords.", "active", 2, cancellationToken);
         _logger.LogInformation("Analyzing ticket {TicketId}.", request.TicketId);

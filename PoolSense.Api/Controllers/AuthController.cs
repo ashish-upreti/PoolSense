@@ -28,6 +28,7 @@ public sealed class AuthController : ControllerBase
     private readonly ISessionPasswordStore _sessionPasswordStore;
     private readonly IAuthUserRepository _authUserRepository;
     private readonly IUserActivityAuditLogger _auditLogger;
+    private readonly ISessionSlidingExpirationService _slidingExpirationService;
 
     public AuthController(
         IOptions<ActiveDirectoryOptions> activeDirectoryOptions,
@@ -39,7 +40,8 @@ public sealed class AuthController : ControllerBase
         IJwtTokenService jwtTokenService,
         ISessionPasswordStore sessionPasswordStore,
         IAuthUserRepository authUserRepository,
-        IUserActivityAuditLogger auditLogger)
+        IUserActivityAuditLogger auditLogger,
+        ISessionSlidingExpirationService slidingExpirationService)
     {
         _activeDirectoryOptions = activeDirectoryOptions.Value;
         _authOptions = authOptions.Value;
@@ -51,6 +53,7 @@ public sealed class AuthController : ControllerBase
         _sessionPasswordStore = sessionPasswordStore;
         _authUserRepository = authUserRepository;
         _auditLogger = auditLogger;
+        _slidingExpirationService = slidingExpirationService;
     }
 
     [HttpGet("pubkey")]
@@ -195,9 +198,8 @@ public sealed class AuthController : ControllerBase
             return StatusCode(authResult.StatusCode, payload);
         }
 
-        var rememberMeLifetime = TimeSpan.FromDays(Math.Max(1, _authOptions.RememberMeDays));
-        var defaultLifetime = TimeSpan.FromHours(Math.Max(1, _authOptions.SessionHours));
-        var sessionLifetime = mutableRequest.RememberMe ? rememberMeLifetime : defaultLifetime;
+        // Sessions slide on activity (see PoolSenseJwtAuthenticationHandler) and only expire after inactivity.
+        var sessionLifetime = TimeSpan.FromDays(Math.Max(1, _authOptions.InactivityTimeoutDays));
 
         var tokenEnvelope = _jwtTokenService.CreateToken(authResult.User, password!, sessionLifetime);
         var allowInsecureTransport = _authOptions.AllowInsecurePasswordFallback && !HttpContext.Request.IsHttps;
@@ -276,7 +278,7 @@ public sealed class AuthController : ControllerBase
     }
 
     [HttpGet("session")]
-    public IActionResult GetSession()
+    public async Task<IActionResult> GetSession(CancellationToken cancellationToken)
     {
         var token = _jwtTokenService.GetTokenFromRequest(Request);
         if (string.IsNullOrWhiteSpace(token))
@@ -309,7 +311,7 @@ public sealed class AuthController : ControllerBase
             });
         }
 
-        if (!_sessionPasswordStore.TryGet(jti, out _))
+        if (!_sessionPasswordStore.TryGet(jti, out var sessionEntry) || sessionEntry is null)
         {
             if (_sessionPasswordStore.HasDecryptionFailure(jti))
             {
@@ -330,6 +332,9 @@ public sealed class AuthController : ControllerBase
             });
         }
 
+        // Opening the app with a still-valid session counts as activity, so extend it here too.
+        _slidingExpirationService.ExtendIfNeeded(HttpContext, jti, sessionEntry, principal);
+
         var username = GetClaimValue(principal, "username");
         if (string.IsNullOrWhiteSpace(username))
         {
@@ -349,6 +354,10 @@ public sealed class AuthController : ControllerBase
 
         var displayName = GetClaimValue(principal, "displayName");
         var email = GetSessionEmail(principal, username, authPrincipal);
+
+        // Every successful session check represents the user opening PoolSense, not just an explicit login.
+        var clientAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        await RecordSessionResumedAsync(username, authPrincipal, clientAddress, cancellationToken);
 
         return Ok(new
         {
@@ -449,6 +458,18 @@ public sealed class AuthController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Unable to persist failed authentication attempt for user '{Username}'.", username ?? string.Empty);
+        }
+    }
+
+    private async Task RecordSessionResumedAsync(string username, string authPrincipal, string clientAddress, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _authUserRepository.RecordSessionResumedAsync(username, authPrincipal, clientAddress, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to persist session-resume audit entry for user '{Username}'.", username);
         }
     }
 

@@ -56,6 +56,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<IRsaKeyMaterialProvider, RsaKeyMaterialProvider>();
 builder.Services.AddSingleton<ISessionPasswordStore, SessionPasswordStore>();
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
+builder.Services.AddSingleton<ISessionSlidingExpirationService, SessionSlidingExpirationService>();
 builder.Services.AddSingleton<IActiveDirectoryAuthService, ActiveDirectoryAuthService>();
 builder.Services.AddAuthentication(PoolSenseJwtAuthenticationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, PoolSenseJwtAuthenticationHandler>(PoolSenseJwtAuthenticationHandler.SchemeName, _ => { });
@@ -110,6 +111,8 @@ builder.Services.AddScoped<IncidentContextBuilder>();
 
 builder.Services.AddSingleton<InMemoryVectorStoreCache>();
 builder.Services.AddSingleton<IVectorStoreCacheInvalidator>(sp => sp.GetRequiredService<InMemoryVectorStoreCache>());
+builder.Services.AddSingleton<TicketKnowledgeReembedJobStatus>();
+builder.Services.AddSingleton<ITicketKnowledgeReembeddingService, TicketKnowledgeReembeddingService>();
 builder.Services.AddScoped<IPoolSenseSqlConnectionFactory, PoolSenseSqlConnectionFactory>();
 builder.Services.AddScoped<IAuthUserRepository, AuthUserRepository>();
 builder.Services.AddScoped<IVectorSimilaritySearch, CosineVectorSimilaritySearch>();
@@ -196,6 +199,11 @@ builder.Services.AddScoped<Kernel>(sp =>
         deploymentName: nyraSettings.CategorizationModel,
         azureOpenAIClient: nyraClient,
         serviceId: QueryCategorizationAgent.CategorizationServiceId);
+
+    kernelBuilder.AddAzureOpenAIChatCompletion(
+        deploymentName: nyraSettings.ResolutionModel,
+        azureOpenAIClient: nyraClient,
+        serviceId: ResolutionAgent.ResolutionServiceId);
 
     return kernelBuilder.Build();
 });
@@ -285,4 +293,43 @@ if (File.Exists(spaIndexPath))
     app.MapFallbackToFile("index.html");
 }
 
+// One-time CLI mode: `dotnet run -- --reembed-ticket-knowledge` re-embeds ticket_knowledge without
+// starting Kestrel or the background ticket-polling hosted service (no HTTP/admin auth needed).
+if (args.Contains("--reembed-ticket-knowledge", StringComparer.OrdinalIgnoreCase))
+{
+    await RunTicketKnowledgeReembedCliAsync(app.Services);
+    return;
+}
+
 app.Run();
+
+static async Task RunTicketKnowledgeReembedCliAsync(IServiceProvider services)
+{
+    var reembeddingService = services.GetRequiredService<ITicketKnowledgeReembeddingService>();
+    if (!reembeddingService.TryStart())
+    {
+        Console.WriteLine("A re-embed job is already running.");
+        return;
+    }
+
+    Console.WriteLine("Started ticket_knowledge re-embed job...");
+    while (true)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        var status = reembeddingService.GetStatus();
+        Console.WriteLine($"  {status.Processed}/{status.Total} (succeeded: {status.Succeeded}, failed: {status.Failed})");
+        if (!status.IsRunning)
+        {
+            Console.WriteLine($"Done. Total: {status.Total}, Succeeded: {status.Succeeded}, Failed: {status.Failed}.");
+            if (!string.IsNullOrWhiteSpace(status.LastError))
+            {
+                Console.WriteLine($"Job error: {status.LastError}");
+            }
+            if (status.FailedTicketIds.Count > 0)
+            {
+                Console.WriteLine("Failed ticket IDs: " + string.Join(", ", status.FailedTicketIds));
+            }
+            break;
+        }
+    }
+}

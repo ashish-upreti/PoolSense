@@ -27,6 +27,8 @@ public sealed class ResolutionIncident
 
 public class ResolutionAgent : IResolutionAgent
 {
+    public const string ResolutionServiceId = "resolution";
+
     private readonly Kernel _kernel;
     private readonly ILlmTokenUsageRepository _tokenUsageRepository;
     private readonly IOptionsMonitor<NyraSettings> _nyraSettings;
@@ -98,7 +100,7 @@ Rules:
 - Do not include markdown, comments, code fences, or extra fields.
 ";
 
-        var arguments = new KernelArguments
+        var arguments = new KernelArguments(new PromptExecutionSettings { ServiceId = ResolutionServiceId })
         {
             { "title", title },
             { "description", description },
@@ -112,6 +114,6 @@ Rules:
             arguments,
             _tokenUsageRepository,
             "ResolutionGeneration",
-            _nyraSettings.CurrentValue.Model);
+            _nyraSettings.CurrentValue.ResolutionModel);
     }
 }

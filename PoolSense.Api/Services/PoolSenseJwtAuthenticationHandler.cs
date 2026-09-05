@@ -12,17 +12,20 @@ public sealed class PoolSenseJwtAuthenticationHandler : AuthenticationHandler<Au
 
     private readonly IJwtTokenService _jwtTokenService;
     private readonly ISessionPasswordStore _sessionPasswordStore;
+    private readonly ISessionSlidingExpirationService _slidingExpirationService;
 
     public PoolSenseJwtAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
         IJwtTokenService jwtTokenService,
-        ISessionPasswordStore sessionPasswordStore)
+        ISessionPasswordStore sessionPasswordStore,
+        ISessionSlidingExpirationService slidingExpirationService)
         : base(options, logger, encoder)
     {
         _jwtTokenService = jwtTokenService;
         _sessionPasswordStore = sessionPasswordStore;
+        _slidingExpirationService = slidingExpirationService;
     }
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -46,13 +49,15 @@ public sealed class PoolSenseJwtAuthenticationHandler : AuthenticationHandler<Au
             return Task.FromResult(AuthenticateResult.Fail("Session token is missing a token id."));
         }
 
-        if (!_sessionPasswordStore.TryGet(jti, out _))
+        if (!_sessionPasswordStore.TryGet(jti, out var entry) || entry is null)
         {
             return Task.FromResult(AuthenticateResult.Fail(
                 _sessionPasswordStore.HasDecryptionFailure(jti)
                     ? "Session requires re-authentication."
                     : "Session has expired."));
         }
+
+        _slidingExpirationService.ExtendIfNeeded(Context, jti, entry, principal);
 
         var identity = principal.Identity as ClaimsIdentity;
         if (identity is not null && string.IsNullOrWhiteSpace(identity.AuthenticationType))

@@ -9,5 +9,7 @@ public interface IJwtTokenService
 
     ClaimsPrincipal? ValidateToken(string token);
 
+    string RefreshToken(ClaimsPrincipal principal, DateTimeOffset expiresAtUtc);
+
     string? GetTokenFromRequest(HttpRequest request);
 }

@@ -15,6 +15,7 @@ public interface ITicketKnowledgeEmbeddingStore
     Task<TicketKnowledge> AddTicketKnowledgeAsync(TicketKnowledge ticketKnowledge, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TicketKnowledge>> GetTicketKnowledgeAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<IncidentTimelinePoint>> GetIncidentTimelineAsync(int monthCount = 6, CancellationToken cancellationToken = default);
+    Task UpdateEmbeddingAsync(int id, float[] embedding, CancellationToken cancellationToken = default);
 }
 
 public interface IVectorSimilaritySearch

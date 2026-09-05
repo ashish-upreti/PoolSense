@@ -9,6 +9,8 @@ public interface IAuthUserRepository
     Task RecordSuccessfulLoginAsync(AuthenticatedUser user, string clientAddress, CancellationToken cancellationToken = default);
 
     Task RecordFailedLoginAsync(string? username, int statusCode, string message, string clientAddress, CancellationToken cancellationToken = default);
+
+    Task RecordSessionResumedAsync(string username, string authPrincipal, string clientAddress, CancellationToken cancellationToken = default);
 }
 
 public sealed class AuthUserRepository : IAuthUserRepository
@@ -76,6 +78,24 @@ public sealed class AuthUserRepository : IAuthUserRepository
         command.Parameters.AddWithValue("@username", string.IsNullOrWhiteSpace(username) ? string.Empty : username.Trim());
         command.Parameters.AddWithValue("@statusCode", statusCode);
         command.Parameters.AddWithValue("@message", string.IsNullOrWhiteSpace(message) ? "Authentication failed" : message);
+        command.Parameters.AddWithValue("@clientAddress", clientAddress);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task RecordSessionResumedAsync(string username, string authPrincipal, string clientAddress, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = """
+            INSERT INTO dbo.auth_login_audit (username, auth_principal, success, status_code, message, client_address, created_at)
+            VALUES (@username, @authPrincipal, 1, 200, 'Session validated (app opened)', @clientAddress, SYSUTCDATETIME());
+            """;
+
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@username", string.IsNullOrWhiteSpace(username) ? string.Empty : username.Trim());
+        command.Parameters.AddWithValue("@authPrincipal", string.IsNullOrWhiteSpace(authPrincipal) ? string.Empty : authPrincipal.Trim());
         command.Parameters.AddWithValue("@clientAddress", clientAddress);
 
         await command.ExecuteNonQueryAsync(cancellationToken);

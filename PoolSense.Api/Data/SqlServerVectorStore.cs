@@ -97,6 +97,26 @@ public sealed class SqlServerVectorStore : IVectorStore, ITicketKnowledgeEmbeddi
         return _cache.GetOrLoadAsync(LoadTicketKnowledgeAsync, cancellationToken);
     }
 
+    public async Task UpdateEmbeddingAsync(int id, float[] embedding, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(embedding);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = """
+            UPDATE dbo.ticket_knowledge
+            SET embedding = @embedding
+            WHERE id = @id;
+            """;
+
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@id", id);
+        command.Parameters.AddWithValue("@embedding", JsonSerializer.Serialize(embedding));
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<TicketKnowledge>> SearchSimilarTickets(
         float[] embedding,
         int limit = 5,

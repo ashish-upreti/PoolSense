@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PoolSense.Api.Agents;
 using PoolSense.Api.Data;
@@ -27,6 +28,7 @@ public class KnowledgeController : ControllerBase
     private readonly ISimilaritySearchService _similaritySearchService;
     private readonly IVectorStore _vectorStore;
     private readonly IUserActivityAuditLogger _auditLogger;
+    private readonly ITicketKnowledgeReembeddingService _reembeddingService;
     private readonly ILogger<KnowledgeController> _logger;
 
     /// <summary>
@@ -38,6 +40,7 @@ public class KnowledgeController : ControllerBase
     /// <param name="similaritySearchService">The service that searches for similar tickets.</param>
     /// <param name="vectorStore">The vector store used to persist ticket knowledge.</param>
     /// <param name="auditLogger">The audit logger.</param>
+    /// <param name="reembeddingService">The one-time job that regenerates embeddings for existing ticket knowledge.</param>
     /// <param name="logger">Logger for persisting errors to the database.</param>
     public KnowledgeController(
         ITicketAnalyzerAgent ticketAnalyzerAgent,
@@ -46,6 +49,7 @@ public class KnowledgeController : ControllerBase
         ISimilaritySearchService similaritySearchService,
         IVectorStore vectorStore,
         IUserActivityAuditLogger auditLogger,
+        ITicketKnowledgeReembeddingService reembeddingService,
         ILogger<KnowledgeController> logger)
     {
         _ticketAnalyzerAgent = ticketAnalyzerAgent;
@@ -54,6 +58,7 @@ public class KnowledgeController : ControllerBase
         _similaritySearchService = similaritySearchService;
         _vectorStore = vectorStore;
         _auditLogger = auditLogger;
+        _reembeddingService = reembeddingService;
         _logger = logger;
     }
 
@@ -163,6 +168,38 @@ public class KnowledgeController : ControllerBase
             _logger.LogError(ex, "Error searching for similar tickets.");
             return StatusCode(500, $"An error occurred while searching for similar tickets: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Starts a one-time background job that regenerates every stored ticket_knowledge embedding
+    /// using the currently configured embedding model (fixes stale vectors after a model change).
+    /// </summary>
+    [HttpPost("knowledge/reembed")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> StartReembed(CancellationToken cancellationToken)
+    {
+        var started = _reembeddingService.TryStart();
+        var status = _reembeddingService.GetStatus();
+
+        if (!started)
+        {
+            return Conflict(new { success = false, message = "A re-embedding job is already running.", status });
+        }
+
+        await _auditLogger.LogAsync("ReembedTicketKnowledge", "TicketKnowledge", "all",
+            "Started ticket_knowledge re-embed job.", success: true, cancellationToken);
+
+        return Accepted(new { success = true, message = "Re-embedding job started.", status });
+    }
+
+    /// <summary>
+    /// Returns the progress of the re-embed job (or its last completed result).
+    /// </summary>
+    [HttpGet("knowledge/reembed/status")]
+    [Authorize(Roles = "Admin")]
+    public IActionResult GetReembedStatus()
+    {
+        return Ok(new { success = true, status = _reembeddingService.GetStatus() });
     }
 
     private sealed class TicketAnalysisResult

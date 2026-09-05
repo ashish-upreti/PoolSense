@@ -41,7 +41,7 @@ public sealed class JwtTokenService : IJwtTokenService
     public TokenEnvelope CreateToken(AuthenticatedUser user, string password, TimeSpan? sessionLifetime = null)
     {
         var jti = Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLowerInvariant();
-        var effectiveLifetime = sessionLifetime ?? TimeSpan.FromHours(_authOptions.SessionHours);
+        var effectiveLifetime = sessionLifetime ?? TimeSpan.FromDays(_authOptions.InactivityTimeoutDays);
         var expiresAtUtc = DateTimeOffset.UtcNow.Add(effectiveLifetime);
         var isAdmin = user.IsAdmin ?? false;
 
@@ -96,6 +96,19 @@ public sealed class JwtTokenService : IJwtTokenService
         {
             return null;
         }
+    }
+
+    public string RefreshToken(ClaimsPrincipal principal, DateTimeOffset expiresAtUtc)
+    {
+        var descriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(principal.Claims),
+            Expires = expiresAtUtc.UtcDateTime,
+            SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(_secret), SecurityAlgorithms.HmacSha256)
+        };
+
+        var token = _tokenHandler.CreateToken(descriptor);
+        return _tokenHandler.WriteToken(token);
     }
 
     public string? GetTokenFromRequest(HttpRequest request)

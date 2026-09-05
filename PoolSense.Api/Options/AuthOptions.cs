@@ -11,4 +11,7 @@ public sealed class AuthOptions
     public int SessionHours { get; set; } = 8;
 
     public int RememberMeDays { get; set; } = 4;
+
+    // Sliding session window: a session only expires after this many days with no activity.
+    public int InactivityTimeoutDays { get; set; } = 14;
 }

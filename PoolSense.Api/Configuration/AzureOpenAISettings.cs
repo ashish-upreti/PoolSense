@@ -36,6 +36,7 @@ public class NyraSettings
     public string ResponsesUrl { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
     public string CategorizationModel { get; set; } = string.Empty;
+    public string ResolutionModel { get; set; } = string.Empty;
     public string EmbeddingEndpoint { get; set; } = string.Empty;
     public string EmbeddingGenerateUrl { get; set; } = string.Empty;
     public string EmbeddingModel { get; set; } = string.Empty;
@@ -58,6 +59,7 @@ public class NyraProfileSettings
     public string ResponsesUrl { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
     public string CategorizationModel { get; set; } = string.Empty;
+    public string ResolutionModel { get; set; } = string.Empty;
     public string EmbeddingEndpoint { get; set; } = string.Empty;
     public string EmbeddingGenerateUrl { get; set; } = string.Empty;
     public string EmbeddingModel { get; set; } = string.Empty;
@@ -131,6 +133,7 @@ public static class NyraSettingsResolver
             settings.ResponsesUrl = FirstNonEmpty(profile.ResponsesUrl, settings.ResponsesUrl);
             settings.Model = FirstNonEmpty(profile.Model, settings.Model);
             settings.CategorizationModel = FirstNonEmpty(profile.CategorizationModel, settings.CategorizationModel);
+            settings.ResolutionModel = FirstNonEmpty(profile.ResolutionModel, settings.ResolutionModel);
             settings.EmbeddingEndpoint = FirstNonEmpty(profile.EmbeddingEndpoint, settings.EmbeddingEndpoint);
             settings.EmbeddingGenerateUrl = FirstNonEmpty(profile.EmbeddingGenerateUrl, settings.EmbeddingGenerateUrl);
             settings.EmbeddingModel = FirstNonEmpty(profile.EmbeddingModel, settings.EmbeddingModel);
@@ -142,6 +145,7 @@ public static class NyraSettingsResolver
         settings.Scope = FirstNonEmpty(settings.Scope, "openid");
         settings.EmbeddingSubscriptionType = FirstNonEmpty(settings.EmbeddingSubscriptionType, "azure");
         settings.CategorizationModel = FirstNonEmpty(settings.CategorizationModel, "gpt-5.4-mini");
+        settings.ResolutionModel = FirstNonEmpty(settings.ResolutionModel, "gpt-5.5");
     }
 
     public static bool HasRequiredSettings(NyraSettings settings)
