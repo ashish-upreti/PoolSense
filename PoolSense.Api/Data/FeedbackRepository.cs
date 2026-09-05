@@ -143,9 +143,7 @@ public sealed class FeedbackRepository : IFeedbackRepository
             SELECT
                 COUNT(*) AS total_feedback,
                 ISNULL(SUM(CASE WHEN @isAllTime = 1 OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS feedback_last_30_days,
-                ISNULL(SUM(CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart THEN 1 ELSE 0 END), 0) AS previous_feedback_30_days,
-                COUNT(DISTINCT CASE WHEN @isAllTime = 1 OR created_at >= @rangeStart THEN NULLIF(LOWER(LTRIM(RTRIM(user_email))), '') END) AS unique_submitters_last_30_days,
-                COUNT(DISTINCT CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart THEN NULLIF(LOWER(LTRIM(RTRIM(user_email))), '') END) AS previous_unique_submitters_30_days
+                ISNULL(SUM(CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart THEN 1 ELSE 0 END), 0) AS previous_feedback_30_days
             FROM dbo.application_feedback_logs;
 
             SELECT
@@ -154,6 +152,20 @@ public sealed class FeedbackRepository : IFeedbackRepository
                 ISNULL(SUM(CASE WHEN @isAllTime = 1 OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS total_ai_feedback_last_30_days,
                 ISNULL(SUM(CASE WHEN (@isAllTime = 1 OR created_at >= @rangeStart) AND feedback_type = -1 THEN 1 ELSE 0 END), 0) AS not_helpful_ai_feedback_last_30_days
             FROM dbo.feedback_logs;
+
+            SELECT
+                COUNT(DISTINCT CASE WHEN (@isAllTime = 1 OR created_at >= @rangeStart) AND success = 1 THEN NULLIF(LOWER(LTRIM(RTRIM(username))), '') END) AS unique_active_users_last_30_days,
+                COUNT(DISTINCT CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart AND success = 1 THEN NULLIF(LOWER(LTRIM(RTRIM(username))), '') END) AS previous_unique_active_users_30_days,
+                COUNT(DISTINCT CASE WHEN created_at >= CAST(@now AS date) AND success = 1 THEN NULLIF(LOWER(LTRIM(RTRIM(username))), '') END) AS users_today,
+                COUNT(DISTINCT CASE WHEN created_at >= DATEADD(day, -1, CAST(@now AS date)) AND created_at < CAST(@now AS date) AND success = 1 THEN NULLIF(LOWER(LTRIM(RTRIM(username))), '') END) AS users_yesterday,
+                ISNULL(SUM(CASE WHEN (@isAllTime = 1 OR created_at >= @rangeStart) AND success = 1 THEN 1 ELSE 0 END), 0) AS total_logins_last_30_days,
+                ISNULL(SUM(CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart AND success = 1 THEN 1 ELSE 0 END), 0) AS previous_total_logins_30_days
+            FROM dbo.auth_login_audit;
+
+            SELECT
+                ISNULL(SUM(CASE WHEN @isAllTime = 1 OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS recommendations_processed_last_30_days,
+                ISNULL(SUM(CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart THEN 1 ELSE 0 END), 0) AS previous_recommendations_processed_30_days
+            FROM dbo.interaction_logs;
 
             SELECT TOP (4)
                 COALESCE(NULLIF(LTRIM(RTRIM(feedback_type)), ''), 'Unclassified') AS feedback_type,
@@ -212,16 +224,12 @@ public sealed class FeedbackRepository : IFeedbackRepository
         var totalFeedback = 0;
         var feedbackLast30Days = 0;
         var previousFeedback30Days = 0;
-        var uniqueSubmittersLast30Days = 0;
-        var previousUniqueSubmitters30Days = 0;
 
         if (await reader.ReadAsync(cancellationToken))
         {
             totalFeedback = reader.GetInt32(0);
             feedbackLast30Days = reader.GetInt32(1);
             previousFeedback30Days = reader.GetInt32(2);
-            uniqueSubmittersLast30Days = reader.GetInt32(3);
-            previousUniqueSubmitters30Days = reader.GetInt32(4);
         }
 
         await reader.NextResultAsync(cancellationToken);
@@ -237,6 +245,36 @@ public sealed class FeedbackRepository : IFeedbackRepository
             previousHelpfulAiFeedback30Days = reader.GetInt32(1);
             totalAiFeedbackLast30Days = reader.GetInt32(2);
             notHelpfulAiFeedbackLast30Days = reader.GetInt32(3);
+        }
+
+        await reader.NextResultAsync(cancellationToken);
+
+        var uniqueActiveUsersLast30Days = 0;
+        var previousUniqueActiveUsers30Days = 0;
+        var usersToday = 0;
+        var usersYesterday = 0;
+        var totalLoginsLast30Days = 0;
+        var previousTotalLogins30Days = 0;
+
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            uniqueActiveUsersLast30Days = reader.GetInt32(0);
+            previousUniqueActiveUsers30Days = reader.GetInt32(1);
+            usersToday = reader.GetInt32(2);
+            usersYesterday = reader.GetInt32(3);
+            totalLoginsLast30Days = reader.GetInt32(4);
+            previousTotalLogins30Days = reader.GetInt32(5);
+        }
+
+        await reader.NextResultAsync(cancellationToken);
+
+        var recommendationsProcessedLast30Days = 0;
+        var previousRecommendationsProcessed30Days = 0;
+
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            recommendationsProcessedLast30Days = reader.GetInt32(0);
+            previousRecommendationsProcessed30Days = reader.GetInt32(1);
         }
 
         await reader.NextResultAsync(cancellationToken);
@@ -268,8 +306,14 @@ public sealed class FeedbackRepository : IFeedbackRepository
             totalFeedback,
             feedbackLast30Days,
             previousFeedback30Days,
-            uniqueSubmittersLast30Days,
-            previousUniqueSubmitters30Days,
+            uniqueActiveUsersLast30Days,
+            previousUniqueActiveUsers30Days,
+            usersToday,
+            usersYesterday,
+            totalLoginsLast30Days,
+            previousTotalLogins30Days,
+            recommendationsProcessedLast30Days,
+            previousRecommendationsProcessed30Days,
             helpfulAiFeedbackLast30Days,
             previousHelpfulAiFeedback30Days,
             totalAiFeedbackLast30Days,

@@ -506,6 +506,33 @@ export class AppComponent implements OnInit {
       .join(' · ')
   }
 
+  get usersToday() {
+    return this.applicationFeedbackInsights?.usersToday ?? 0
+  }
+
+  get usersTodayDeltaLabel() {
+    const insights = this.applicationFeedbackInsights
+    if (!insights) {
+      return 'Loading usage'
+    }
+
+    const yesterday = insights.usersYesterday
+    if (yesterday === 0) {
+      return this.usersToday === 0 ? '0%' : 'New'
+    }
+
+    const delta = Math.round(((this.usersToday - yesterday) / yesterday) * 100)
+    if (delta === 0) {
+      return '0%'
+    }
+
+    return `${delta > 0 ? '↑' : '↓'} ${Math.abs(delta)}%`
+  }
+
+  get isUsersTodayDeltaNegative() {
+    return (this.applicationFeedbackInsights?.usersToday ?? 0) < (this.applicationFeedbackInsights?.usersYesterday ?? 0)
+  }
+
   get ticketSourceDatabaseName() {
     return this.resolvedDeploymentInfo?.ticketSourceDatabaseName || this.appSettings.ticketAutomation.sourceDatabaseName
   }

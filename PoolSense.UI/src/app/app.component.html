@@ -761,7 +761,24 @@
           <p class="panel-kicker">Incident Insights</p>
           <h2>Operational context</h2>
         </div>
-        <span class="panel-status" [class.panel-status-busy]="isLoading">{{ isLoading ? 'PoolSense is analyzing incidents...' : 'Workspace synced' }}</span>
+        <div class="insight-panel-actions">
+          <div class="users-today-card" aria-label="Users today">
+            <span class="users-today-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </span>
+            <span class="users-today-copy">
+              <strong>{{ usersToday }}</strong>
+              <span class="users-today-label">Users Today</span>
+            </span>
+            <small class="users-today-delta" [class.users-today-trend-negative]="isUsersTodayDeltaNegative">{{ usersTodayDeltaLabel }}</small>
+          </div>
+          <span class="panel-status" *ngIf="false" [class.panel-status-busy]="isLoading">{{ isLoading ? 'PoolSense is analyzing incidents...' : 'Workspace synced' }}</span>
+        </div>
       </div>
 
       <section *ngIf="!insights" class="insight-card insight-empty">
@@ -1564,11 +1581,36 @@
                     </svg>
                   </span>
                   <p>Unique users</p>
-                  <strong>{{ feedbackInsights.uniqueSubmittersLast30Days }}</strong>
-                  <small [class.metric-trend-negative]="isApplicationFeedbackDeltaNegative(feedbackInsights.uniqueSubmittersLast30Days, feedbackInsights.previousUniqueSubmitters30Days)">{{ formatApplicationFeedbackDelta(feedbackInsights.uniqueSubmittersLast30Days, feedbackInsights.previousUniqueSubmitters30Days) }}</small>
+                  <strong>{{ feedbackInsights.uniqueActiveUsersLast30Days }}</strong>
+                  <small [class.metric-trend-negative]="isApplicationFeedbackDeltaNegative(feedbackInsights.uniqueActiveUsersLast30Days, feedbackInsights.previousUniqueActiveUsers30Days)">{{ formatApplicationFeedbackDelta(feedbackInsights.uniqueActiveUsersLast30Days, feedbackInsights.previousUniqueActiveUsers30Days) }}</small>
                   <div class="application-feedback-sparkline" aria-hidden="true">
                     <span *ngFor="let day of feedbackInsights.dailyFeedbackCounts; trackBy: trackApplicationFeedbackDay" [style.height.%]="getApplicationFeedbackSparklineHeight(day.count, 'feedback')"></span>
                   </div>
+                </article>
+
+                <article class="application-feedback-metric-card">
+                  <span class="application-feedback-metric-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                      <path d="M10 17l5-5-5-5"></path>
+                      <path d="M15 12H3"></path>
+                    </svg>
+                  </span>
+                  <p>Total logins</p>
+                  <strong>{{ feedbackInsights.totalLoginsLast30Days }}</strong>
+                  <small [class.metric-trend-negative]="isApplicationFeedbackDeltaNegative(feedbackInsights.totalLoginsLast30Days, feedbackInsights.previousTotalLogins30Days)">{{ formatApplicationFeedbackDelta(feedbackInsights.totalLoginsLast30Days, feedbackInsights.previousTotalLogins30Days) }}</small>
+                </article>
+
+                <article class="application-feedback-metric-card">
+                  <span class="application-feedback-metric-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 2a10 10 0 1 0 10 10"></path>
+                      <path d="M12 2v10l7 4"></path>
+                    </svg>
+                  </span>
+                  <p>Recommendations processed</p>
+                  <strong>{{ feedbackInsights.recommendationsProcessedLast30Days }}</strong>
+                  <small [class.metric-trend-negative]="isApplicationFeedbackDeltaNegative(feedbackInsights.recommendationsProcessedLast30Days, feedbackInsights.previousRecommendationsProcessed30Days)">{{ formatApplicationFeedbackDelta(feedbackInsights.recommendationsProcessedLast30Days, feedbackInsights.previousRecommendationsProcessed30Days) }}</small>
                 </article>
 
                 <article class="application-feedback-metric-card">

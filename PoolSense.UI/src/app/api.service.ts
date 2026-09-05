@@ -234,8 +234,14 @@ export interface ApplicationFeedbackInsights {
   totalFeedback: number
   feedbackLast30Days: number
   previousFeedback30Days: number
-  uniqueSubmittersLast30Days: number
-  previousUniqueSubmitters30Days: number
+  uniqueActiveUsersLast30Days: number
+  previousUniqueActiveUsers30Days: number
+  usersToday: number
+  usersYesterday: number
+  totalLoginsLast30Days: number
+  previousTotalLogins30Days: number
+  recommendationsProcessedLast30Days: number
+  previousRecommendationsProcessed30Days: number
   helpfulAiFeedbackLast30Days: number
   previousHelpfulAiFeedback30Days: number
   totalAiFeedbackLast30Days: number
