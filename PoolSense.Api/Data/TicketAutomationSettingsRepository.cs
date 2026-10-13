@@ -21,6 +21,11 @@ public sealed class TicketAutomationSettingsRepository : ITicketAutomationSettin
 
     public async Task<RuntimeTicketAutomationSettings?> GetAsync(CancellationToken cancellationToken = default)
     {
+        if (!_connectionFactory.HasConnectionString())
+        {
+            return null;
+        }
+
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 

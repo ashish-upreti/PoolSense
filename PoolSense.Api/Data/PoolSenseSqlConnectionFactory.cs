@@ -5,6 +5,7 @@ namespace PoolSense.Api.Data;
 public interface IPoolSenseSqlConnectionFactory
 {
     SqlConnection CreateConnection();
+    bool HasConnectionString();
 }
 
 public sealed class PoolSenseSqlConnectionFactory : IPoolSenseSqlConnectionFactory
@@ -21,12 +22,14 @@ public sealed class PoolSenseSqlConnectionFactory : IPoolSenseSqlConnectionFacto
         return new SqlConnection(GetConnectionString());
     }
 
+    public bool HasConnectionString()
+    {
+        return !string.IsNullOrWhiteSpace(GetConfiguredConnectionString());
+    }
+
     private string GetConnectionString()
     {
-        var connectionString = _configuration.GetConnectionString("PoolSenseSqlServer")
-            ?? _configuration.GetConnectionString("SqlServer")
-            ?? _configuration.GetConnectionString("DefaultConnection")
-            ?? _configuration.GetConnectionString("TicketSourceSqlServer");
+        var connectionString = GetConfiguredConnectionString();
 
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -34,5 +37,13 @@ public sealed class PoolSenseSqlConnectionFactory : IPoolSenseSqlConnectionFacto
         }
 
         return connectionString;
+    }
+
+    private string? GetConfiguredConnectionString()
+    {
+        return _configuration.GetConnectionString("PoolSenseSqlServer")
+            ?? _configuration.GetConnectionString("SqlServer")
+            ?? _configuration.GetConnectionString("DefaultConnection")
+            ?? _configuration.GetConnectionString("TicketSourceSqlServer");
     }
 }
