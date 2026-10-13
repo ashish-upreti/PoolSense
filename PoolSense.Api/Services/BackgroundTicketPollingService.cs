@@ -11,6 +11,7 @@ public class BackgroundTicketPollingService : BackgroundService
 {
     private const string ClosedKnowledgeKind = "ClosedKnowledge";
     private const string NewRecommendationKind = "NewRecommendation";
+    private static readonly TimeSpan FailureRetryDelay = TimeSpan.FromSeconds(30);
 
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly IOptionsMonitor<NyraSettings> _nyraSettingsMonitor;
@@ -56,7 +57,8 @@ public class BackgroundTicketPollingService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Ticket polling iteration failed.");
+                _logger.LogError(ex, "Ticket polling iteration failed. Waiting {DelaySeconds} seconds before retrying.", FailureRetryDelay.TotalSeconds);
+                await Task.Delay(FailureRetryDelay, stoppingToken);
             }
         }
     }

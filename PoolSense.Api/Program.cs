@@ -13,14 +13,313 @@ using PoolSense.Api.Orchestration;
 using PoolSense.Api.Services;
 using PoolSense.Api.Services.Nyra;
 using PoolSense.Api.Logging;
+using Serilog;
 
-var builder = WebApplication.CreateBuilder(args);
-const string PoolSenseUiCorsPolicy = "PoolSenseUi";
+const string ConsoleOutputTemplate =
+    "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext} {Message:lj}{NewLine}{Exception}";
 
-builder.Logging.AddProvider(new SqlServerApplicationLoggerProvider(
-    builder.Configuration,
-    builder.Environment.ApplicationName,
-    builder.Environment.EnvironmentName));
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .Enrich.FromLogContext()
+    .WriteTo.Console(outputTemplate: ConsoleOutputTemplate)
+    .CreateLogger();
+
+try
+{
+    Log.Information("PoolSense API starting...");
+
+    var builder = WebApplication.CreateBuilder(args);
+    const string PoolSenseUiCorsPolicy = "PoolSenseUi";
+
+    // writeToProviders: true keeps the existing SqlServerApplicationLoggerProvider (DB audit
+    // logging) receiving events, in addition to Serilog's console sink.
+    builder.Host.UseSerilog((_, services, configuration) => configuration
+        .ReadFrom.Services(services)
+        .MinimumLevel.Information()
+        .Enrich.FromLogContext()
+        .WriteTo.Console(outputTemplate: ConsoleOutputTemplate),
+        writeToProviders: true);
+
+    builder.Logging.AddProvider(new SqlServerApplicationLoggerProvider(
+        builder.Configuration,
+        builder.Environment.ApplicationName,
+        builder.Environment.EnvironmentName));
+
+    // Add services to the container.
+    builder.Services.AddControllers(options =>
+    {
+        options.Filters.Add(new AuthorizeFilter());
+    });
+    builder.Services.Configure<AiSettings>(builder.Configuration.GetSection("AiSettings"));
+    builder.Services.Configure<NyraSettings>(builder.Configuration.GetSection("Nyra"));
+    builder.Services.Configure<NyraRetrievalSettings>(builder.Configuration.GetSection("NyraRetrieval"));
+    builder.Services.PostConfigure<NyraSettings>(NyraSettingsResolver.ApplyActiveProfile);
+    builder.Services.PostConfigure<NyraRetrievalSettings>(NyraRetrievalSettingsResolver.ApplyDefaults);
+    builder.Services.Configure<ActiveDirectoryOptions>(builder.Configuration.GetSection(ActiveDirectoryOptions.SectionName));
+    builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
+    builder.Services.Configure<TicketAutomationSettings>(builder.Configuration.GetSection("TicketAutomation"));
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddSingleton<IRsaKeyMaterialProvider, RsaKeyMaterialProvider>();
+    builder.Services.AddSingleton<ISessionPasswordStore, SessionPasswordStore>();
+    builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
+    builder.Services.AddSingleton<ISessionSlidingExpirationService, SessionSlidingExpirationService>();
+    builder.Services.AddSingleton<IActiveDirectoryAuthService, ActiveDirectoryAuthService>();
+    builder.Services.AddAuthentication(PoolSenseJwtAuthenticationHandler.SchemeName)
+        .AddScheme<AuthenticationSchemeOptions, PoolSenseJwtAuthenticationHandler>(PoolSenseJwtAuthenticationHandler.SchemeName, _ => { });
+    builder.Services.AddAuthorization();
+    builder.Services.AddCors(options =>
+    {
+        options.AddPolicy(PoolSenseUiCorsPolicy, policy =>
+        {
+            var configuredOrigins = builder.Configuration
+                .GetSection("Cors:AllowedOrigins")
+                .Get<string[]>()
+                ?? [];
+            var allowedOrigins = configuredOrigins.Length == 0
+                ? ["http://localhost:4200", "http://localhost:5173"]
+                : configuredOrigins;
+
+            policy
+                .WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        });
+    });
+    builder.Services.AddScoped<ITicketAnalyzerAgent, TicketAnalyzerAgent>();
+    builder.Services.AddScoped<IResolutionAgent, ResolutionAgent>();
+    builder.Services.AddScoped<IQueryVariantGeneratorAgent, QueryVariantGeneratorAgent>();
+    builder.Services.AddScoped<IFailurePatternAgent, FailurePatternAgent>();
+    builder.Services.AddScoped<IQueryCategorizationAgent, QueryCategorizationAgent>();
+
+    builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
+    builder.Services.AddScoped<ILLMService, LLMService>();
+    builder.Services.AddScoped<IPoolTroubleshootEvidenceService, PoolTroubleshootEvidenceService>();
+    builder.Services.AddScoped<IKnowledgeEnrichmentService, KnowledgeEnrichmentService>();
+    builder.Services.AddScoped<IFailurePatternService, FailurePatternService>();
+    builder.Services.AddScoped<ITicketIngestionService, TicketIngestionService>();
+    builder.Services.AddScoped<InteractionLogger>();
+    builder.Services.AddScoped<ILlmTokenUsageRepository, LlmTokenUsageRepository>();
+
+    var emailDeliveryMode = builder.Configuration
+        .GetSection("TicketAutomation:Email:DeliveryMode")
+        .Get<EmailDeliveryMode>();
+    if (emailDeliveryMode == EmailDeliveryMode.DatabaseMail)
+    {
+        builder.Services.AddScoped<ITicketRecommendationEmailService, DatabaseMailEmailService>();
+    }
+    else
+    {
+        builder.Services.AddScoped<ITicketRecommendationEmailService, TicketRecommendationEmailService>();
+    }
+
+    builder.Services.AddScoped<IncidentContextBuilder>();
+
+    builder.Services.AddSingleton<InMemoryVectorStoreCache>();
+    builder.Services.AddSingleton<IVectorStoreCacheInvalidator>(sp => sp.GetRequiredService<InMemoryVectorStoreCache>());
+    builder.Services.AddSingleton<TicketKnowledgeReembedJobStatus>();
+    builder.Services.AddSingleton<ITicketKnowledgeReembeddingService, TicketKnowledgeReembeddingService>();
+    builder.Services.AddScoped<IPoolSenseSqlConnectionFactory, PoolSenseSqlConnectionFactory>();
+    builder.Services.AddScoped<IAuthUserRepository, AuthUserRepository>();
+    builder.Services.AddScoped<IVectorSimilaritySearch, CosineVectorSimilaritySearch>();
+    builder.Services.AddScoped<SqlServerVectorStore>();
+    builder.Services.AddScoped<IVectorStore>(sp => sp.GetRequiredService<SqlServerVectorStore>());
+    builder.Services.AddScoped<ITicketKnowledgeEmbeddingStore>(sp => sp.GetRequiredService<SqlServerVectorStore>());
+    builder.Services.AddScoped<IFeedbackRepository, FeedbackRepository>();
+    builder.Services.AddScoped<IValidatedResolutionRepository, ValidatedResolutionRepository>();
+    builder.Services.AddScoped<IFailurePatternRepository, FailurePatternRepository>();
+    builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
+    builder.Services.AddScoped<ITicketSourceApplicationRepository, TicketSourceApplicationRepository>();
+    builder.Services.AddScoped<IIngestionStatusRepository, IngestionStatusRepository>();
+    builder.Services.AddScoped<IProcessedSourceEventRepository, ProcessedSourceEventRepository>();
+    builder.Services.AddScoped<ITicketAutomationSettingsRepository, TicketAutomationSettingsRepository>();
+    builder.Services.AddScoped<ITicketAutomationSettingsProvider, TicketAutomationSettingsProvider>();
+
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddScoped<IUserActivityAuditLogger, UserActivityAuditLogger>();
+
+    builder.Services.AddScoped<SqlTicketConnector>();
+    builder.Services.AddScoped<IApplicationSyncService, ApplicationSyncService>();
+    builder.Services.AddHttpClient<ApiTicketConnector>();
+    builder.Services.AddHttpClient<INyraDocumentRetrievalService, NyraDocumentRetrievalService>();
+
+    builder.Services.AddScoped<ITicketWorkflowOrchestrator, TicketWorkflowOrchestrator>();
+    builder.Services.AddHostedService<BackgroundTicketPollingService>();
+
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddSwaggerGen(c =>
+    {
+        c.SwaggerDoc("v1", new OpenApiInfo
+        {
+            Title = "PoolSense API",
+            Version = "v1",
+            Description = "AI-powered pool maintenance assistant API."
+        });
+        c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+        {
+            Name = "Authorization",
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            In = ParameterLocation.Header,
+            Description = "Use a PoolSense JWT bearer token or authenticate through /api/auth/login for the auth cookie."
+        });
+        c.AddSecurityRequirement(new OpenApiSecurityRequirement
+        {
+            {
+                new OpenApiSecurityScheme
+                {
+                    Reference = new OpenApiReference
+                    {
+                        Type = ReferenceType.SecurityScheme,
+                        Id = "Bearer"
+                    }
+                },
+                []
+            }
+        });
+    });
+
+    builder.Services.AddScoped<Kernel>(sp =>
+    {
+        var nyraSettings = sp.GetRequiredService<IOptionsMonitor<NyraSettings>>().CurrentValue;
+        NyraSettingsResolver.Validate(nyraSettings);
+
+        var kernelBuilder = Kernel.CreateBuilder();
+        var endpoint = new Uri(nyraSettings.GatewayEndpoint);
+        var nyraClient = NyraGateway.Create(
+            NyraSettingsResolver.GetApiKeyHeaderValue(nyraSettings),
+            endpoint,
+            nyraSettings.TokenUrl,
+            nyraSettings.ClientId,
+            nyraSettings.ClientSecret,
+            nyraSettings.Audience,
+            nyraSettings.Issuer,
+            nyraSettings.Scope);
+
+        kernelBuilder.AddAzureOpenAIChatCompletion(
+            deploymentName: nyraSettings.Model,
+            azureOpenAIClient: nyraClient);
+
+        kernelBuilder.AddAzureOpenAIChatCompletion(
+            deploymentName: nyraSettings.CategorizationModel,
+            azureOpenAIClient: nyraClient,
+            serviceId: QueryCategorizationAgent.CategorizationServiceId);
+
+        kernelBuilder.AddAzureOpenAIChatCompletion(
+            deploymentName: nyraSettings.ResolutionModel,
+            azureOpenAIClient: nyraClient,
+            serviceId: ResolutionAgent.ResolutionServiceId);
+
+        return kernelBuilder.Build();
+    });
+
+    builder.Services.AddHttpClient<NyraEmbeddingGenerator>();
+    builder.Services.AddScoped<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
+        sp.GetRequiredService<NyraEmbeddingGenerator>());
+
+
+    var app = builder.Build();
+    var spaIndexPath = Path.Combine(app.Environment.WebRootPath ?? string.Empty, "index.html");
+    var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("StartupSecurity");
+    var authOptions = app.Services.GetRequiredService<IOptions<AuthOptions>>().Value;
+    if (string.IsNullOrWhiteSpace(authOptions.JwtSecret) || authOptions.JwtSecret.Length < 32)
+    {
+        startupLogger.LogWarning(
+            "Auth:JwtSecret is missing or too short. Configure a strong secret via environment-specific secret storage before production use.");
+    }
+
+    app.Logger.LogInformation(
+        "PoolSense API starting on host {MachineName} as user {UserName}. Environment: {EnvironmentName}. ProcessId: {ProcessId}. ContentRoot: {ContentRoot}. OS: {OSDescription}.",
+        Environment.MachineName,
+        Environment.UserName,
+        app.Environment.EnvironmentName,
+        Environment.ProcessId,
+        app.Environment.ContentRootPath,
+        System.Runtime.InteropServices.RuntimeInformation.OSDescription);
+
+    var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+    lifetime.ApplicationStopping.Register(() =>
+        app.Logger.LogInformation(
+            "PoolSense API stopping on host {MachineName} as user {UserName}. ProcessId: {ProcessId}.",
+            Environment.MachineName,
+            Environment.UserName,
+            Environment.ProcessId));
+
+    // Configure the HTTP request pipeline.
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI(c =>
+        {
+            c.SwaggerEndpoint("/swagger/v1/swagger.json", "PoolSense API v1");
+            c.RoutePrefix = "swagger";
+        });
+    }
+
+    if (HasHttpsBinding(app.Configuration))
+    {
+        app.UseHttpsRedirection();
+    }
+
+    app.UseSerilogRequestLogging();
+
+    app.UseCors(PoolSenseUiCorsPolicy);
+
+    app.Use(async (context, next) =>
+    {
+        try
+        {
+            await next();
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(
+                ex,
+                "Unhandled HTTP request exception. Method: {Method}. Path: {Path}. RemoteIp: {RemoteIp}. User: {User}.",
+                context.Request.Method,
+                context.Request.Path.Value,
+                context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+                context.User.Identity?.Name ?? string.Empty);
+            throw;
+        }
+    });
+
+    if (Directory.Exists(app.Environment.WebRootPath))
+    {
+        app.UseDefaultFiles();
+        app.UseStaticFiles();
+    }
+
+    app.UseAuthentication();
+    app.UseAuthorization();
+
+    app.MapControllers();
+
+    if (File.Exists(spaIndexPath))
+    {
+        app.MapFallbackToFile("index.html");
+    }
+
+    // One-time CLI mode: `dotnet run -- --reembed-ticket-knowledge` re-embeds ticket_knowledge without
+    // starting Kestrel or the background ticket-polling hosted service (no HTTP/admin auth needed).
+    if (args.Contains("--reembed-ticket-knowledge", StringComparer.OrdinalIgnoreCase))
+    {
+        await RunTicketKnowledgeReembedCliAsync(app.Services);
+    }
+    else
+    {
+        app.Run();
+    }
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Host terminated unexpectedly.");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
 
 static bool HasHttpsBinding(IConfiguration configuration)
 {
@@ -38,270 +337,6 @@ static bool HasHttpsBinding(IConfiguration configuration)
         .SelectMany(value => value!.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         .Any(value => value.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
 }
-
-// Add services to the container.
-builder.Services.AddControllers(options =>
-{
-    options.Filters.Add(new AuthorizeFilter());
-});
-builder.Services.Configure<AiSettings>(builder.Configuration.GetSection("AiSettings"));
-builder.Services.Configure<NyraSettings>(builder.Configuration.GetSection("Nyra"));
-builder.Services.Configure<NyraRetrievalSettings>(builder.Configuration.GetSection("NyraRetrieval"));
-builder.Services.PostConfigure<NyraSettings>(NyraSettingsResolver.ApplyActiveProfile);
-builder.Services.PostConfigure<NyraRetrievalSettings>(NyraRetrievalSettingsResolver.ApplyDefaults);
-builder.Services.Configure<ActiveDirectoryOptions>(builder.Configuration.GetSection(ActiveDirectoryOptions.SectionName));
-builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
-builder.Services.Configure<TicketAutomationSettings>(builder.Configuration.GetSection("TicketAutomation"));
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddSingleton<IRsaKeyMaterialProvider, RsaKeyMaterialProvider>();
-builder.Services.AddSingleton<ISessionPasswordStore, SessionPasswordStore>();
-builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
-builder.Services.AddSingleton<ISessionSlidingExpirationService, SessionSlidingExpirationService>();
-builder.Services.AddSingleton<IActiveDirectoryAuthService, ActiveDirectoryAuthService>();
-builder.Services.AddAuthentication(PoolSenseJwtAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, PoolSenseJwtAuthenticationHandler>(PoolSenseJwtAuthenticationHandler.SchemeName, _ => { });
-builder.Services.AddAuthorization();
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy(PoolSenseUiCorsPolicy, policy =>
-    {
-        var configuredOrigins = builder.Configuration
-            .GetSection("Cors:AllowedOrigins")
-            .Get<string[]>()
-            ?? [];
-        var allowedOrigins = configuredOrigins.Length == 0
-            ? ["http://localhost:4200", "http://localhost:5173"]
-            : configuredOrigins;
-
-        policy
-            .WithOrigins(allowedOrigins)
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
-    });
-});
-builder.Services.AddScoped<ITicketAnalyzerAgent, TicketAnalyzerAgent>();
-builder.Services.AddScoped<IResolutionAgent, ResolutionAgent>();
-builder.Services.AddScoped<IQueryVariantGeneratorAgent, QueryVariantGeneratorAgent>();
-builder.Services.AddScoped<IFailurePatternAgent, FailurePatternAgent>();
-builder.Services.AddScoped<IQueryCategorizationAgent, QueryCategorizationAgent>();
-
-builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
-builder.Services.AddScoped<ILLMService, LLMService>();
-builder.Services.AddScoped<IPoolTroubleshootEvidenceService, PoolTroubleshootEvidenceService>();
-builder.Services.AddScoped<IKnowledgeEnrichmentService, KnowledgeEnrichmentService>();
-builder.Services.AddScoped<IFailurePatternService, FailurePatternService>();
-builder.Services.AddScoped<ITicketIngestionService, TicketIngestionService>();
-builder.Services.AddScoped<InteractionLogger>();
-builder.Services.AddScoped<ILlmTokenUsageRepository, LlmTokenUsageRepository>();
-
-var emailDeliveryMode = builder.Configuration
-    .GetSection("TicketAutomation:Email:DeliveryMode")
-    .Get<EmailDeliveryMode>();
-if (emailDeliveryMode == EmailDeliveryMode.DatabaseMail)
-{
-    builder.Services.AddScoped<ITicketRecommendationEmailService, DatabaseMailEmailService>();
-}
-else
-{
-    builder.Services.AddScoped<ITicketRecommendationEmailService, TicketRecommendationEmailService>();
-}
-
-builder.Services.AddScoped<IncidentContextBuilder>();
-
-builder.Services.AddSingleton<InMemoryVectorStoreCache>();
-builder.Services.AddSingleton<IVectorStoreCacheInvalidator>(sp => sp.GetRequiredService<InMemoryVectorStoreCache>());
-builder.Services.AddSingleton<TicketKnowledgeReembedJobStatus>();
-builder.Services.AddSingleton<ITicketKnowledgeReembeddingService, TicketKnowledgeReembeddingService>();
-builder.Services.AddScoped<IPoolSenseSqlConnectionFactory, PoolSenseSqlConnectionFactory>();
-builder.Services.AddScoped<IAuthUserRepository, AuthUserRepository>();
-builder.Services.AddScoped<IVectorSimilaritySearch, CosineVectorSimilaritySearch>();
-builder.Services.AddScoped<SqlServerVectorStore>();
-builder.Services.AddScoped<IVectorStore>(sp => sp.GetRequiredService<SqlServerVectorStore>());
-builder.Services.AddScoped<ITicketKnowledgeEmbeddingStore>(sp => sp.GetRequiredService<SqlServerVectorStore>());
-builder.Services.AddScoped<IFeedbackRepository, FeedbackRepository>();
-builder.Services.AddScoped<IValidatedResolutionRepository, ValidatedResolutionRepository>();
-builder.Services.AddScoped<IFailurePatternRepository, FailurePatternRepository>();
-builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
-builder.Services.AddScoped<ITicketSourceApplicationRepository, TicketSourceApplicationRepository>();
-builder.Services.AddScoped<IIngestionStatusRepository, IngestionStatusRepository>();
-builder.Services.AddScoped<IProcessedSourceEventRepository, ProcessedSourceEventRepository>();
-builder.Services.AddScoped<ITicketAutomationSettingsRepository, TicketAutomationSettingsRepository>();
-builder.Services.AddScoped<ITicketAutomationSettingsProvider, TicketAutomationSettingsProvider>();
-
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<IUserActivityAuditLogger, UserActivityAuditLogger>();
-
-builder.Services.AddScoped<SqlTicketConnector>();
-builder.Services.AddScoped<IApplicationSyncService, ApplicationSyncService>();
-builder.Services.AddHttpClient<ApiTicketConnector>();
-builder.Services.AddHttpClient<INyraDocumentRetrievalService, NyraDocumentRetrievalService>();
-
-builder.Services.AddScoped<ITicketWorkflowOrchestrator, TicketWorkflowOrchestrator>();
-builder.Services.AddHostedService<BackgroundTicketPollingService>();
-
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Title = "PoolSense API",
-        Version = "v1",
-        Description = "AI-powered pool maintenance assistant API."
-    });
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        In = ParameterLocation.Header,
-        Description = "Use a PoolSense JWT bearer token or authenticate through /api/auth/login for the auth cookie."
-    });
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            []
-        }
-    });
-});
-
-builder.Services.AddScoped<Kernel>(sp =>
-{
-    var nyraSettings = sp.GetRequiredService<IOptionsMonitor<NyraSettings>>().CurrentValue;
-    NyraSettingsResolver.Validate(nyraSettings);
-
-    var kernelBuilder = Kernel.CreateBuilder();
-    var endpoint = new Uri(nyraSettings.GatewayEndpoint);
-    var nyraClient = NyraGateway.Create(
-        NyraSettingsResolver.GetApiKeyHeaderValue(nyraSettings),
-        endpoint,
-        nyraSettings.TokenUrl,
-        nyraSettings.ClientId,
-        nyraSettings.ClientSecret,
-        nyraSettings.Audience,
-        nyraSettings.Issuer,
-        nyraSettings.Scope);
-
-    kernelBuilder.AddAzureOpenAIChatCompletion(
-        deploymentName: nyraSettings.Model,
-        azureOpenAIClient: nyraClient);
-
-    kernelBuilder.AddAzureOpenAIChatCompletion(
-        deploymentName: nyraSettings.CategorizationModel,
-        azureOpenAIClient: nyraClient,
-        serviceId: QueryCategorizationAgent.CategorizationServiceId);
-
-    kernelBuilder.AddAzureOpenAIChatCompletion(
-        deploymentName: nyraSettings.ResolutionModel,
-        azureOpenAIClient: nyraClient,
-        serviceId: ResolutionAgent.ResolutionServiceId);
-
-    return kernelBuilder.Build();
-});
-
-builder.Services.AddHttpClient<NyraEmbeddingGenerator>();
-builder.Services.AddScoped<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
-    sp.GetRequiredService<NyraEmbeddingGenerator>());
-
-
-var app = builder.Build();
-var spaIndexPath = Path.Combine(app.Environment.WebRootPath ?? string.Empty, "index.html");
-var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("StartupSecurity");
-var authOptions = app.Services.GetRequiredService<IOptions<AuthOptions>>().Value;
-if (string.IsNullOrWhiteSpace(authOptions.JwtSecret) || authOptions.JwtSecret.Length < 32)
-{
-    startupLogger.LogWarning(
-        "Auth:JwtSecret is missing or too short. Configure a strong secret via environment-specific secret storage before production use.");
-}
-
-app.Logger.LogInformation(
-    "PoolSense API starting on host {MachineName} as user {UserName}. Environment: {EnvironmentName}. ProcessId: {ProcessId}. ContentRoot: {ContentRoot}. OS: {OSDescription}.",
-    Environment.MachineName,
-    Environment.UserName,
-    app.Environment.EnvironmentName,
-    Environment.ProcessId,
-    app.Environment.ContentRootPath,
-    System.Runtime.InteropServices.RuntimeInformation.OSDescription);
-
-var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-lifetime.ApplicationStopping.Register(() =>
-    app.Logger.LogInformation(
-        "PoolSense API stopping on host {MachineName} as user {UserName}. ProcessId: {ProcessId}.",
-        Environment.MachineName,
-        Environment.UserName,
-        Environment.ProcessId));
-
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "PoolSense API v1");
-        c.RoutePrefix = "swagger";
-    });
-}
-
-if (HasHttpsBinding(app.Configuration))
-{
-    app.UseHttpsRedirection();
-}
-
-app.UseCors(PoolSenseUiCorsPolicy);
-
-app.Use(async (context, next) =>
-{
-    try
-    {
-        await next();
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogError(
-            ex,
-            "Unhandled HTTP request exception. Method: {Method}. Path: {Path}. RemoteIp: {RemoteIp}. User: {User}.",
-            context.Request.Method,
-            context.Request.Path.Value,
-            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
-            context.User.Identity?.Name ?? string.Empty);
-        throw;
-    }
-});
-
-if (Directory.Exists(app.Environment.WebRootPath))
-{
-    app.UseDefaultFiles();
-    app.UseStaticFiles();
-}
-
-app.UseAuthentication();
-app.UseAuthorization();
-
-app.MapControllers();
-
-if (File.Exists(spaIndexPath))
-{
-    app.MapFallbackToFile("index.html");
-}
-
-// One-time CLI mode: `dotnet run -- --reembed-ticket-knowledge` re-embeds ticket_knowledge without
-// starting Kestrel or the background ticket-polling hosted service (no HTTP/admin auth needed).
-if (args.Contains("--reembed-ticket-knowledge", StringComparer.OrdinalIgnoreCase))
-{
-    await RunTicketKnowledgeReembedCliAsync(app.Services);
-    return;
-}
-
-app.Run();
 
 static async Task RunTicketKnowledgeReembedCliAsync(IServiceProvider services)
 {
