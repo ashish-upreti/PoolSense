@@ -203,12 +203,24 @@ The bootstrap script creates and/or maintains these primary tables:
 
 ## Run Locally
 
-### 1. Start the API
-
-From the repository root:
+PowerShell helpers for common local workflows live in [scripts](scripts). The easiest way to start both local servers is:
 
 ```powershell
-dotnet run --project .\PoolSense.Api\PoolSense.Api.csproj --launch-profile http
+.\scripts\run-dev.ps1
+```
+
+This opens the API and Angular UI in separate PowerShell windows.
+
+If your execution policy blocks local scripts, use a one-time bypass:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1
+```
+
+Open the UI at:
+
+```text
+http://localhost:4200
 ```
 
 Development defaults:
@@ -216,9 +228,35 @@ Development defaults:
 - API base URL: `http://localhost:5217`
 - Swagger: `http://localhost:5217/swagger`
 
-### 2. Start the Angular UI
+### 1. Start the API Only
 
 From the repository root:
+
+```powershell
+.\scripts\run-api.ps1
+```
+
+Direct command equivalent:
+
+```powershell
+dotnet run --project .\PoolSense.Api\PoolSense.Api.csproj --launch-profile http
+```
+
+### 2. Start the Angular UI Only
+
+From the repository root:
+
+```powershell
+.\scripts\run-ui.ps1
+```
+
+To force dependency installation before starting Angular:
+
+```powershell
+.\scripts\run-ui.ps1 -Install
+```
+
+Direct command equivalent:
 
 ```powershell
 cd .\PoolSense.UI
@@ -228,15 +266,19 @@ npm start
 
 This runs Angular with the local proxy from [PoolSense.UI/proxy.conf.json](PoolSense.UI/proxy.conf.json), forwarding `/api` to `http://localhost:5217`.
 
-Open the UI at:
-
-```text
-http://localhost:4200
-```
-
 ### 3. Integrated Builds
 
-Useful build commands:
+Useful script commands:
+
+```powershell
+.\scripts\build.ps1
+.\scripts\build.ps1 -Target Api
+.\scripts\build.ps1 -Target UI -Configuration Release
+.\scripts\test.ps1
+.\scripts\test.ps1 -Filter "FullyQualifiedName~NyraConfigurationTests"
+```
+
+Direct build command equivalents:
 
 ```powershell
 dotnet build .\PoolSense.Api\PoolSense.Api.csproj
