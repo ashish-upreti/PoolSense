@@ -88,6 +88,7 @@ public class ProjectsController : ControllerBase
         public string EmailRecipients { get; set; } = string.Empty;
         public string ApplicationFilter { get; set; } = string.Empty;
         public string NyraKbNames { get; set; } = string.Empty;
+        public string GithubUrls { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
     }
 
@@ -574,7 +575,8 @@ public class ProjectsController : ControllerBase
             ConnectionString = request.ConnectionString?.Trim() ?? string.Empty,
             KnowledgeSources = request.KnowledgeSources ?? [],
             ApplicationFilter = request.ApplicationFilter?.Trim() ?? string.Empty,
-            NyraKbNames = request.NyraKbNames?.Trim() ?? string.Empty
+            NyraKbNames = request.NyraKbNames?.Trim() ?? string.Empty,
+            GithubUrls = request.GithubUrls?.Trim() ?? string.Empty
         };
     }
 
@@ -592,6 +594,7 @@ public class ProjectsController : ControllerBase
             EmailRecipients = project.EmailRecipients,
             ApplicationFilter = project.ApplicationFilter,
             NyraKbNames = project.NyraKbNames,
+            GithubUrls = project.GithubUrls,
             CreatedAt = project.CreatedAt
         };
     }

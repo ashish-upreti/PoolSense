@@ -145,6 +145,7 @@ export interface ProjectConfig {
   emailRecipients: string
   applicationFilter: string
   nyraKbNames: string
+  githubUrls: string
   createdAt: string
 }
 
@@ -158,6 +159,7 @@ export interface ProjectConfigInput {
   emailRecipients: string
   applicationFilter: string
   nyraKbNames: string
+  githubUrls: string
 }
 
 export interface TicketAutomationSettings {

@@ -178,6 +178,10 @@ Run it in SQL Server Management Studio, Azure Data Studio, or `sqlcmd` against t
 sqlcmd -S your-sql-server,1433 -d PoolSense -E -i .\database\sqlserver-bootstrap.sql
 ```
 
+Re-run the bootstrap script before deploying the GitHub repository configuration field to add `dbo.project_configs.github_urls` to existing databases. Existing applications default to an empty value.
+
+In App Config, the optional **GitHub repository URLs** list groups repositories by application. Add or remove URL rows using the adjacent controls. You can also paste semicolon-separated (`;`) URLs into a row, for example `https://github.com/team/repo-one; https://github.com/team/repo-two`. URLs must use HTTP or HTTPS and are stored as a semicolon-separated value. This setting stores the indexing targets; it does not start repository indexing.
+
 Useful smoke-test and verification scripts:
 
 - [database/testingSQL.sql](database/testingSQL.sql) — SQL Server smoke-test and validation queries

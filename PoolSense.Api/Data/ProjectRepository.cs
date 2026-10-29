@@ -46,7 +46,8 @@ public class ProjectRepository : IProjectRepository
                 connection_string,
                 knowledge_sources,
                 application_filter,
-                nyra_kb_names)
+                nyra_kb_names,
+                github_urls)
             OUTPUT INSERTED.id, INSERTED.created_at
             VALUES (
                 @projectId,
@@ -60,7 +61,8 @@ public class ProjectRepository : IProjectRepository
                 @connectionString,
                 @knowledgeSources,
                 @applicationFilter,
-                @nyraKbNames);
+                @nyraKbNames,
+                @githubUrls);
             """;
 
         await using var command = new SqlCommand(sql, connection);
@@ -101,7 +103,8 @@ public class ProjectRepository : IProjectRepository
                    connection_string,
                    knowledge_sources,
                      application_filter,
-                     nyra_kb_names
+                     nyra_kb_names,
+                     github_urls
             FROM dbo.project_configs
             WHERE project_id = @projectId;
             """;
@@ -137,7 +140,8 @@ public class ProjectRepository : IProjectRepository
                    connection_string,
                    knowledge_sources,
                      application_filter,
-                     nyra_kb_names
+                     nyra_kb_names,
+                     github_urls
             FROM dbo.project_configs
             ORDER BY project_name ASC;
             """;
@@ -179,7 +183,8 @@ public class ProjectRepository : IProjectRepository
                    connection_string,
                    knowledge_sources,
                      application_filter,
-                     nyra_kb_names
+                     nyra_kb_names,
+                     github_urls
             FROM dbo.project_configs
             WHERE application_filter = @applicationFilter;
             """;
@@ -215,7 +220,8 @@ public class ProjectRepository : IProjectRepository
                 connection_string = @connectionString,
                 knowledge_sources = @knowledgeSources,
                 application_filter = @applicationFilter,
-                nyra_kb_names = @nyraKbNames
+                nyra_kb_names = @nyraKbNames,
+                github_urls = @githubUrls
             OUTPUT INSERTED.id, INSERTED.created_at
             WHERE project_id = @projectId;
             """;
@@ -250,6 +256,7 @@ public class ProjectRepository : IProjectRepository
         command.Parameters.AddWithValue("@knowledgeSources", JsonSerializer.Serialize(projectConfig.KnowledgeSources ?? []));
         command.Parameters.AddWithValue("@applicationFilter", projectConfig.ApplicationFilter ?? string.Empty);
         command.Parameters.AddWithValue("@nyraKbNames", projectConfig.NyraKbNames ?? string.Empty);
+        command.Parameters.AddWithValue("@githubUrls", projectConfig.GithubUrls ?? string.Empty);
     }
 
     private static ProjectConfig MapProjectConfig(SqlDataReader reader)
@@ -269,7 +276,8 @@ public class ProjectRepository : IProjectRepository
             ConnectionString = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
             KnowledgeSources = reader.IsDBNull(11) ? [] : DeserializeKnowledgeSources(reader.GetString(11)),
             ApplicationFilter = reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
-            NyraKbNames = reader.IsDBNull(13) ? string.Empty : reader.GetString(13)
+            NyraKbNames = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
+            GithubUrls = reader.IsDBNull(14) ? string.Empty : reader.GetString(14)
         };
     }
 

@@ -108,6 +108,7 @@ const defaultProjectForm: ProjectConfigInput = {
   emailRecipients: environment.projectDefaults.emailRecipients,
   applicationFilter: '',
   nyraKbNames: '',
+  githubUrls: '',
 }
 
 function createDefaultProjectForm(): ProjectConfigInput {
@@ -417,6 +418,7 @@ export class AppComponent implements OnInit {
   projects: ProjectConfig[] = []
   ingestionStatuses: IngestionStatus[] = []
   projectForm = createDefaultProjectForm()
+  projectRepositoryRows = [{ url: '' }]
   editingProjectId: string | null = null
   isProjectLoading = true
   isProjectSaving = false
@@ -976,9 +978,23 @@ export class AppComponent implements OnInit {
       emailRecipients: project.emailRecipients,
       applicationFilter: project.applicationFilter,
       nyraKbNames: project.nyraKbNames,
+      githubUrls: project.githubUrls ?? '',
     }
+    const repositoryUrls = (project.githubUrls ?? '').split(';').map(url => url.trim()).filter(Boolean)
+    this.projectRepositoryRows = repositoryUrls.length ? repositoryUrls.map(url => ({ url })) : [{ url: '' }]
     this.projectNotice = `Editing ${project.projectName}.`
     this.projectError = ''
+  }
+
+  addProjectRepository() {
+    this.projectRepositoryRows.push({ url: '' })
+  }
+
+  removeProjectRepository(index: number) {
+    this.projectRepositoryRows.splice(index, 1)
+    if (!this.projectRepositoryRows.length) {
+      this.addProjectRepository()
+    }
   }
 
   cancelProjectEdit() {
@@ -988,6 +1004,22 @@ export class AppComponent implements OnInit {
   }
 
   async handleProjectSubmit() {
+    const repositoryUrls = this.projectRepositoryRows.flatMap(row => row.url.split(';'))
+      .map(url => url.trim()).filter(Boolean)
+
+    for (const repositoryUrl of repositoryUrls) {
+      try {
+        const parsedUrl = new URL(repositoryUrl)
+        if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+          throw new Error('Unsupported repository URL protocol')
+        }
+      } catch {
+        this.projectError = 'Enter a valid HTTP or HTTPS URL for each repository.'
+        this.projectNotice = ''
+        return
+      }
+    }
+
     const payload: ProjectConfigInput = {
       ...this.projectForm,
       projectId: this.editingProjectId ? this.editingProjectId.trim() : '',
@@ -995,6 +1027,7 @@ export class AppComponent implements OnInit {
       emailRecipients: this.projectForm.emailRecipients.trim(),
       applicationFilter: this.projectForm.applicationFilter.trim(),
       nyraKbNames: this.projectForm.nyraKbNames.trim(),
+      githubUrls: repositoryUrls.join(';'),
     }
 
     if (!payload.projectName) {
@@ -1452,6 +1485,7 @@ export class AppComponent implements OnInit {
   private resetProjectForm() {
     this.editingProjectId = null
     this.projectForm = createDefaultProjectForm()
+    this.projectRepositoryRows = [{ url: '' }]
   }
 
   private async initializeSession() {

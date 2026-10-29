@@ -73,6 +73,7 @@ BEGIN
         knowledge_sources nvarchar(max) NOT NULL CONSTRAINT DF_project_configs_knowledge_sources DEFAULT '[]',
         application_filter nvarchar(256) NOT NULL CONSTRAINT DF_project_configs_application_filter DEFAULT '',
         nyra_kb_names nvarchar(max) NOT NULL CONSTRAINT DF_project_configs_nyra_kb_names DEFAULT '',
+        github_urls nvarchar(max) NOT NULL CONSTRAINT DF_project_configs_github_urls DEFAULT '',
         CONSTRAINT UQ_project_configs_project_id UNIQUE (project_id),
         CONSTRAINT CK_project_configs_similarity_search_limit CHECK (similarity_search_limit BETWEEN 1 AND 20)
     );
@@ -83,6 +84,13 @@ IF COL_LENGTH(N'dbo.project_configs', N'nyra_kb_names') IS NULL
 BEGIN
     ALTER TABLE dbo.project_configs
         ADD nyra_kb_names nvarchar(max) NOT NULL CONSTRAINT DF_project_configs_nyra_kb_names DEFAULT '';
+END;
+GO
+
+IF COL_LENGTH(N'dbo.project_configs', N'github_urls') IS NULL
+BEGIN
+    ALTER TABLE dbo.project_configs
+        ADD github_urls nvarchar(max) NOT NULL CONSTRAINT DF_project_configs_github_urls DEFAULT '';
 END;
 GO
 

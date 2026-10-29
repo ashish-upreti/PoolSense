@@ -16,6 +16,7 @@ public class ProjectConfig
     public List<string> KnowledgeSources { get; set; } = [];
     public string ApplicationFilter { get; set; } = string.Empty;
     public string NyraKbNames { get; set; } = string.Empty;
+    public string GithubUrls { get; set; } = string.Empty;
     public bool IsActive
     {
         get => PoolingEnabled;

@@ -1275,6 +1275,17 @@
                   <span class="field-note">Optional, comma-separated. NYRA document retrieval runs only when populated.</span>
                 </label>
 
+                <div class="field-group field-group-full repository-fields" role="group" aria-labelledby="repository-urls-label">
+                  <div class="repository-fields-heading">
+                    <span class="field-label" id="repository-urls-label">GitHub repository URLs</span>
+                    <button type="button" class="repository-icon-button" (click)="addProjectRepository()" title="Add repository" aria-label="Add repository" [disabled]="isProjectSaving"><span aria-hidden="true">+</span></button>
+                  </div>
+                  <div class="repository-url-row" *ngFor="let repository of projectRepositoryRows; let index = index">
+                    <input class="field-input" type="text" inputmode="url" [name]="'githubUrl' + index" [(ngModel)]="repository.url" [attr.aria-label]="'Repository URL ' + (index + 1)" placeholder="https://github.com/team/repository" autocomplete="off" spellcheck="false" [disabled]="isProjectSaving" />
+                    <button type="button" class="repository-icon-button" (click)="removeProjectRepository(index)" title="Remove repository" [attr.aria-label]="'Remove repository ' + (index + 1)" [disabled]="isProjectSaving || (projectRepositoryRows.length === 1 && !repository.url)"><span aria-hidden="true">&times;</span></button>
+                  </div>
+                </div>
+
                 <label class="field-group">
                   <span class="field-label">Application ID</span>
                   <span class="application-id-control">
