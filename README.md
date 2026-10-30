@@ -1,8 +1,10 @@
 # PoolSense
 
-PoolSense is a deployed .NET 9 incident-assistance platform with an ASP.NET Core API, an Angular 18 operator console, NYRA gateway-backed inference, embedding, and Wiki document retrieval, and SQL Server persistence for knowledge, project configuration, ingestion tracking, feedback, telemetry, and operational logging.
+PoolSense is a .NET 10 incident-assistance platform with an ASP.NET Core API, an Angular 18 operator console, NYRA gateway-backed inference, embedding, and Wiki document retrieval, and SQL Server persistence for knowledge, project configuration, ingestion tracking, feedback, telemetry, and operational logging.
 
-PoolSense uses pool ticket history as its primary SQL-backed knowledge source and can enrich answers with project-scoped NYRA Wiki / KnowledgeBase documents when application configuration includes NYRA KB names.
+PoolSense combines pool ticket history, project-scoped NYRA Wiki documents, and optional GitHub repository code. Code evidence requires the querying user's own GitHub authorization; Wiki and Pool DB access behavior is unchanged.
+
+See [GitHub Code Knowledge setup](CodeKnowledge.md) for OAuth, database setup, hourly refresh, security boundaries, and verification steps.
 
 At a high level, PoolSense does four things:
 
@@ -16,7 +18,7 @@ At a high level, PoolSense does four things:
 - Incident triage through the `POST /api/ticket/process` workflow.
 - Similar-incident retrieval using stored embeddings and cosine similarity search over SQL Server-backed knowledge rows.
 - AI-generated root cause, resolution, reasoning, confidence, and failure-pattern enrichment.
-- Query categorization that decides whether to use Pool database history, NYRA Wiki retrieval, or both.
+- Hybrid retrieval for every interactive question; configured, accessible code repositories also participate without a separate code-question mode.
 - Project-scoped NYRA Wiki document retrieval using comma-separated `nyra_kb_names` from `dbo.project_configs`.
 - Background polling of a SQL Server ticket source for new tickets and closed-ticket knowledge ingestion.
 - Application sync from `dbo.tbl_Application.PoolSense` into `dbo.project_configs` before each polling iteration.
@@ -34,6 +36,8 @@ At a high level, PoolSense does four things:
 - SQL Server-backed interaction logs, application logs, and LLM token usage tracking.
 
 ## Solution Layout
+
+The embedded `PoolSense.CodeRAG` project contains the CodeRAGCSharp indexer, Roslyn symbol graph, SQLite full-text storage and retriever. PoolSense builds independently of the original CodeRAGCSharp checkout; no separate CodeRAG API, UI, or LLM is required.
 
 ```text
 PoolSense/
@@ -68,7 +72,7 @@ PoolSense/
 
 ## Tech Stack
 
-- .NET 9
+- .NET 10 LTS
 - ASP.NET Core Web API
 - Angular 18
 - TypeScript 5
@@ -81,7 +85,7 @@ PoolSense/
 
 Install these before running locally:
 
-- .NET 9 SDK
+- .NET 10 SDK (stable feature-band roll-forward is configured in `global.json`)
 - Node.js 20+ and npm
 - Access to NYRA gateway endpoints for inference and embeddings
 - Access to NYRA retrieval-service endpoints when using project Wiki / KnowledgeBase enrichment

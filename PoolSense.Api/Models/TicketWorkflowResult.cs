@@ -7,6 +7,9 @@ public sealed class TicketWorkflowResult
     public double Confidence { get; set; }
     public IReadOnlyList<SimilarIncidentResult> SimilarIncidents { get; set; } = [];
     public IReadOnlyList<NyraDocumentResult> NyraDocuments { get; set; } = [];
+    public IReadOnlyList<PoolSense.Api.Services.CodeRAG.CodeEvidence> CodeDocuments { get; set; } = [];
+    public string CodeKnowledgeStatus { get; set; } = "not-available";
+    public string FeedbackAuthorization { get; set; } = string.Empty;
     public bool NyraKnowledgeBaseUsed { get; set; }
     public string NyraKnowledgeBaseStatus { get; set; } = string.Empty;
     public string NyraKnowledgeBaseMessage { get; set; } = string.Empty;

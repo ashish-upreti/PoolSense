@@ -1,6 +1,35 @@
 import { Injectable } from '@angular/core'
 import { environment } from '../environments/environment'
 
+export interface CodeEvidence {
+  repositoryId: string
+  projectId: string
+  repository: string
+  branch: string
+  commit: string
+  filePath: string
+  symbol: string
+  startLine: number
+  endLine: number
+  content: string
+  sourceUrl: string
+}
+
+export interface CodeRepository {
+  id: string
+  projectId: string
+  url: string
+  branch: string
+  enabled: boolean
+  status: string
+  message: string
+  indexedCommit: string
+  fileCount: number
+  symbolCount: number
+  lastCheckedAt: string | null
+  lastIndexedAt: string | null
+}
+
 export interface SimilarIncident {
   ticketId: string
   problem: string
@@ -20,6 +49,9 @@ export interface FailurePattern {
 }
 
 export interface TicketWorkflowResult {
+  codeDocuments?: CodeEvidence[]
+  codeKnowledgeStatus?: string
+  feedbackAuthorization?: string
   suggestedRootCause: string
   suggestedResolution: string
   confidence: number
@@ -118,6 +150,8 @@ export interface PoolRecommendationReportFilters {
 }
 
 export interface PoolTroubleshootResponse {
+  codeDocuments?: CodeEvidence[]
+  codeKnowledgeStatus?: string
   sourceEventId: string
   question: string
   answer: string
@@ -203,6 +237,7 @@ export interface IngestionStatus {
 }
 
 export interface FeedbackRequest {
+  feedbackAuthorization?: string
   query: string
   suggestedResolution: string
   feedbackType: number
@@ -272,6 +307,16 @@ export interface LoginResponse {
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly apiBaseUrl = environment.apiBaseUrl.replace(/\/$/, '')
+
+  async codeRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+    const response = await fetch(this.apiUrl(path), {
+      method, credentials: 'include', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'X-PoolSense-CSRF': '1' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(await this.readErrorMessage(response, 'Code knowledge is unavailable.'))
+    return response.status === 204 ? undefined as T : await response.json() as T
+  }
 
   async getSession(): Promise<AuthenticatedUser | null> {
     const response = await fetch(this.apiUrl('/auth/session'), {
@@ -775,7 +820,7 @@ export class ApiService {
   private async readErrorMessage(response: Response, fallbackMessage: string): Promise<string> {
     const contentType = response.headers.get('content-type') ?? ''
 
-    if (contentType.includes('application/json')) {
+    if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
       const payload = (await response.json()) as {
         title?: string
         errors?: Record<string, string[]>
@@ -806,6 +851,7 @@ export class ApiService {
       if (payload.error) {
         return payload.error
       }
+      return fallbackMessage
     }
 
     const errorText = await response.text()

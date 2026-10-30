@@ -4,6 +4,7 @@ public sealed record FeedbackRequest
 {
     public string Query { get; init; } = string.Empty;
     public string SuggestedResolution { get; init; } = string.Empty;
+    public string FeedbackAuthorization { get; init; } = string.Empty;
     public int FeedbackType { get; init; }
     public bool WasUsed { get; init; }
     public string? CurrentPoolResolutionNote { get; init; }

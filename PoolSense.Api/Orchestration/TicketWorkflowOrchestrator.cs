@@ -9,6 +9,7 @@ using PoolSense.Api.Data;
 using PoolSense.Api.Models;
 using PoolSense.Api.Services;
 using PoolSense.Api.Services.Nyra;
+using PoolSense.Api.Services.CodeRAG;
 using PoolSense.Application.Models;
 
 namespace PoolSense.Api.Orchestration;
@@ -44,6 +45,8 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
     private readonly InteractionLogger _interactionLogger;
     private readonly ILogger<TicketWorkflowOrchestrator> _logger;
     private readonly TicketAutomationSettings _settings;
+    private readonly ICodeKnowledgeService _codeKnowledge;
+    private readonly CodeFeedbackPolicy _codeFeedback;
 
     public TicketWorkflowOrchestrator(
         ITicketAnalyzerAgent ticketAnalyzerAgent,
@@ -61,7 +64,9 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         IValidatedResolutionRepository validatedResolutionRepository,
         InteractionLogger interactionLogger,
         IOptions<TicketAutomationSettings> settings,
-        ILogger<TicketWorkflowOrchestrator> logger)
+        ILogger<TicketWorkflowOrchestrator> logger,
+        ICodeKnowledgeService codeKnowledge,
+        CodeFeedbackPolicy codeFeedback)
     {
         _ticketAnalyzerAgent = ticketAnalyzerAgent;
         _embeddingService = embeddingService;
@@ -78,6 +83,8 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         _validatedResolutionRepository = validatedResolutionRepository;
         _interactionLogger = interactionLogger;
         _settings = settings.Value;
+        _codeKnowledge = codeKnowledge;
+        _codeFeedback = codeFeedback;
         _logger = logger;
     }
 
@@ -161,6 +168,9 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         var nyraScope = await nyraScopeTask;
         LogNyraRetrievalScope(request, nyraScope);
         var nyraRetrievalTask = RetrieveNyraDocumentsAsync(searchText, nyraScope.KbNames, cancellationToken);
+        var codeTask = persistKnowledge
+            ? Task.FromResult(CodeRetrievalResult.Skipped)
+            : _codeKnowledge.ForRequestAsync($"{title}\n{description}\n{searchText}", request, cancellationToken);
 
         var similarTickets = await similarTicketsTask;
         await ReportProgressAsync(progressCallback, "pool-data", "Pulling pool data", $"Found {similarTickets.Count} similar incident candidate(s).", "completed", 3, cancellationToken);
@@ -185,6 +195,11 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             cancellationToken);
         _logger.LogInformation("Found {SimilarTicketCount} similar tickets for ticket {TicketId}.", similarTickets.Count, request.TicketId);
         _logger.LogInformation("Found {NyraDocumentCount} NYRA document(s) for ticket {TicketId}.", nyraDocuments.Count, request.TicketId);
+
+        await ReportProgressAsync(progressCallback, "code-repositories", "Querying repository code", "Checking GitHub access and indexed code.", "active", 5, cancellationToken);
+        var code = await codeTask;
+        await ReportProgressAsync(progressCallback, "code-repositories", "Querying repository code", $"Code source: {code.Status}. {code.Documents.Count} excerpt(s).",
+            code.Documents.Count > 0 ? "completed" : "skipped", 5, cancellationToken);
 
         await ReportProgressAsync(progressCallback, "enrich", "Enriching context", "Applying feedback evidence and human-validated fixes.", "active", 5, cancellationToken);
         var feedbackEvidenceByTicketId = await _feedbackRepository.GetFeedbackEvidence(
@@ -217,9 +232,31 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
 
         await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Generating root cause, recommended fix, and reasoning.", "active", 6, cancellationToken);
         _logger.LogInformation("Generating resolution for ticket {TicketId}.", request.TicketId);
-        var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, description, resolutionIncidents.Take(5).ToList(), nyraDocuments.Take(5).ToList());
+        var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, description, resolutionIncidents.Take(5).ToList(), nyraDocuments.Take(5).ToList(), code.Documents);
         var resolution = JsonSerializer.Deserialize<ResolutionResult>(AiJsonResponseSanitizer.Normalize(resolutionJson), JsonOptions)
             ?? throw new InvalidOperationException("The resolution agent returned an empty result.");
+
+        if (code.Documents.Count > 0)
+        {
+            await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Recommendation is ready.", "completed", 6, cancellationToken);
+            return new TicketWorkflowResult
+            {
+                SuggestedRootCause = resolution.SuggestedRootCause, SuggestedResolution = resolution.SuggestedResolution,
+                Confidence = resolution.Confidence, Reasoning = resolution.Reasoning,
+                CodeDocuments = code.Documents, CodeKnowledgeStatus = code.Status,
+                SimilarIncidents = similarTickets.Select(ticket => new SimilarIncidentResult
+                {
+                    TicketId = ticket.TicketId, Problem = ticket.Problem, RootCause = ticket.RootCause,
+                    Resolution = ticket.Resolution, Similarity = ticket.Similarity
+                }).ToList(),
+                NyraDocuments = nyraDocuments, NyraKnowledgeBaseUsed = nyraScope.KbNames.Count > 0,
+                NyraKnowledgeBaseStatus = GetNyraKnowledgeBaseStatus(nyraScope, nyraRetrieval),
+                NyraKnowledgeBaseMessage = GetNyraKnowledgeBaseMessage(nyraScope, nyraRetrieval),
+                NyraKnowledgeBaseNames = nyraScope.KbNames, NyraKnowledgeBaseProjects = nyraScope.ProjectLabels,
+                QueryCategory = categorization.Category, QueryCategorizationReasoning = categorization.Reasoning,
+                UsedPoolDatabase = true
+            };
+        }
 
         await _interactionLogger.LogInteractionAsync(
             searchText,
@@ -300,6 +337,8 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             SuggestedRootCause = resolution.SuggestedRootCause,
             SuggestedResolution = resolution.SuggestedResolution,
             Confidence = resolution.Confidence,
+            CodeKnowledgeStatus = code.Status,
+            FeedbackAuthorization = _codeFeedback.Permit(resolution.SuggestedResolution),
             SimilarIncidents = similarTickets.Select(ticket => new SimilarIncidentResult
             {
                 TicketId = ticket.TicketId,

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common'
-import { Component, HostListener, OnInit, inject } from '@angular/core'
+import { Component, HostListener, OnInit, ViewChild, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import {
   ApplicationFeedbackDailyCount,
@@ -24,6 +24,8 @@ import {
   TicketWorkflowResult,
 } from './api.service'
 import { environment } from '../environments/environment'
+import { CodeEvidenceComponent } from './code-evidence.component'
+import { CodeRepositoriesComponent } from './code-repositories.component'
 
 type UserMessage = {
   id: number
@@ -376,7 +378,7 @@ function findLastStepIndex(steps: TicketWorkflowProgress[], predicate: (step: Ti
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CodeEvidenceComponent, CodeRepositoriesComponent],
   templateUrl: './app.component.html',
 })
 export class AppComponent implements OnInit {
@@ -399,7 +401,7 @@ export class AppComponent implements OnInit {
   loginError = ''
   messages: ChatMessage[] = []
   insights: TicketWorkflowResult | null = null
-  activeEvidenceTab: 'incidents' | 'nyra' = 'incidents'
+  activeEvidenceTab: 'incidents' | 'nyra' | 'code' = 'incidents'
   isEvidencePanelCollapsed = false
   isTroubleshootPanelCollapsed = false
   expandedWorkflowActivityMessageId: number | null = null
@@ -418,6 +420,7 @@ export class AppComponent implements OnInit {
   projects: ProjectConfig[] = []
   ingestionStatuses: IngestionStatus[] = []
   projectForm = createDefaultProjectForm()
+  @ViewChild(CodeRepositoriesComponent) codeRepositories?: CodeRepositoriesComponent
   projectRepositoryRows = [{ url: '' }]
   editingProjectId: string | null = null
   isProjectLoading = true
@@ -967,6 +970,7 @@ export class AppComponent implements OnInit {
   }
 
   handleEditProject(project: ProjectConfig) {
+    if (this.isProjectSaving) return
     this.editingProjectId = project.projectId
     this.projectForm = {
       projectId: project.projectId,
@@ -998,12 +1002,14 @@ export class AppComponent implements OnInit {
   }
 
   cancelProjectEdit() {
+    if (this.isProjectSaving) return
     this.resetProjectForm()
     this.projectNotice = ''
     this.projectError = ''
   }
 
   async handleProjectSubmit() {
+    if (this.isProjectSaving) return
     const repositoryUrls = this.projectRepositoryRows.flatMap(row => row.url.split(';'))
       .map(url => url.trim()).filter(Boolean)
 
@@ -1038,20 +1044,26 @@ export class AppComponent implements OnInit {
     this.projectError = ''
     this.projectNotice = ''
     this.isProjectSaving = true
+    const repositoryEditor = this.codeRepositories
+    let applicationSaved = false
 
     try {
+      repositoryEditor?.validate()
       if (this.editingProjectId) {
         await this.api.updateProject(this.editingProjectId, payload)
-        this.projectNotice = `Updated ${payload.projectName}.`
+        applicationSaved = true
+        const queued = await repositoryEditor?.saveChanges() ?? 0
+        this.projectNotice = `Updated ${payload.projectName}.` + (queued ? ` Queued ${queued} ${queued === 1 ? 'repository' : 'repositories'} for indexing.` : '')
       } else {
         await this.api.createProject(payload)
         this.projectNotice = `Created ${payload.projectName}.`
+        this.resetProjectForm()
       }
 
-      this.resetProjectForm()
       await this.loadProjectWorkspace(true)
     } catch (requestError) {
-      this.projectError = requestError instanceof Error ? requestError.message : 'Unable to save the application configuration.'
+      const message = requestError instanceof Error ? requestError.message : 'Unable to save the application configuration.'
+      this.projectError = applicationSaved ? `Application settings were saved, but repository changes could not be completed. ${message}` : message
     } finally {
       this.isProjectSaving = false
     }
@@ -1357,7 +1369,20 @@ export class AppComponent implements OnInit {
     return document.documentId || document.sourceUrl || document.citation
   }
 
-  setEvidenceTab(tab: 'incidents' | 'nyra') {
+  clearCodeAnswers() {
+    const removedIds = new Set(this.messages
+      .filter(message => message.role === 'assistant' && (message.result.codeDocuments?.length ?? 0) > 0)
+      .map(message => message.id))
+    this.messages = this.messages.filter(message => !removedIds.has(message.id))
+    if (this.insights?.codeDocuments?.length) this.insights = null
+    this.poolTroubleshootEntries = this.poolTroubleshootEntries.filter(entry => !entry.codeDocuments?.length)
+    for (const messageId of removedIds) delete this.feedbackStateByMessageId[messageId]
+    if (this.openFeedbackTargetMessageId !== null && removedIds.has(this.openFeedbackTargetMessageId)) this.openFeedbackTargetMessageId = null
+    if (this.expandedWorkflowActivityMessageId !== null && removedIds.has(this.expandedWorkflowActivityMessageId)) this.expandedWorkflowActivityMessageId = null
+    this.activeEvidenceTab = 'incidents'
+  }
+
+  setEvidenceTab(tab: 'incidents' | 'nyra' | 'code') {
     this.activeEvidenceTab = tab
   }
 

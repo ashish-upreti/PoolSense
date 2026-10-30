@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using PoolSense.Api.Feedback;
 using PoolSense.Api.Data;
 using System.Net.Mail;
+using PoolSense.Api.Services.CodeRAG;
 
 namespace PoolSense.Api.Controllers;
 
@@ -14,6 +15,7 @@ public class FeedbackController : ControllerBase
 {
     private readonly IFeedbackRepository _feedbackRepository;
     private readonly IValidatedResolutionRepository _validatedResolutionRepository;
+    private readonly CodeFeedbackPolicy _codeFeedback;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FeedbackController"/> class.
@@ -22,10 +24,12 @@ public class FeedbackController : ControllerBase
     /// <param name="validatedResolutionRepository">The repository used to store human-validated resolutions.</param>
     public FeedbackController(
         IFeedbackRepository feedbackRepository,
-        IValidatedResolutionRepository validatedResolutionRepository)
+        IValidatedResolutionRepository validatedResolutionRepository,
+        CodeFeedbackPolicy codeFeedback)
     {
         _feedbackRepository = feedbackRepository;
         _validatedResolutionRepository = validatedResolutionRepository;
+        _codeFeedback = codeFeedback;
     }
 
     /// <summary>
@@ -43,6 +47,9 @@ public class FeedbackController : ControllerBase
         {
             return BadRequest("Query and suggested resolution are required.");
         }
+
+        if (!_codeFeedback.Allows(request.SuggestedResolution, request.FeedbackAuthorization))
+            return BadRequest("This answer cannot be saved as shared incident knowledge. Generate a new Wiki/PoolDB-only answer for shared feedback.");
 
         if (request.FeedbackType is not 1 and not -1)
         {

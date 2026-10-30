@@ -4,3 +4,51 @@ GET {{PoolSense.Api_HostAddress}}/weatherforecast/
 Accept: application/json
 
 ###
+
+### GitHub connection status (sign in to PoolSense first)
+GET {{PoolSense.Api_HostAddress}}/api/github/connection
+
+### Start GitHub OAuth; open the returned URL in the same authenticated browser
+POST {{PoolSense.Api_HostAddress}}/api/github/connect
+X-PoolSense-CSRF: 1
+Content-Type: application/json
+
+{}
+
+### List accessible repository registrations
+@projectId = YOUR_PROJECT_ID
+@repositoryId = REPOSITORY_ID_FROM_CREATE
+GET {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories
+
+### Add repository and queue initial indexing
+POST {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories
+X-PoolSense-CSRF: 1
+Content-Type: application/json
+
+{"url":"https://github.com/dotnet/runtime","branch":"main","enabled":true}
+
+### Get one registration
+GET {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}
+
+### Update branch/settings; authorize indexing as the current user
+PUT {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}
+X-PoolSense-CSRF: 1
+Content-Type: application/json
+
+{"url":"https://github.com/dotnet/runtime","branch":"main","enabled":true}
+
+### Check current branch SHA; rebuild only if changed
+POST {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}/refresh
+X-PoolSense-CSRF: 1
+
+### Take indexing ownership using your connected GitHub account
+POST {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}/take-ownership
+X-PoolSense-CSRF: 1
+
+### Remove a repository
+DELETE {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}
+X-PoolSense-CSRF: 1
+
+### Disconnect GitHub for the current user
+DELETE {{PoolSense.Api_HostAddress}}/api/github/connection
+X-PoolSense-CSRF: 1

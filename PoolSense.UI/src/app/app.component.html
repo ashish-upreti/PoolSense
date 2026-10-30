@@ -372,6 +372,7 @@
             </div>
             <div class="message-body markdown-body" [innerHTML]="entry.renderedAnswer"></div>
             <p class="helper-text">{{ entry.generatedAt | date: 'medium' }} · Checked {{ entry.retrievedSimilarIncidentCount ?? 0 }} fresh incident{{ (entry.retrievedSimilarIncidentCount ?? 0) === 1 ? '' : 's' }}<span *ngIf="entry.nyraKnowledgeBaseUsed"> + NYRA KB ({{ (entry.nyraKnowledgeBaseNames ?? []).join(', ') }}, {{ entry.retrievedNyraDocumentCount ?? 0 }} doc{{ (entry.retrievedNyraDocumentCount ?? 0) === 1 ? '' : 's' }})</span></p>
+            <app-code-evidence *ngIf="(entry.codeDocuments ?? []).length > 0" [documents]="entry.codeDocuments ?? []" [status]="entry.codeKnowledgeStatus ?? ''"></app-code-evidence>
             <ul *ngIf="(entry.nyraDocuments ?? []).length > 0" class="troubleshoot-doc-list">
               <li *ngFor="let document of entry.nyraDocuments ?? []; trackBy: trackNyraDocument">
                 <a *ngIf="document.sourceUrl; else plainTroubleshootCitation" [href]="document.sourceUrl" target="_blank" rel="noopener noreferrer">{{ document.title || document.citation }}</a>
@@ -939,7 +940,12 @@
               <button type="button" class="evidence-tab" [class.evidence-tab-active]="activeEvidenceTab === 'nyra'" (click)="setEvidenceTab('nyra')" role="tab">
                 NYRA KB (Wiki) <span class="evidence-tab-count">{{ (insights.nyraDocuments ?? []).length }}</span>
               </button>
+              <button type="button" class="evidence-tab" [class.evidence-tab-active]="activeEvidenceTab === 'code'" (click)="setEvidenceTab('code')" role="tab">
+                Code <span class="evidence-tab-count">{{ (insights.codeDocuments ?? []).length }}</span>
+              </button>
             </div>
+
+            <app-code-evidence *ngIf="activeEvidenceTab === 'code'" [documents]="insights.codeDocuments ?? []" [status]="insights.codeKnowledgeStatus ?? ''"></app-code-evidence>
 
             <ng-container *ngIf="activeEvidenceTab === 'incidents'">
               <p *ngIf="insights.similarIncidents.length === 0" class="empty-copy">No related incidents were returned.</p>
@@ -1254,7 +1260,7 @@
                   <h3>{{ editingProjectId ? 'Edit application configuration' : 'Add application configuration' }}</h3>
                   <p>Define a new application and its polling settings.</p>
                 </div>
-                <button *ngIf="editingProjectId" type="button" class="feedback-button feedback-button-secondary" (click)="cancelProjectEdit()">Cancel edit</button>
+                <button *ngIf="editingProjectId" type="button" class="feedback-button feedback-button-secondary" (click)="cancelProjectEdit()" [disabled]="isProjectSaving">Cancel edit</button>
               </div>
 
               <div class="project-form-grid application-config-grid">
@@ -1342,6 +1348,8 @@
                 </label>
               </div>
 
+              <app-code-repositories *ngIf="editingProjectId" [projectId]="editingProjectId" [saving]="isProjectSaving" (disconnected)="clearCodeAnswers()"></app-code-repositories>
+
               <div class="composer-footer application-config-footer">
                 <p class="helper-text application-config-helper">
                   <span class="application-config-helper-icon" aria-hidden="true">
@@ -1403,7 +1411,7 @@
                       <p class="project-card-meta">{{ project.projectId }}</p>
                     </div>
                     <div class="application-card-actions">
-                      <button type="button" class="feedback-button feedback-button-secondary project-edit-button application-card-edit-button" (click)="handleEditProject(project)">
+                      <button type="button" class="feedback-button feedback-button-secondary project-edit-button application-card-edit-button" (click)="handleEditProject(project)" [disabled]="isProjectSaving">
                         <span class="button-icon" aria-hidden="true">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 20h9"></path>

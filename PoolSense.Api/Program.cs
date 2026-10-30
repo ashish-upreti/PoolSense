@@ -11,6 +11,7 @@ using PoolSense.Api.Data;
 using PoolSense.Api.Options;
 using PoolSense.Api.Orchestration;
 using PoolSense.Api.Services;
+using PoolSense.Api.Services.CodeRAG;
 using PoolSense.Api.Services.Nyra;
 using PoolSense.Api.Logging;
 using Serilog;
@@ -36,6 +37,7 @@ try
     builder.Host.UseSerilog((_, services, configuration) => configuration
         .ReadFrom.Services(services)
         .MinimumLevel.Information()
+        .MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", Serilog.Events.LogEventLevel.Warning)
         .Enrich.FromLogContext()
         .WriteTo.Console(outputTemplate: ConsoleOutputTemplate),
         writeToProviders: true);
@@ -60,6 +62,7 @@ try
     builder.Services.Configure<TicketAutomationSettings>(builder.Configuration.GetSection("TicketAutomation"));
     builder.Services.AddHttpContextAccessor();
     builder.Services.AddSingleton<IRsaKeyMaterialProvider, RsaKeyMaterialProvider>();
+    builder.Services.AddCodeKnowledge(builder.Configuration, builder.Environment);
     builder.Services.AddSingleton<ISessionPasswordStore, SessionPasswordStore>();
     builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
     builder.Services.AddSingleton<ISessionSlidingExpirationService, SessionSlidingExpirationService>();

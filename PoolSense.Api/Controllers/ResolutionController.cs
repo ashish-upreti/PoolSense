@@ -11,6 +11,7 @@ namespace PoolSense.Api.Controllers;
 /// Provides endpoints for running the ticket resolution workflow.
 /// </summary>
 [ApiController]
+[ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 [Route("api/ticket")]
 public class ResolutionController : ControllerBase
 {
@@ -72,7 +73,7 @@ public class ResolutionController : ControllerBase
         }
 
         Response.ContentType = "application/x-ndjson";
-        Response.Headers.CacheControl = "no-cache";
+        Response.Headers.CacheControl = "no-store";
         Response.Headers.XContentTypeOptions = "nosniff";
 
         try

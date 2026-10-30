@@ -95,6 +95,8 @@ PoolSense.Api/appsettings*.json
 PoolSense.Api/artifacts/
 PoolSense.Api/artifacts/auth-state/
 .playwright-mcp/
+PoolSense.UI/test-results/
+PoolSense.UI/playwright-report/
 **/appsettings.Local.json
 **/appsettings.*.local.json
 secrets.json

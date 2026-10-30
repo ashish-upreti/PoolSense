@@ -7,6 +7,9 @@ param(
 
 . (Join-Path $PSScriptRoot "_common.ps1")
 
+Assert-Command "dotnet" "Install the .NET 10 SDK required by global.json and make sure dotnet is on PATH."
+Assert-Command "npm" "Install Node.js 20.11.1 or later and make sure npm is on PATH."
+
 $powerShell = (Get-Command "powershell.exe" -ErrorAction Stop).Source
 $apiScript = Resolve-RepoPath "scripts\run-api.ps1"
 $uiScript = Resolve-RepoPath "scripts\run-ui.ps1"
