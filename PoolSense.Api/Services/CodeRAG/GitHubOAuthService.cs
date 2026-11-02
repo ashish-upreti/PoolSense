@@ -26,7 +26,8 @@ public sealed class GitHubOAuthStates
     }
 }
 
-public sealed class GitHubDisconnectException() : Exception("Unable to revoke GitHub authorization. Try Disconnect again, or revoke PoolSense in GitHub Settings > Applications before reconnecting.");
+/// <summary>Reports local disconnection separately from GitHub grant revocation.</summary>
+public sealed record GitHubDisconnectResult(bool Disconnected, bool AuthorizationRevoked, string Warning, string? AuthorizationUrl);
 
 public sealed class GitHubOAuthService(HttpClient http, ICodeRepositoryStore store, GitHubOAuthStates states,
     IDataProtectionProvider protection, IOptions<CodeRAGOptions> options)
@@ -49,36 +50,45 @@ public sealed class GitHubOAuthService(HttpClient http, ICodeRepositoryStore sto
         }));
     }
 
-    public async Task DisconnectAsync(string user, CancellationToken token)
+    public async Task<GitHubDisconnectResult> DisconnectAsync(string user, CancellationToken token)
     {
         states.Invalidate(user);
         var connection = await store.ConnectionAsync(user, token);
-        if (connection is not null)
-        {
-            var settings = options.Value;
-            if (string.IsNullOrWhiteSpace(settings.GitHubClientId) || string.IsNullOrWhiteSpace(settings.GitHubClientSecret))
-                throw new GitHubDisconnectException();
-            string credential;
-            try { credential = protection.CreateProtector(GitHubCodeClient.TokenPurpose).Unprotect(connection.ProtectedToken); }
-            catch (CryptographicException) { throw new GitHubDisconnectException(); }
-            using var request = new HttpRequestMessage(HttpMethod.Delete, $"https://api.github.com/applications/{Uri.EscapeDataString(settings.GitHubClientId)}/grant")
-            {
-                Content = JsonContent.Create(new { access_token = credential })
-            };
-            request.Headers.Authorization = new("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{settings.GitHubClientId}:{settings.GitHubClientSecret}")));
-            request.Headers.UserAgent.ParseAdd("PoolSense-CodeKnowledge/1.0");
-            request.Headers.Accept.ParseAdd("application/vnd.github+json");
-            request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
-            try
-            {
-                using var response = await http.SendAsync(request, token);
-                if (response.StatusCode is not HttpStatusCode.NoContent and not HttpStatusCode.NotFound) throw new GitHubDisconnectException();
-            }
-            catch (HttpRequestException) { throw new GitHubDisconnectException(); }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested) { throw new GitHubDisconnectException(); }
-        }
         await store.DisconnectAsync(user, token);
         states.Invalidate(user);
+        var revoked = connection is not null && await RevokeAsync(connection, token);
+        states.Invalidate(user);
+        var authorizationUrl = string.IsNullOrWhiteSpace(options.Value.GitHubClientId)
+            ? "https://github.com/settings/applications"
+            : $"https://github.com/settings/connections/applications/{Uri.EscapeDataString(options.Value.GitHubClientId)}";
+        return new(true, revoked, revoked ? "" : "Disconnected from PoolSense. GitHub authorization may still be active. Revoke PoolSense on GitHub to reset permissions before reconnecting.",
+            revoked ? null : authorizationUrl);
+    }
+
+    private async Task<bool> RevokeAsync(GitHubConnection connection, CancellationToken token)
+    {
+        var settings = options.Value;
+        if (string.IsNullOrWhiteSpace(settings.GitHubClientId) || string.IsNullOrWhiteSpace(settings.GitHubClientSecret)) return false;
+        string credential;
+        try { credential = protection.CreateProtector(GitHubCodeClient.TokenPurpose).Unprotect(connection.ProtectedToken); }
+        catch (CryptographicException) { return false; }
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"https://api.github.com/applications/{Uri.EscapeDataString(settings.GitHubClientId)}/grant")
+        {
+            Content = JsonContent.Create(new { access_token = credential })
+        };
+        request.Headers.Authorization = new("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{settings.GitHubClientId}:{settings.GitHubClientSecret}")));
+        request.Headers.UserAgent.ParseAdd("PoolSense-CodeKnowledge/1.0");
+        request.Headers.Accept.ParseAdd("application/vnd.github+json");
+        request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(10));
+        try
+        {
+            using var response = await http.SendAsync(request, deadline.Token);
+            return response.StatusCode == HttpStatusCode.NoContent;
+        }
+        catch (HttpRequestException) { return false; }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { return false; }
     }
 
     public async Task CompleteAsync(string user, string session, string state, string code, CancellationToken token)

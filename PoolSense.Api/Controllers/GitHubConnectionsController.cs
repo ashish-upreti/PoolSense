@@ -46,9 +46,10 @@ public sealed class GitHubConnectionsController(GitHubOAuthService oauth, ICodeR
     public async Task<IActionResult> Disconnect(CancellationToken token)
     {
         await files.Gate.WaitAsync(token);
-        try { await oauth.DisconnectAsync(CodeUser.Name(User), token); }
+        GitHubDisconnectResult result;
+        try { result = await oauth.DisconnectAsync(CodeUser.Name(User), token); }
         finally { files.Gate.Release(); }
         Response.Cookies.Delete("poolsense-github-state", new CookieOptions { Path = "/api/github/callback" });
-        return NoContent();
+        return Ok(result);
     }
 }

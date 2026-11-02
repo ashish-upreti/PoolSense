@@ -45,7 +45,11 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
       }
       else if (path === '/api/github/connection') {
         if (!serviceAvailable) { await route.fulfill({ status: 503, json: { title: 'Code knowledge is not enabled.', status: 503 } }); return }
-        if (request.method() === 'DELETE') { connected = false; await route.fulfill({ status: 204 }); return }
+        if (request.method() === 'DELETE') {
+          connected = false
+          body = { disconnected: true, authorizationRevoked: false, warning: 'Disconnected from PoolSense. GitHub authorization may still be active.', authorizationUrl: 'https://github.com/settings/connections/applications/test-client' }
+          await route.fulfill({ json: body }); return
+        }
         body = { connected, login: 'alice-gh' }
       } else if (repositoryPath) {
         expect(request.headers()['x-poolsense-csrf']).toBe('1')
@@ -246,6 +250,9 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await rows.last().getByRole('button', { name: 'Remove repository', exact: true }).click()
     await component.getByRole('button', { name: 'Disconnect', exact: true }).click()
     await expect(component.getByRole('button', { name: 'Connect GitHub', exact: true })).toBeVisible()
+    await expect(component.getByRole('status').filter({ hasText: 'GitHub authorization may still be active' })).toBeVisible()
+    await expect(component.getByRole('link', { name: 'Open GitHub authorization settings' })).toHaveAttribute('href', 'https://github.com/settings/connections/applications/test-client')
+    await expect(component.getByRole('alert')).toHaveCount(0)
     await expect(component.getByLabel('Repository URL')).toHaveCount(0)
     await expect(addRepository).toHaveCount(0)
     expect(errors).toEqual([])

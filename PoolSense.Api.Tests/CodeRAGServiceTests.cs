@@ -188,14 +188,17 @@ public sealed class CodeRAGServiceTests : IDisposable
             Assert.Equal(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("test-client:test-secret")), request.Headers.Authorization?.Parameter);
             using var body = System.Text.Json.JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             Assert.Equal("test-access-token", body.RootElement.GetProperty("access_token").GetString());
-            Assert.True(store.Connections.ContainsKey("alice"));
+            Assert.False(store.Connections.ContainsKey("alice"));
             Assert.Null(states.Consume("old-state"));
             return new HttpResponseMessage((System.Net.HttpStatusCode)status);
         }));
         var oauth = new GitHubOAuthService(http, store, states, protection, options);
 
-        await oauth.DisconnectAsync("alice", default);
+        var result = await oauth.DisconnectAsync("alice", default);
 
+        Assert.True(result.Disconnected);
+        Assert.Equal(status == 204, result.AuthorizationRevoked);
+        Assert.Equal(status == 204, string.IsNullOrEmpty(result.Warning));
         Assert.False(store.Connections.ContainsKey("alice"));
         Assert.True(store.Connections.ContainsKey("bob"));
         Assert.NotNull(states.Consume("other-state"));
@@ -209,7 +212,7 @@ public sealed class CodeRAGServiceTests : IDisposable
     [InlineData(403)]
     [InlineData(422)]
     [InlineData(500)]
-    public async Task OAuthDisconnect_FailedRevocationDoesNotReportLocalSuccess(int status)
+    public async Task OAuthDisconnect_FailedRevocationStillDisconnectsLocallyWithWarning(int status)
     {
         options.Value.GitHubClientId = "test-client";
         options.Value.GitHubClientSecret = "test-secret";
@@ -220,17 +223,106 @@ public sealed class CodeRAGServiceTests : IDisposable
         using var http = new HttpClient(new OAuthHandler(_ => Task.FromResult(new HttpResponseMessage((System.Net.HttpStatusCode)status))));
         var oauth = new GitHubOAuthService(http, store, states, protection, options);
 
-        var error = await Assert.ThrowsAsync<GitHubDisconnectException>(() => oauth.DisconnectAsync("alice", default));
+        var result = await oauth.DisconnectAsync("alice", default);
 
-        Assert.True(store.Connections.ContainsKey("alice"));
+        Assert.True(result.Disconnected);
+        Assert.False(result.AuthorizationRevoked);
+        Assert.False(store.Connections.ContainsKey("alice"));
         Assert.Null(states.Consume("old-state"));
-        Assert.DoesNotContain("test-secret", error.Message);
-        Assert.DoesNotContain("test-access-token", error.Message);
+        Assert.Contains("GitHub authorization may still be active", result.Warning);
+        Assert.Equal("https://github.com/settings/connections/applications/test-client", result.AuthorizationUrl);
+        Assert.DoesNotContain("test-secret", result.Warning);
+        Assert.DoesNotContain("test-access-token", result.Warning);
+    }
+
+    [Theory]
+    [InlineData("missing-secret")]
+    [InlineData("unreadable-token")]
+    [InlineData("network-error")]
+    [InlineData("timeout")]
+    public async Task OAuthDisconnect_LocalCleanupDoesNotDependOnRemoteCredentialsOrNetwork(string failure)
+    {
+        options.Value.GitHubClientId = "test-client";
+        options.Value.GitHubClientSecret = failure == "missing-secret" ? "" : "test-secret";
+        var protection = new EphemeralDataProtectionProvider();
+        var protectedToken = failure == "unreadable-token" ? "unreadable" : protection.CreateProtector(GitHubCodeClient.TokenPurpose).Protect("test-access-token");
+        store.Connections["alice"] = new("alice", 1, "alice-gh", protectedToken);
+        var states = new GitHubOAuthStates();
+        var requests = 0;
+        using var http = new HttpClient(new OAuthHandler(_ =>
+        {
+            requests++;
+            return Task.FromException<HttpResponseMessage>(failure == "timeout" ? new TaskCanceledException() : new HttpRequestException());
+        }));
+        var oauth = new GitHubOAuthService(http, store, states, protection, options);
+
+        var result = await oauth.DisconnectAsync("alice", default);
+
+        Assert.True(result.Disconnected);
+        Assert.False(result.AuthorizationRevoked);
+        Assert.False(store.Connections.ContainsKey("alice"));
+        Assert.NotEmpty(result.Warning);
+        Assert.Equal(failure is "network-error" or "timeout" ? 1 : 0, requests);
     }
 
     private sealed class OAuthHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handle) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => handle(request);
+    }
+
+    [Theory]
+    [InlineData(401, "", "expired or was revoked")]
+    [InlineData(403, "", "organization-owner approval")]
+    [InlineData(403, "sso", "SSO authorization")]
+    [InlineData(403, "rate-limit", "rate limit")]
+    [InlineData(404, "", "could not find or access this repository")]
+    [InlineData(404, "branch", "selected branch")]
+    [InlineData(429, "", "rate limit")]
+    [InlineData(500, "", "Try again later")]
+    public async Task GitHubAccessFailure_ReportsActionableGuidanceThroughApi(int status, string scenario, string expected)
+    {
+        var protection = new EphemeralDataProtectionProvider();
+        store.Connections["alice"] = new("alice", 1, "alice-gh", protection.CreateProtector(GitHubCodeClient.TokenPurpose).Protect("test-access-token"));
+        using var http = new HttpClient(new OAuthHandler(request =>
+        {
+            if (scenario == "branch" && request.RequestUri!.AbsolutePath == "/repos/owner/repo")
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"id":123,"full_name":"owner/repo","default_branch":"main"}""")
+                });
+            var response = new HttpResponseMessage((System.Net.HttpStatusCode)status)
+            {
+                Content = new StringContent("upstream-sensitive-body")
+            };
+            if (scenario == "sso") response.Headers.Add("X-GitHub-SSO", "required; url=https://github.com/orgs/example/sso?secret=value");
+            if (scenario == "rate-limit") response.Headers.RetryAfter = new(TimeSpan.FromMinutes(1));
+            return Task.FromResult(response);
+        }));
+        var client = new GitHubCodeClient(http, store, protection, options);
+
+        var exception = await Assert.ThrowsAsync<CodeAccessException>(async () =>
+        {
+            if (scenario == "branch") await client.CommitAsync("alice", store.Repository!, default);
+            else await client.RepositoryAsync("alice", "owner/repo", default);
+        });
+
+        Assert.Contains(expected, exception.Message);
+        Assert.Equal(scenario == "rate-limit", exception.RetryAt is not null);
+        context.HttpContext!.Request.Method = "POST";
+        context.HttpContext.Request.Headers["X-PoolSense-CSRF"] = "1";
+        var action = new Microsoft.AspNetCore.Mvc.ActionContext(context.HttpContext!, new(), new());
+        var filters = new List<Microsoft.AspNetCore.Mvc.Filters.IFilterMetadata>();
+        var executing = new Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext(action, filters, new Dictionary<string, object?>(), new object());
+        var executed = new Microsoft.AspNetCore.Mvc.Filters.ActionExecutedContext(action, filters, new object()) { Exception = exception };
+        await new PoolSense.Api.Controllers.CodeApiFilter(options).OnActionExecutionAsync(executing, () => Task.FromResult(executed));
+        var result = Assert.IsType<Microsoft.AspNetCore.Mvc.ObjectResult>(executed.Result);
+        var problem = Assert.IsType<Microsoft.AspNetCore.Mvc.ProblemDetails>(result.Value);
+        Assert.True(executed.ExceptionHandled);
+        Assert.Equal(403, result.StatusCode);
+        Assert.Equal(exception.Message, problem.Title);
+        Assert.DoesNotContain("test-access-token", problem.Title);
+        Assert.DoesNotContain("upstream-sensitive-body", problem.Title);
+        Assert.DoesNotContain("secret=value", problem.Title);
     }
 
     [Fact]

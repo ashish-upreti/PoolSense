@@ -36,6 +36,7 @@ export class RepositoryIconComponent implements OnChanges {
         </div>
       </header>
       <p *ngIf="error" role="alert" class="error">{{ error }}</p>
+      <p *ngIf="warning" role="status" class="warning">{{ warning }} <a *ngIf="warningUrl" [href]="warningUrl" target="_blank" rel="noopener noreferrer">Open GitHub authorization settings</a></p>
       <ng-container *ngIf="projectId && connected">
         <p *ngIf="!loading && !repositories.length">No repositories configured.</p>
         <article *ngFor="let repo of repositories; trackBy: trackRepository" class="repository">
@@ -75,6 +76,8 @@ export class RepositoryIconComponent implements OnChanges {
     .repo-status, .list-footer span { font-size: 12px; overflow-wrap: anywhere; }
     .list-footer { margin-top: 16px; }
     .error { color: #ba493e; overflow-wrap: anywhere; }
+    .warning { color: #946200; overflow-wrap: anywhere; }
+    a { color: inherit; }
     p { font-size: 13px; margin: 8px 0; }
     @container(max-width: 360px) { .repo-fields { grid-template-columns: minmax(0, 1fr) auto; } .repo-fields > label:not(.enabled) { grid-column: 1 / -1; } }
   `],
@@ -90,6 +93,8 @@ export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
   login = ''
   repositories: RepositoryDraft[] = []
   error = ''
+  warning = ''
+  warningUrl = ''
   busy = false
   loading = false
   private removed: CodeRepository[] = []
@@ -136,10 +141,18 @@ export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
     catch (error) { this.error = error instanceof Error ? error.message : 'Repository operation failed.' }
     finally { this.busy = false; if (!this.destroyed) this.changes.markForCheck() }
   }
-  async connect() { if (!this.connectionAvailable || this.disabled) return; await this.run(async () => { const result = await this.api.codeRequest<{ url: string }>('/github/connect', 'POST', {}); window.location.assign(result.url) }) }
+  async connect() { if (!this.connectionAvailable || this.disabled) return; this.warning = ''; this.warningUrl = ''; await this.run(async () => { const result = await this.api.codeRequest<{ url: string }>('/github/connect', 'POST', {}); window.location.assign(result.url) }) }
   async disconnect() {
     if (this.disabled || (this.hasChanges && !window.confirm('Discard unsaved repository changes and disconnect GitHub?'))) return
-    await this.run(async () => { await this.api.codeRequest('/github/connection', 'DELETE'); this.repositories = []; this.removed = []; this.connected = false; this.disconnected.emit() })
+    this.warning = ''
+    this.warningUrl = ''
+    await this.run(async () => {
+      const result = await this.api.codeRequest<{ warning?: string; authorizationUrl?: string | null } | undefined>('/github/connection', 'DELETE')
+      this.repositories = []; this.removed = []; this.connected = false
+      this.warning = result?.warning ?? ''
+      this.warningUrl = this.warning && result?.authorizationUrl?.startsWith('https://github.com/') ? result.authorizationUrl : ''
+      this.disconnected.emit()
+    })
   }
   addRepository() {
     if (this.disabled || !this.connected) return
