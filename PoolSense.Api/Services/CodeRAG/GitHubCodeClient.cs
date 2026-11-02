@@ -49,14 +49,14 @@ public sealed partial class GitHubCodeClient(HttpClient http, ICodeRepositorySto
     {
         var metadata = await RepositoryAsync(user, repository.FullName, token);
         if (metadata.Id != repository.GitHubId) throw new CodeAccessException();
-        using var response = await SendAsync(user, $"repos/{metadata.FullName}/commits/{Uri.EscapeDataString(repository.Branch)}", token);
+        using var response = await SendAsync(user, $"repos/{metadata.FullName}/commits/{Uri.EscapeDataString(repository.Branch)}", token, branchLookup: true);
         using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(token), cancellationToken: token);
         var sha = document.RootElement.GetProperty("sha").GetString()!;
         if (!Regex.IsMatch(sha, "^[a-f0-9]{40}$")) throw new CodeAccessException();
         return sha;
     }
 
-    private async Task<HttpResponseMessage> SendAsync(string user, string path, CancellationToken token, bool archive = false)
+    private async Task<HttpResponseMessage> SendAsync(string user, string path, CancellationToken token, bool archive = false, bool branchLookup = false)
     {
         var connection = await store.ConnectionAsync(user, token) ?? throw new CodeAccessException();
         string credential;
@@ -74,8 +74,21 @@ public sealed partial class GitHubCodeClient(HttpClient http, ICodeRepositorySto
         if (response.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining) && remaining.FirstOrDefault() == "0"
             && response.Headers.TryGetValues("X-RateLimit-Reset", out var reset) && long.TryParse(reset.FirstOrDefault(), out var seconds))
             retryAt = DateTimeOffset.FromUnixTimeSeconds(seconds).AddSeconds(5);
+        var ssoRequired = response.Headers.TryGetValues("X-GitHub-SSO", out var sso)
+            && sso.Any(value => value.StartsWith("required", StringComparison.OrdinalIgnoreCase));
+        var message = response.StatusCode switch
+        {
+            HttpStatusCode.Unauthorized => "GitHub authorization has expired or was revoked. Disconnect and reconnect GitHub.",
+            HttpStatusCode.Forbidden when ssoRequired => "GitHub requires organization SSO authorization. Sign in through your organization's SSO and authorize PoolSense for repository access.",
+            HttpStatusCode.TooManyRequests => "GitHub API rate limit reached. Wait before retrying repository changes.",
+            HttpStatusCode.Forbidden when retryAt is not null => "GitHub API rate limit reached. Wait before retrying repository changes.",
+            HttpStatusCode.Forbidden => "GitHub denied repository access. Check your repository permissions and the OAuth app's organization approval in GitHub Settings > Applications. Pending requests require organization-owner approval; reconnecting does not grant approval.",
+            HttpStatusCode.NotFound when branchLookup => "GitHub could not find the selected branch or access changed. Verify the branch name and repository permissions.",
+            HttpStatusCode.NotFound => "GitHub could not find or access this repository. Verify the URL and your permissions. For organization repositories, check the OAuth app's organization approval in GitHub Settings > Applications; a pending request needs organization-owner approval.",
+            _ => "GitHub could not complete the repository request. Try again later."
+        };
         response.Dispose();
-        throw new CodeAccessException(retryAt: retryAt);
+        throw new CodeAccessException(message, retryAt);
     }
 
     public async Task DownloadAsync(string user, CodeRepository repository, string commit, string destination, CancellationToken token)
