@@ -40,6 +40,7 @@
   --shadow-md: 0 14px 32px rgba(2, 6, 23, 0.26);
   --ui-font: 'Inter', 'Segoe UI Variable', 'Segoe UI', Tahoma, sans-serif;
   --mono-font: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+  --app-ui-scale: 0.8;
 
   font: 16px/1.5 var(--ui-font);
   color: var(--ink);
@@ -135,7 +136,7 @@ body {
 
 app-root {
   display: block;
-  width: calc(100% / var(--app-ui-scale));
+  width: 100%;
   min-height: calc(100vh / var(--app-ui-scale));
   zoom: var(--app-ui-scale);
 }
@@ -188,12 +189,12 @@ h3 {
 }
 
 h1 {
-  font-size: clamp(2.35rem, 4vw, 3.75rem);
+  font-size: clamp(2.35rem, calc(4vw / var(--app-ui-scale)), 3.75rem);
   font-weight: 800;
 }
 
 h2 {
-  font-size: clamp(1.35rem, 2vw, 1.9rem);
+  font-size: clamp(1.35rem, calc(2vw / var(--app-ui-scale)), 1.9rem);
   font-weight: 750;
 }
 
