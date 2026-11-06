@@ -6,7 +6,7 @@ using PoolSense.Api.Services.CodeRAG;
 
 namespace PoolSense.Api.Controllers;
 
-public sealed class CodeApiFilter(IOptions<CodeRAGOptions> options) : IAsyncActionFilter
+public sealed class CodeApiFilter(IOptions<CodeRAGOptions> options, ILogger<CodeApiFilter> logger) : IAsyncActionFilter
 {
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
@@ -34,6 +34,8 @@ public sealed class CodeApiFilter(IOptions<CodeRAGOptions> options) : IAsyncActi
             SqlException sql when sql.Number is 2601 or 2627 => (409, "Repository is already configured."),
             _ => (503, "Code knowledge is temporarily unavailable.")
         };
+        logger.LogError(result.Exception, "Code knowledge request {Method} {Path} failed with {Status}: {Title}",
+            request.Method, request.Path, status, title);
         result.Result = Error(status, title);
         result.ExceptionHandled = true;
     }
@@ -49,6 +51,13 @@ public sealed class ProjectCodeRepositoriesController(ICodeRepositoryService ser
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<CodeRepositoryResponse>>> List(string projectId, CancellationToken token) =>
         Ok(await service.ListAsync(CodeUser.Name(User), projectId, token));
+
+    [HttpGet("branches")]
+    public async Task<ActionResult<GitHubBranches>> Branches(string projectId, [FromQuery] string url, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(url) || url.Length > 300) throw new ArgumentException("A GitHub repository URL is required.");
+        return Ok(await service.BranchesAsync(CodeUser.Name(User), url, token));
+    }
 
     [HttpGet("{id}")]
     public async Task<ActionResult<CodeRepositoryResponse>> Get(string projectId, string id, CancellationToken token)

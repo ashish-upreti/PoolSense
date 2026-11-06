@@ -9,18 +9,19 @@ namespace PoolSense.Api.Controllers;
 [Route("api/github")]
 [ServiceFilter(typeof(CodeApiFilter))]
 public sealed class GitHubConnectionsController(GitHubOAuthService oauth, ICodeRepositoryStore store,
-    IOptions<CodeRAGOptions> options, CodeIndexFiles files) : ControllerBase
+    IOptions<CodeRAGOptions> options, CodeIndexFiles files, SharedGitHubConnection shared) : ControllerBase
 {
     [HttpGet("connection")]
     public async Task<IActionResult> Status(CancellationToken token)
     {
         var connection = await store.ConnectionAsync(CodeUser.Name(User), token);
-        return Ok(new { connected = connection is not null, login = connection?.Login });
+        return Ok(new { connected = connection is not null, login = connection?.Login, shared = shared.Enabled });
     }
 
     [HttpPost("connect")]
     public IActionResult Connect()
     {
+        if (shared.Enabled) throw new CodeAccessException("GitHub access is configured by the server administrator.");
         var (state, url) = oauth.Begin(CodeUser.Name(User), User.FindFirstValue("jti") ?? "");
         Response.Cookies.Append("poolsense-github-state", state, new CookieOptions
         {
@@ -45,6 +46,7 @@ public sealed class GitHubConnectionsController(GitHubOAuthService oauth, ICodeR
     [HttpDelete("connection")]
     public async Task<IActionResult> Disconnect(CancellationToken token)
     {
+        if (shared.Enabled) throw new CodeAccessException("GitHub access is configured by the server administrator.");
         await files.Gate.WaitAsync(token);
         GitHubDisconnectResult result;
         try { result = await oauth.DisconnectAsync(CodeUser.Name(User), token); }

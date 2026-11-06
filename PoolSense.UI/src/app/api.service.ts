@@ -30,6 +30,42 @@ export interface CodeRepository {
   lastIndexedAt: string | null
 }
 
+export interface CodeChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface CodeAskResponse {
+  projectId: string
+  sessionId: string
+  question: string
+  answer: string
+  generatedAt: string
+  codeKnowledgeStatus: string
+  citations: CodeEvidence[]
+}
+
+export interface CodeChatSessionSummary {
+  id: string
+  projectId: string
+  title: string
+  createdAt: string
+  updatedAt: string
+  messageCount: number
+}
+
+export interface CodeChatStoredMessage {
+  role: 'user' | 'assistant'
+  content: string
+  citations: CodeEvidence[]
+  createdAt: string
+}
+
+export interface CodeChatSession {
+  session: CodeChatSessionSummary
+  messages: CodeChatStoredMessage[]
+}
+
 export interface SimilarIncident {
   ticketId: string
   problem: string
@@ -316,6 +352,26 @@ export class ApiService {
     })
     if (!response.ok) throw new Error(await this.readErrorMessage(response, 'Code knowledge is unavailable.'))
     return response.status === 204 ? undefined as T : await response.json() as T
+  }
+
+  private codeChatPath(projectId: string, suffix: string) {
+    return '/projects/' + encodeURIComponent(projectId) + '/code-chat' + suffix
+  }
+
+  askCodeChat(projectId: string, question: string, history: CodeChatTurn[], sessionId: string | null): Promise<CodeAskResponse> {
+    return this.codeRequest<CodeAskResponse>(this.codeChatPath(projectId, '/ask'), 'POST', { question, history, sessionId })
+  }
+
+  getCodeChatHistory(projectId: string): Promise<CodeChatSessionSummary[]> {
+    return this.codeRequest<CodeChatSessionSummary[]>(this.codeChatPath(projectId, '/history'))
+  }
+
+  getCodeChatSession(projectId: string, sessionId: string): Promise<CodeChatSession> {
+    return this.codeRequest<CodeChatSession>(this.codeChatPath(projectId, '/history/' + encodeURIComponent(sessionId)))
+  }
+
+  deleteCodeChatSession(projectId: string, sessionId: string): Promise<void> {
+    return this.codeRequest<void>(this.codeChatPath(projectId, '/history/' + encodeURIComponent(sessionId)), 'DELETE')
   }
 
   async getSession(): Promise<AuthenticatedUser | null> {

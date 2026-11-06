@@ -9,6 +9,8 @@ public sealed class CodeRAGOptions
     public string StoragePath { get; set; } = "artifacts/code-knowledge";
     public string GitHubClientId { get; set; } = "";
     public string GitHubClientSecret { get; set; } = "";
+    /// <summary>Server-wide GitHub PAT. When set, per-user OAuth is bypassed and every user shares this token.</summary>
+    public string GitHubToken { get; set; } = "";
     public string CallbackUrl { get; set; } = "";
     public string ReturnUrl { get; set; } = "/";
     public int RefreshMinutes { get; set; } = 60;
@@ -62,6 +64,29 @@ public sealed record CodeRetrievalResult(string Status, IReadOnlyList<CodeEviden
 {
     public static CodeRetrievalResult Skipped { get; } = new("not-available", []);
 }
+
+public sealed record CodeChatTurn
+{
+    [Required, MaxLength(16)] public string Role { get; init; } = "";
+    [Required, MaxLength(8000)] public string Content { get; init; } = "";
+}
+
+/// <summary>Asks a question against a project's indexed repositories, optionally continuing a saved session.</summary>
+public sealed record CodeAskRequest
+{
+    [Required, MaxLength(4000)] public string Question { get; init; } = "";
+    [MaxLength(20)] public IReadOnlyList<CodeChatTurn> History { get; init; } = [];
+    [MaxLength(32)] public string? SessionId { get; init; }
+}
+
+public sealed record CodeAskResponse(string ProjectId, string SessionId, string Question, string Answer, DateTimeOffset GeneratedAt,
+    string CodeKnowledgeStatus, IReadOnlyList<CodeEvidence> Citations);
+
+public sealed record CodeChatSessionSummary(string Id, string ProjectId, string Title, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int MessageCount);
+
+public sealed record CodeChatStoredMessage(string Role, string Content, IReadOnlyList<CodeEvidence> Citations, DateTimeOffset CreatedAt);
+
+public sealed record CodeChatSession(CodeChatSessionSummary Session, IReadOnlyList<CodeChatStoredMessage> Messages);
 
 public static class CodeUser
 {

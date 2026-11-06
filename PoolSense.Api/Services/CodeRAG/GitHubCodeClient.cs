@@ -11,9 +11,12 @@ namespace PoolSense.Api.Services.CodeRAG;
 
 public sealed record GitHubRepository(long Id, string FullName, string DefaultBranch);
 
+public sealed record GitHubBranches(string FullName, string DefaultBranch, IReadOnlyList<string> Branches, bool Truncated);
+
 public interface IGitHubCodeClient
 {
     Task<GitHubRepository> RepositoryAsync(string user, string fullName, CancellationToken token);
+    Task<GitHubBranches> BranchesAsync(string user, string fullName, CancellationToken token);
     Task<string> CommitAsync(string user, CodeRepository repository, CancellationToken token);
     Task DownloadAsync(string user, CodeRepository repository, string commit, string destination, CancellationToken token);
 }
@@ -43,6 +46,30 @@ public sealed partial class GitHubCodeClient(HttpClient http, ICodeRepositorySto
         using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(token), cancellationToken: token);
         var root = document.RootElement;
         return new(root.GetProperty("id").GetInt64(), root.GetProperty("full_name").GetString()!, root.GetProperty("default_branch").GetString()!);
+    }
+
+    private const int BranchPageSize = 100, MaxBranchPages = 5;
+
+    public async Task<GitHubBranches> BranchesAsync(string user, string fullName, CancellationToken token)
+    {
+        var metadata = await RepositoryAsync(user, fullName, token);
+        var branches = new List<string>();
+        var truncated = false;
+        for (var page = 1; ; page++)
+        {
+            using var response = await SendAsync(user, $"repos/{metadata.FullName}/branches?per_page={BranchPageSize}&page={page}", token);
+            using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(token), cancellationToken: token);
+            var count = 0;
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                count++;
+                if (element.TryGetProperty("name", out var name) && name.GetString() is { Length: > 0 } value) branches.Add(value);
+            }
+            if (count < BranchPageSize) break;
+            if (page >= MaxBranchPages) { truncated = true; break; }
+        }
+        branches.Sort((left, right) => left == metadata.DefaultBranch ? -1 : right == metadata.DefaultBranch ? 1 : string.Compare(left, right, StringComparison.OrdinalIgnoreCase));
+        return new(metadata.FullName, metadata.DefaultBranch, branches, truncated);
     }
 
     public async Task<string> CommitAsync(string user, CodeRepository repository, CancellationToken token)

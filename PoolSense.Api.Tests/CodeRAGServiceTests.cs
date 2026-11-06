@@ -314,7 +314,7 @@ public sealed class CodeRAGServiceTests : IDisposable
         var filters = new List<Microsoft.AspNetCore.Mvc.Filters.IFilterMetadata>();
         var executing = new Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext(action, filters, new Dictionary<string, object?>(), new object());
         var executed = new Microsoft.AspNetCore.Mvc.Filters.ActionExecutedContext(action, filters, new object()) { Exception = exception };
-        await new PoolSense.Api.Controllers.CodeApiFilter(options).OnActionExecutionAsync(executing, () => Task.FromResult(executed));
+        await new PoolSense.Api.Controllers.CodeApiFilter(options, Microsoft.Extensions.Logging.Abstractions.NullLogger<PoolSense.Api.Controllers.CodeApiFilter>.Instance).OnActionExecutionAsync(executing, () => Task.FromResult(executed));
         var result = Assert.IsType<Microsoft.AspNetCore.Mvc.ObjectResult>(executed.Result);
         var problem = Assert.IsType<Microsoft.AspNetCore.Mvc.ProblemDetails>(result.Value);
         Assert.True(executed.ExceptionHandled);
@@ -370,6 +370,7 @@ public sealed class CodeRAGServiceTests : IDisposable
             return user == "alice" && AllowAlice ? Task.FromResult(Commit) : Task.FromException<string>(new CodeAccessException());
         }
         public Task<GitHubRepository> RepositoryAsync(string user, string fullName, CancellationToken token) => Task.FromResult(new GitHubRepository(123, fullName, "main"));
+        public Task<GitHubBranches> BranchesAsync(string user, string fullName, CancellationToken token) => Task.FromResult(new GitHubBranches(fullName, "main", ["main"], false));
         public Task DownloadAsync(string user, CodeRepository repository, string commit, string destination, CancellationToken token) => throw new NotSupportedException();
     }
 

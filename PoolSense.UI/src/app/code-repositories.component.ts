@@ -29,9 +29,10 @@ export class RepositoryIconComponent implements OnChanges {
       <header>
         <h3><app-repo-icon name="branch"></app-repo-icon> Git repositories</h3>
         <div class="actions">
-          <span *ngIf="connected" class="login">{{ login }}</span>
-          <button *ngIf="!connected" type="button" (click)="connect()" [disabled]="disabled || !connectionAvailable"><app-repo-icon name="branch"></app-repo-icon>Connect GitHub</button>
-          <button *ngIf="connected" type="button" (click)="disconnect()" [disabled]="disabled">Disconnect</button>
+          <span *ngIf="connected && !shared" class="login">{{ login }}</span>
+          <span *ngIf="connected && shared" class="login" title="Repositories are shared by all users through the server-configured GitHub access">Shared access</span>
+          <button *ngIf="!connected && !shared" type="button" (click)="connect()" [disabled]="disabled || !connectionAvailable"><app-repo-icon name="branch"></app-repo-icon>Connect GitHub</button>
+          <button *ngIf="connected && !shared" type="button" (click)="disconnect()" [disabled]="disabled">Disconnect</button>
           <button type="button" title="Reload GitHub connection" aria-label="Reload GitHub connection" (click)="load()" [disabled]="disabled"><app-repo-icon name="refresh"></app-repo-icon></button>
         </div>
       </header>
@@ -90,6 +91,7 @@ export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
   private readonly changes = inject(ChangeDetectorRef)
   connectionAvailable = false
   connected = false
+  shared = false
   login = ''
   repositories: RepositoryDraft[] = []
   error = ''
@@ -117,11 +119,12 @@ export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
     let connectionLoaded = false
     this.loading = true
     try {
-      const connection = await this.api.codeRequest<{ connected: boolean; login: string }>('/github/connection')
+      const connection = await this.api.codeRequest<{ connected: boolean; login: string; shared?: boolean }>('/github/connection')
       if (version !== this.version || this.destroyed) return
       connectionLoaded = true
       this.connectionAvailable = true
       this.connected = connection.connected
+      this.shared = connection.shared === true
       this.login = connection.login
       const records = this.projectId && this.connected ? await this.api.codeRequest<CodeRepository[]>(this.path()) : []
       if (version !== this.version || this.destroyed) return

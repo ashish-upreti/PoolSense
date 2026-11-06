@@ -7,18 +7,22 @@ namespace PoolSense.Api.Services.CodeRAG;
 public interface ICodeRepositoryService
 {
     Task<IReadOnlyList<CodeRepositoryResponse>> ListAsync(string user, string projectId, CancellationToken token);
+    Task<GitHubBranches> BranchesAsync(string user, string url, CancellationToken token);
     Task<CodeRepositoryResponse> SaveAsync(string user, string projectId, string? id, SaveCodeRepositoryRequest request, CancellationToken token);
     Task<CodeRepositoryResponse> RefreshAsync(string user, string projectId, string id, bool takeOwnership, CancellationToken token);
     Task DeleteAsync(string user, string projectId, string id, CancellationToken token);
 }
 
 public sealed class CodeRepositoryService(ICodeRepositoryStore store, IProjectRepository projects, IGitHubCodeClient github,
-    CodeIndexFiles files, IOptions<CodeRAGOptions> options, IUserActivityAuditLogger audit) : ICodeRepositoryService
+    CodeIndexFiles files, IOptions<CodeRAGOptions> options, IUserActivityAuditLogger audit, SharedGitHubConnection shared) : ICodeRepositoryService
 {
     public async Task<IReadOnlyList<CodeRepositoryResponse>> ListAsync(string user, string projectId, CancellationToken token)
     {
+        var candidates = (await store.RepositoriesAsync(token)).Where(entry => entry.ProjectId == projectId);
+        // With a server-wide PAT every user has identical access, so the per-user GitHub visibility probe is unnecessary.
+        if (shared.Enabled) return candidates.Select(Response).ToArray();
         var visible = new List<CodeRepositoryResponse>();
-        foreach (var repository in (await store.RepositoriesAsync(token)).Where(entry => entry.ProjectId == projectId))
+        foreach (var repository in candidates)
         {
             try
             {
@@ -29,6 +33,9 @@ public sealed class CodeRepositoryService(ICodeRepositoryStore store, IProjectRe
         }
         return visible;
     }
+
+    public Task<GitHubBranches> BranchesAsync(string user, string url, CancellationToken token) =>
+        github.BranchesAsync(user, GitHubCodeClient.ParseUrl(url), token);
 
     private async Task<CodeRepository> FindAsync(string user, string projectId, string id, CancellationToken token)
     {

@@ -140,6 +140,23 @@
           </span>
         </button>
 
+        <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'codeRepositories'" (click)="setActiveSection('codeRepositories')" [attr.aria-pressed]="activeSection === 'codeRepositories'" aria-label="Open code repositories" [attr.title]="isSidebarCollapsed ? 'Code Repositories' : null">
+          <span class="sidebar-nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="4" r="2"></circle>
+              <circle cx="6" cy="20" r="2"></circle>
+              <circle cx="18" cy="8" r="2"></circle>
+              <path d="M6 6v12"></path>
+              <path d="M18 10a4 4 0 0 1-4 4h-4a4 4 0 0 0-4 4"></path>
+            </svg>
+          </span>
+          <span *ngIf="!isSidebarCollapsed" class="sidebar-nav-body">
+            <span class="sidebar-nav-kicker">CodeRAG</span>
+            <span class="sidebar-nav-title">Code Repositories</span>
+            <span class="sidebar-nav-copy">Add GitHub repositories and index them as code knowledge for an application.</span>
+          </span>
+        </button>
+
         <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'applicationFeedback'" (click)="setActiveSection('applicationFeedback')" [attr.aria-pressed]="activeSection === 'applicationFeedback'" aria-label="Open application feedback" [attr.title]="isSidebarCollapsed ? 'Application Feedback' : null">
           <span class="sidebar-nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -1171,7 +1188,7 @@
       </ng-container>
 
       <ng-template #nonPoolRecommendationView>
-      <ng-container *ngIf="activeSection === 'projectConfig'; else applicationFeedbackView">
+      <ng-container *ngIf="activeSection === 'projectConfig'; else codeRepositoriesView">
       <section class="workspace-panel project-config-screen">
         <div class="project-config-screen-header">
           <div>
@@ -1280,17 +1297,6 @@
                   <input class="field-input" type="text" name="nyraKbNames" [(ngModel)]="projectForm.nyraKbNames" placeholder="FSCOUserGuide, FSCO_WIN" [disabled]="isProjectSaving" />
                   <span class="field-note">Optional, comma-separated. NYRA document retrieval runs only when populated.</span>
                 </label>
-
-                <div class="field-group field-group-full repository-fields" role="group" aria-labelledby="repository-urls-label">
-                  <div class="repository-fields-heading">
-                    <span class="field-label" id="repository-urls-label">GitHub repository URLs</span>
-                    <button type="button" class="repository-icon-button" (click)="addProjectRepository()" title="Add repository" aria-label="Add repository" [disabled]="isProjectSaving"><span aria-hidden="true">+</span></button>
-                  </div>
-                  <div class="repository-url-row" *ngFor="let repository of projectRepositoryRows; let index = index">
-                    <input class="field-input" type="text" inputmode="url" [name]="'githubUrl' + index" [(ngModel)]="repository.url" [attr.aria-label]="'Repository URL ' + (index + 1)" placeholder="https://github.com/team/repository" autocomplete="off" spellcheck="false" [disabled]="isProjectSaving" />
-                    <button type="button" class="repository-icon-button" (click)="removeProjectRepository(index)" title="Remove repository" [attr.aria-label]="'Remove repository ' + (index + 1)" [disabled]="isProjectSaving || (projectRepositoryRows.length === 1 && !repository.url)"><span aria-hidden="true">&times;</span></button>
-                  </div>
-                </div>
 
                 <label class="field-group">
                   <span class="field-label">Application ID</span>
@@ -1442,6 +1448,188 @@
                     </div>
                   </div>
                 </article>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+      </ng-container>
+    </ng-template>
+
+    <ng-template #codeRepositoriesView>
+      <ng-container *ngIf="activeSection === 'codeRepositories'; else applicationFeedbackView">
+      <section class="workspace-panel project-config-screen code-rag-screen">
+        <div class="project-config-screen-header">
+          <div>
+            <p class="panel-kicker">CodeRAG</p>
+            <h2>Code Repositories</h2>
+            <p class="workspace-copy">Register GitHub repositories as code knowledge for an application. Repositories are shared by every PoolSense user and indexed with the server-configured GitHub access.</p>
+          </div>
+          <div class="settings-banner-group">
+            <div class="workspace-banner">
+              <span class="workspace-dot"></span>
+              <span>{{ codeRepoList.length }} {{ codeRepoList.length === 1 ? 'repository' : 'repositories' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <p *ngIf="codeRepoError" class="project-feedback-banner">{{ codeRepoError }}</p>
+        <p *ngIf="codeRepoNotice" class="project-feedback-banner project-feedback-banner-success">{{ codeRepoNotice }}</p>
+        <p *ngIf="codeRepoConnection && !codeRepoConnection.connected && !codeRepoError" class="project-feedback-banner">
+          GitHub access is not configured on the server. Set <code>CodeRAG:GitHubToken</code> (innersource PAT) on the API host and restart it before adding repositories.
+        </p>
+
+        <section class="project-studio">
+          <div class="project-form-card code-rag-controls">
+            <div class="project-form-grid code-rag-control-grid">
+              <label class="field-group">
+                <span class="field-label">Application</span>
+                <select class="field-input" name="codeRepoProject" [ngModel]="codeRepoProjectId" (ngModelChange)="handleCodeRepoProjectChange($event)" [disabled]="isCodeRepoBusy || projects.length === 0">
+                  <option *ngFor="let project of projects" [value]="project.projectId">{{ project.projectName }}</option>
+                </select>
+                <span class="field-note">{{ projects.length === 0 ? 'Create an application in Application Configuration first.' : 'Repositories are indexed per application and used as code evidence for its tickets.' }}</span>
+              </label>
+
+              <div class="code-rag-actions">
+                <button type="button" class="feedback-button feedback-button-secondary" (click)="loadCodeRepositories()" [disabled]="isCodeRepoBusy">
+                  <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12a9 9 0 0 1-15.3 6.4L3 15"></path>
+                    <path d="M3 12a9 9 0 0 1 15.3-6.4L21 9"></path>
+                    <path d="M3 15v4h4"></path>
+                    <path d="M21 9V5h-4"></path>
+                  </svg>
+                  {{ isCodeRepoLoading ? 'Reloading...' : 'Reload' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="field-group code-rag-url-group">
+              <span class="field-label">Add a GitHub repository</span>
+              <div class="code-rag-url-row">
+                <input class="field-input" type="url" name="codeRepoUrl" [ngModel]="codeRepoUrl" (ngModelChange)="handleCodeRepoUrlChange($event)" (keydown.enter)="codeRepoBranchesLoaded ? handleCodeRepoAdd() : handleCodeRepoLoadBranches()" placeholder="https://github.com/owner/repository" autocomplete="off" spellcheck="false" maxlength="300" aria-label="Repository URL" [disabled]="isCodeRepoAdding || isCodeRepoBranchesLoading || !codeRepoProjectId" />
+                <button type="button" class="feedback-button feedback-button-secondary code-rag-branches-button" (click)="handleCodeRepoLoadBranches()" [disabled]="isCodeRepoBusy || !codeRepoProjectId || !codeRepoUrl.trim() || !codeRepoConnection?.connected">
+                  {{ isCodeRepoBranchesLoading ? 'Loading branches...' : codeRepoBranchesLoaded ? 'Reload branches' : 'Load branches' }}
+                </button>
+              </div>
+              <div class="code-rag-url-row code-rag-branch-row">
+                <select *ngIf="codeRepoBranchesLoaded" class="field-input code-rag-branch-input" name="codeRepoBranchSelect" [(ngModel)]="codeRepoBranch" aria-label="Branch" [disabled]="isCodeRepoAdding">
+                  <option *ngFor="let branch of codeRepoBranches" [value]="branch">{{ branch }}</option>
+                </select>
+                <input *ngIf="!codeRepoBranchesLoaded" class="field-input code-rag-branch-input" type="text" name="codeRepoBranch" [(ngModel)]="codeRepoBranch" (keydown.enter)="handleCodeRepoAdd()" placeholder="Branch (load branches to choose, or type one)" autocomplete="off" spellcheck="false" maxlength="255" aria-label="Branch" [disabled]="isCodeRepoAdding || !codeRepoProjectId" />
+                <button type="button" class="send-button" (click)="handleCodeRepoAdd()" [disabled]="isCodeRepoBusy || !codeRepoProjectId || !codeRepoUrl.trim() || !codeRepoConnection?.connected">
+                  {{ isCodeRepoAdding ? 'Adding...' : 'Add and index' }}
+                </button>
+              </div>
+              <span class="field-note">
+                Paste an https://github.com/owner/repository URL, load its branches, and pick the one to index (the default branch is preselected).
+                <ng-container *ngIf="codeRepoBranchesLoaded"> {{ codeRepoBranches.length }} branch{{ codeRepoBranches.length === 1 ? '' : 'es' }} found{{ codeRepoBranchesTruncated ? ' (showing the first 500; type the name if yours is missing)' : '' }}.</ng-container>
+                The API verifies access with the configured GitHub token, queues the repository, and indexes it in the background.
+              </span>
+            </div>
+          </div>
+
+          <div class="project-list-card code-rag-repo-card">
+            <div class="card-heading-row">
+              <div>
+                <p class="panel-kicker">Indexed source</p>
+                <h3>{{ codeRepoProjectName ? codeRepoProjectName + ' repositories' : 'Repositories' }}</h3>
+              </div>
+            </div>
+
+            <div *ngIf="isCodeRepoLoading && codeRepoList.length === 0" class="project-empty"><p class="empty-copy">Loading repository status...</p></div>
+            <div *ngIf="!isCodeRepoLoading && codeRepoList.length === 0" class="project-empty"><p class="empty-copy">No repositories are indexed for this application yet. Add one above.</p></div>
+
+            <div *ngIf="codeRepoList.length > 0" class="code-rag-root-list">
+              <article *ngFor="let repo of codeRepoList; trackBy: trackCodeRepository" class="code-rag-root-row" [class.code-rag-root-row-error]="repo.status === 'error' || repo.status === 'access-required'">
+                <div class="code-rag-root-main">
+                  <strong><a [href]="repo.url" target="_blank" rel="noopener noreferrer">{{ codeRepoName(repo) }}</a> <span class="code-rag-root-branch">{{ repo.branch }}</span></strong>
+                  <span class="code-rag-root-state" [class.code-rag-root-state-busy]="repo.status === 'indexing' || repo.status === 'queued'">{{ codeRepoStatusLabel(repo) }}</span>
+                  <span *ngIf="repo.message" class="code-rag-root-message">{{ repo.message }}</span>
+                </div>
+                <span class="code-rag-root-counts">{{ repo.indexedCommit ? repo.indexedCommit.slice(0, 10) : 'not indexed' }} · {{ repo.fileCount }} files · {{ repo.symbolCount }} symbols</span>
+                <div class="code-rag-root-actions">
+                  <button type="button" class="feedback-button feedback-button-secondary" (click)="handleCodeRepoRefresh(repo)" [disabled]="isCodeRepoBusy || !repo.enabled || repo.status === 'indexing' || repo.status === 'queued'">
+                    {{ codeRepoBusyId === repo.id ? 'Working...' : repo.status === 'access-required' ? 'Retry' : 'Refresh index' }}
+                  </button>
+                  <button type="button" class="repository-icon-button" (click)="handleCodeRepoRemove(repo)" title="Remove repository" aria-label="Remove repository" [disabled]="isCodeRepoBusy"><span aria-hidden="true">&times;</span></button>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div class="project-list-card code-rag-chat-card">
+            <div class="card-heading-row code-rag-chat-heading">
+              <div>
+                <p class="panel-kicker">Conversation</p>
+                <h3>{{ codeRepoProjectName ? codeRepoProjectName + ' repository chat' : 'Repository chat' }}</h3>
+              </div>
+              <button type="button" class="feedback-button feedback-button-secondary" (click)="resetCodeChat()" [disabled]="isCodeChatAsking || (codeChatMessages.length === 0 && !codeChatSessionId)">New chat</button>
+            </div>
+
+            <p *ngIf="codeChatError" class="project-feedback-banner">{{ codeChatError }}</p>
+
+            <div class="code-rag-chat-layout">
+              <aside class="code-rag-history" aria-label="Saved conversations">
+                <p class="code-rag-history-title">History <span class="code-rag-history-count">{{ codeChatHistory.length }}</span></p>
+                <p *ngIf="isCodeChatHistoryLoading && codeChatHistory.length === 0" class="helper-text">Loading...</p>
+                <p *ngIf="!isCodeChatHistoryLoading && codeChatHistory.length === 0" class="helper-text">Saved conversations for this application will appear here.</p>
+                <ul class="code-rag-history-list">
+                  <li *ngFor="let session of codeChatHistory; trackBy: trackCodeChatSession">
+                    <button type="button" class="code-rag-history-item" [class.code-rag-history-item-active]="session.id === codeChatSessionId" (click)="openCodeChatSession(session.id)" [disabled]="isCodeChatAsking" [attr.title]="session.title">
+                      <span class="code-rag-history-item-title">{{ session.title }}</span>
+                      <span class="code-rag-history-item-meta">{{ session.updatedAt | date: 'MMM d, HH:mm' }} · {{ session.messageCount }} msg</span>
+                    </button>
+                    <button type="button" class="code-rag-history-delete" (click)="deleteCodeChatSession(session.id, $event)" [disabled]="isCodeChatAsking" aria-label="Delete conversation" title="Delete conversation">&times;</button>
+                  </li>
+                </ul>
+              </aside>
+
+              <div class="code-rag-chat-main">
+                <div #codeChatTranscript class="code-rag-transcript" aria-live="polite">
+                  <div *ngIf="codeChatMessages.length === 0 && !isCodeChatAsking" class="project-empty code-rag-chat-empty">
+                    <p class="empty-copy">{{ hasReadyCodeRepository ? 'Ask about a class, method, API, or workflow in the indexed repositories. Follow-up questions keep the conversation context.' : 'Add a repository and wait for "Index ready" before asking questions.' }}</p>
+                  </div>
+
+                  <ng-container *ngFor="let message of codeChatMessages; trackBy: trackCodeChatMessage">
+                    <article *ngIf="message.role === 'user'" class="message-bubble message-bubble-user">
+                      <p class="message-label">You</p>
+                      <p class="message-body code-rag-message-text">{{ message.text }}</p>
+                    </article>
+
+                    <article *ngIf="message.role === 'assistant'" class="message-bubble message-bubble-assistant" [class.code-rag-message-error]="message.isError">
+                      <p class="message-label">CodeRAG <span class="code-rag-message-time">{{ message.generatedAt | date: 'shortTime' }}</span></p>
+                      <div class="message-body markdown-body" [innerHTML]="message.renderedText"></div>
+                      <div *ngIf="message.citations.length > 0" class="code-rag-citations">
+                        <button type="button" class="code-rag-sources-toggle" (click)="toggleCodeChatSources(message.id)" [attr.aria-expanded]="expandedCodeChatSourcesMessageId === message.id">
+                          {{ expandedCodeChatSourcesMessageId === message.id ? 'Hide' : 'Show' }} {{ message.citations.length }} source{{ message.citations.length === 1 ? '' : 's' }}
+                        </button>
+                        <ng-container *ngIf="expandedCodeChatSourcesMessageId === message.id">
+                          <details *ngFor="let citation of message.citations" class="code-rag-citation">
+                            <summary>{{ citation.repository }} / {{ citation.filePath }}:{{ citation.startLine }}-{{ citation.endLine }} <span>· {{ citation.symbol }}</span></summary>
+                            <p class="code-rag-citation-link"><a [href]="citation.sourceUrl" target="_blank" rel="noopener noreferrer">Open on GitHub at {{ citation.commit.slice(0, 10) }}</a></p>
+                            <pre><code>{{ citation.content }}</code></pre>
+                          </details>
+                        </ng-container>
+                      </div>
+                    </article>
+                  </ng-container>
+
+                  <article *ngIf="isCodeChatAsking" class="message-bubble message-bubble-assistant code-rag-message-pending">
+                    <p class="message-label">CodeRAG</p>
+                    <p class="message-body">Searching indexed source and preparing an answer...</p>
+                  </article>
+                </div>
+
+                <form class="code-rag-composer" (ngSubmit)="handleCodeChatAsk()">
+                  <label class="sr-only" for="code-chat-question">Ask the repository</label>
+                  <textarea id="code-chat-question" class="field-input code-rag-question" name="codeChatQuestion" [(ngModel)]="codeChatQuestion" (keydown)="handleCodeChatKeydown($event)" maxlength="4000" rows="2" placeholder="Ask the repository... (Enter to send, Shift+Enter for a new line)" [disabled]="isCodeChatAsking || !codeRepoProjectId"></textarea>
+                  <div class="composer-footer">
+                    <p class="helper-text">{{ codeChatQuestion.length }}/4000</p>
+                    <button type="submit" class="send-button" [disabled]="isCodeChatAsking || !codeRepoProjectId || !codeChatQuestion.trim()">
+                      <span>{{ isCodeChatAsking ? 'Thinking...' : 'Send' }}</span>
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           </div>

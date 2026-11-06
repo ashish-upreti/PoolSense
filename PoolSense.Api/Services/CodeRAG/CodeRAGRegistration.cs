@@ -17,8 +17,9 @@ public static class CodeRAGRegistration
                 || settings.MaxArchiveMegabytes is < 1 or > 1000 || settings.MaxExtractedMegabytes is < 1 or > 5000
                 || settings.MaxRepositoriesPerProject is < 1 or > 100)
                 throw new InvalidOperationException("Invalid CodeRAG resource limits.");
-            if (!Uri.TryCreate(settings.CallbackUrl, UriKind.Absolute, out var callback)
-                || callback.Scheme != "https" && !(callback.IsLoopback && callback.Scheme == "http"))
+            var sharedToken = !string.IsNullOrWhiteSpace(settings.GitHubToken);
+            if (!sharedToken && (!Uri.TryCreate(settings.CallbackUrl, UriKind.Absolute, out var callback)
+                || callback.Scheme != "https" && !(callback.IsLoopback && callback.Scheme == "http")))
                 throw new InvalidOperationException("CodeRAG CallbackUrl must use HTTPS (HTTP is allowed only on loopback).");
             protection.PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(Path.GetFullPath(settings.StoragePath, environment.ContentRootPath), "keys")))
                 .ProtectKeysWithDpapi();
@@ -26,9 +27,19 @@ public static class CodeRAGRegistration
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<CodeIndexFiles>();
         services.AddSingleton<GitHubOAuthStates>();
-        services.AddScoped<ICodeRepositoryStore, CodeRepositoryStore>();
+        services.AddScoped<CodeRepositoryStore>();
+        services.AddSingleton<SharedGitHubConnection>();
+        services.AddHttpClient(SharedGitHubConnection.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
+            .RemoveAllLoggers();
+        if (string.IsNullOrWhiteSpace(settings.GitHubToken))
+            services.AddScoped<ICodeRepositoryStore>(sp => sp.GetRequiredService<CodeRepositoryStore>());
+        else
+            services.AddScoped<ICodeRepositoryStore, SharedGitHubConnectionStore>();
         services.AddScoped<ICodeRepositoryService, CodeRepositoryService>();
         services.AddScoped<ICodeKnowledgeService, CodeKnowledgeService>();
+        services.AddScoped<ICodeChatHistoryStore, CodeChatHistoryStore>();
+        services.AddScoped<ICodeChatService, CodeChatService>();
         services.AddScoped<CodeFeedbackPolicy>();
         services.AddScoped<ICodeSnapshotBuilder, CodeSnapshotBuilder>();
         services.AddScoped<CodeIndexCoordinator>();

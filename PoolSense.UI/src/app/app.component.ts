@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common'
-import { Component, HostListener, OnInit, ViewChild, inject } from '@angular/core'
+import { Component, ElementRef, HostListener, OnInit, ViewChild, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import {
   ApplicationFeedbackDailyCount,
@@ -7,6 +7,10 @@ import {
   ApplicationFeedbackRequest,
   AuthenticatedUser,
   ApiService,
+  CodeChatSessionSummary,
+  CodeChatTurn,
+  CodeEvidence,
+  CodeRepository,
   DeploymentInfo,
   IngestionStatus,
   NyraDocumentResult,
@@ -66,7 +70,19 @@ type TelemetryDatum = {
   color: string
 }
 
-type AppSection = 'main' | 'poolRecommendations' | 'projectConfig' | 'applicationFeedback'
+type AppSection = 'main' | 'poolRecommendations' | 'projectConfig' | 'codeRepositories' | 'applicationFeedback'
+
+type GitHubConnectionStatus = { connected: boolean; login: string; shared?: boolean }
+
+type CodeChatMessage = {
+  id: number
+  role: 'user' | 'assistant'
+  text: string
+  renderedText: string
+  citations: CodeEvidence[]
+  generatedAt: string
+  isError?: boolean
+}
 
 type ApplicationFeedbackForm = ApplicationFeedbackRequest
 type TicketAutomationSettingsForm = TicketAutomationSettingsInput
@@ -421,12 +437,36 @@ export class AppComponent implements OnInit {
   ingestionStatuses: IngestionStatus[] = []
   projectForm = createDefaultProjectForm()
   @ViewChild(CodeRepositoriesComponent) codeRepositories?: CodeRepositoriesComponent
-  projectRepositoryRows = [{ url: '' }]
   editingProjectId: string | null = null
   isProjectLoading = true
   isProjectSaving = false
   projectError = ''
   projectNotice = ''
+  codeRepoProjectId = ''
+  codeRepoUrl = ''
+  codeRepoBranch = ''
+  codeRepoBranches: string[] = []
+  codeRepoBranchesUrl = ''
+  codeRepoBranchesTruncated = false
+  isCodeRepoBranchesLoading = false
+  codeRepoList: CodeRepository[] = []
+  codeRepoConnection: GitHubConnectionStatus | null = null
+  codeRepoError = ''
+  codeRepoNotice = ''
+  isCodeRepoLoading = false
+  isCodeRepoAdding = false
+  codeRepoBusyId = ''
+  private codeRepoTimer: number | null = null
+  private codeRepoLoadVersion = 0
+  @ViewChild('codeChatTranscript') codeChatTranscript?: ElementRef<HTMLElement>
+  codeChatMessages: CodeChatMessage[] = []
+  codeChatSessionId: string | null = null
+  codeChatHistory: CodeChatSessionSummary[] = []
+  codeChatQuestion = ''
+  codeChatError = ''
+  isCodeChatAsking = false
+  isCodeChatHistoryLoading = false
+  expandedCodeChatSourcesMessageId: number | null = null
   applicationFeedbackForm = createDefaultApplicationFeedbackForm()
   applicationFeedbackError = ''
   applicationFeedbackNotice = ''
@@ -852,6 +892,324 @@ export class AppComponent implements OnInit {
     if (section === 'applicationFeedback' && this.currentUser && !this.applicationFeedbackInsights) {
       void this.loadApplicationFeedbackInsights()
     }
+
+    if (section === 'codeRepositories' && this.currentUser) {
+      if (!this.codeRepoProjectId || !this.projects.some(project => project.projectId === this.codeRepoProjectId)) {
+        this.codeRepoProjectId = this.projects[0]?.projectId ?? ''
+      }
+      void this.loadCodeRepositories()
+      void this.loadCodeChatHistory()
+      this.startCodeRepoPolling()
+    } else {
+      this.stopCodeRepoPolling()
+    }
+  }
+
+  private startCodeRepoPolling() {
+    this.stopCodeRepoPolling()
+    this.codeRepoTimer = window.setInterval(() => {
+      if (!document.hidden && !this.isCodeRepoAdding && !this.codeRepoBusyId) void this.loadCodeRepositories(true)
+    }, 30000)
+  }
+
+  private stopCodeRepoPolling() {
+    if (this.codeRepoTimer !== null) {
+      window.clearInterval(this.codeRepoTimer)
+      this.codeRepoTimer = null
+    }
+  }
+
+  get isCodeRepoBusy() {
+    return this.isCodeRepoLoading || this.isCodeRepoAdding || this.isCodeRepoBranchesLoading || this.codeRepoBusyId !== ''
+  }
+
+  get codeRepoBranchesLoaded() {
+    return this.codeRepoBranches.length > 0 && this.codeRepoBranchesUrl === this.codeRepoUrl.trim()
+  }
+
+  get codeRepoProjectName() {
+    return this.projects.find(project => project.projectId === this.codeRepoProjectId)?.projectName ?? ''
+  }
+
+  private codeRepoPath(id = '') {
+    return '/projects/' + encodeURIComponent(this.codeRepoProjectId) + '/repositories' + (id ? '/' + encodeURIComponent(id) : '')
+  }
+
+  trackCodeRepository(_index: number, repo: CodeRepository) {
+    return repo.id
+  }
+
+  codeRepoName(repo: CodeRepository) {
+    return repo.url.replace(/^https:\/\/github\.com\//i, '')
+  }
+
+  codeRepoStatusLabel(repo: CodeRepository) {
+    switch (repo.status) {
+      case 'queued': return 'Queued for indexing'
+      case 'indexing': return 'Indexing...'
+      case 'ready': return 'Index ready'
+      case 'error': return 'Indexing failed'
+      case 'access-required': return 'GitHub access required'
+      case 'disabled': return 'Disabled'
+      default: return repo.status
+    }
+  }
+
+  async loadCodeRepositories(silent = false) {
+    if (!this.currentUser) return
+    const version = ++this.codeRepoLoadVersion
+    if (!silent) this.isCodeRepoLoading = true
+    try {
+      this.codeRepoConnection = await this.api.codeRequest<GitHubConnectionStatus>('/github/connection')
+      const records = this.codeRepoProjectId && this.codeRepoConnection.connected
+        ? await this.api.codeRequest<CodeRepository[]>(this.codeRepoPath())
+        : []
+      if (version !== this.codeRepoLoadVersion) return
+      this.codeRepoList = records
+      if (!silent) this.codeRepoError = ''
+    } catch (requestError) {
+      if (version !== this.codeRepoLoadVersion) return
+      if (!this.codeRepoConnection) this.codeRepoConnection = { connected: false, login: '' }
+      this.codeRepoError = requestError instanceof Error ? requestError.message : 'Unable to load code repositories.'
+    } finally {
+      if (version === this.codeRepoLoadVersion) this.isCodeRepoLoading = false
+    }
+  }
+
+  async handleCodeRepoProjectChange(projectId: string) {
+    this.codeRepoProjectId = projectId
+    this.codeRepoList = []
+    this.codeRepoNotice = ''
+    this.resetCodeChat()
+    await Promise.all([this.loadCodeRepositories(), this.loadCodeChatHistory()])
+  }
+
+  async handleCodeRepoAdd() {
+    const url = this.codeRepoUrl.trim()
+    const branch = this.codeRepoBranch.trim() || 'master'
+    if (!url || !this.codeRepoProjectId || this.isCodeRepoBusy) return
+    if (!this.validateCodeRepoUrl(url)) return
+
+    this.isCodeRepoAdding = true
+    this.codeRepoError = ''
+    this.codeRepoNotice = ''
+    try {
+      const saved = await this.api.codeRequest<CodeRepository>(this.codeRepoPath(), 'POST', { url, branch, enabled: true })
+      this.codeRepoUrl = ''
+      this.codeRepoBranch = ''
+      this.codeRepoBranches = []
+      this.codeRepoBranchesUrl = ''
+      this.codeRepoNotice = `${this.codeRepoName(saved)} (${saved.branch}) was added and queued for indexing.`
+      await this.loadCodeRepositories(true)
+    } catch (requestError) {
+      this.codeRepoError = requestError instanceof Error ? requestError.message : 'Unable to add this repository.'
+    } finally {
+      this.isCodeRepoAdding = false
+    }
+  }
+
+  handleCodeRepoUrlChange(value: string) {
+    this.codeRepoUrl = value
+    if (this.codeRepoBranchesUrl && this.codeRepoBranchesUrl !== value.trim()) {
+      this.codeRepoBranches = []
+      this.codeRepoBranchesUrl = ''
+      this.codeRepoBranchesTruncated = false
+      this.codeRepoBranch = ''
+    }
+  }
+
+  async handleCodeRepoLoadBranches() {
+    const url = this.codeRepoUrl.trim()
+    if (!url || !this.codeRepoProjectId || this.isCodeRepoBusy) return
+    if (!this.validateCodeRepoUrl(url)) return
+
+    this.isCodeRepoBranchesLoading = true
+    this.codeRepoError = ''
+    try {
+      const result = await this.api.codeRequest<{ fullName: string; defaultBranch: string; branches: string[]; truncated: boolean }>(
+        this.codeRepoPath() + '/branches?url=' + encodeURIComponent(url))
+      this.codeRepoBranches = result.branches
+      this.codeRepoBranchesUrl = url
+      this.codeRepoBranchesTruncated = result.truncated
+      this.codeRepoBranch = result.branches.includes(this.codeRepoBranch) ? this.codeRepoBranch : result.defaultBranch
+      if (result.branches.length === 0) this.codeRepoError = 'This repository has no branches yet.'
+    } catch (requestError) {
+      this.codeRepoBranches = []
+      this.codeRepoBranchesUrl = ''
+      this.codeRepoError = requestError instanceof Error ? requestError.message : 'Unable to load branches for this repository.'
+    } finally {
+      this.isCodeRepoBranchesLoading = false
+    }
+  }
+
+  private validateCodeRepoUrl(url: string) {
+    let parsed: URL
+    try { parsed = new URL(url) } catch { this.codeRepoError = 'Enter a valid GitHub repository URL.'; return false }
+    const segments = parsed.pathname.split('/').filter(Boolean)
+    if (parsed.protocol !== 'https:' || parsed.host !== 'github.com' || parsed.username || parsed.password || parsed.search || parsed.hash || segments.length !== 2) {
+      this.codeRepoError = 'Use a repository URL in the form https://github.com/owner/repository.'
+      return false
+    }
+    return true
+  }
+
+  async handleCodeRepoRefresh(repo: CodeRepository) {
+    if (this.isCodeRepoBusy || !repo.enabled || repo.status === 'indexing' || repo.status === 'queued') return
+    this.codeRepoBusyId = repo.id
+    this.codeRepoError = ''
+    this.codeRepoNotice = ''
+    try {
+      const path = repo.status === 'access-required' ? '/take-ownership' : '/refresh'
+      await this.api.codeRequest<CodeRepository>(this.codeRepoPath(repo.id) + path, 'POST', {})
+      this.codeRepoNotice = `${this.codeRepoName(repo)} queued for re-indexing.`
+      await this.loadCodeRepositories(true)
+    } catch (requestError) {
+      this.codeRepoError = requestError instanceof Error ? requestError.message : 'Unable to refresh this repository.'
+    } finally {
+      this.codeRepoBusyId = ''
+    }
+  }
+
+  async handleCodeRepoRemove(repo: CodeRepository) {
+    if (this.isCodeRepoBusy || !window.confirm(`Remove ${this.codeRepoName(repo)} from ${this.codeRepoProjectName || 'this application'}?`)) return
+    this.codeRepoBusyId = repo.id
+    this.codeRepoError = ''
+    this.codeRepoNotice = ''
+    try {
+      await this.api.codeRequest(this.codeRepoPath(repo.id), 'DELETE')
+      this.codeRepoNotice = `${this.codeRepoName(repo)} was removed.`
+      this.clearCodeAnswers()
+      await this.loadCodeRepositories(true)
+    } catch (requestError) {
+      this.codeRepoError = requestError instanceof Error ? requestError.message : 'Unable to remove this repository.'
+    } finally {
+      this.codeRepoBusyId = ''
+    }
+  }
+
+  get hasReadyCodeRepository() {
+    return this.codeRepoList.some(repo => repo.enabled && repo.indexedCommit)
+  }
+
+  async loadCodeChatHistory() {
+    if (!this.currentUser || !this.codeRepoProjectId) {
+      this.codeChatHistory = []
+      return
+    }
+    this.isCodeChatHistoryLoading = true
+    try {
+      this.codeChatHistory = await this.api.getCodeChatHistory(this.codeRepoProjectId)
+    } catch (requestError) {
+      this.codeChatError = requestError instanceof Error ? requestError.message : 'Unable to load conversation history.'
+    } finally {
+      this.isCodeChatHistoryLoading = false
+    }
+  }
+
+  async openCodeChatSession(sessionId: string) {
+    if (this.isCodeChatAsking || sessionId === this.codeChatSessionId) return
+    this.isCodeChatHistoryLoading = true
+    this.codeChatError = ''
+    try {
+      const session = await this.api.getCodeChatSession(this.codeRepoProjectId, sessionId)
+      this.codeChatSessionId = session.session.id
+      this.codeChatMessages = session.messages.map(message =>
+        this.createCodeChatMessage(message.role, message.content, message.citations, message.createdAt))
+      this.expandedCodeChatSourcesMessageId = null
+      this.scrollCodeChatToBottom()
+    } catch (requestError) {
+      this.codeChatError = requestError instanceof Error ? requestError.message : 'Unable to load this conversation.'
+    } finally {
+      this.isCodeChatHistoryLoading = false
+    }
+  }
+
+  async deleteCodeChatSession(sessionId: string, event?: Event) {
+    event?.stopPropagation()
+    if (this.isCodeChatAsking) return
+    try {
+      await this.api.deleteCodeChatSession(this.codeRepoProjectId, sessionId)
+      this.codeChatHistory = this.codeChatHistory.filter(session => session.id !== sessionId)
+      if (this.codeChatSessionId === sessionId) this.resetCodeChat()
+    } catch (requestError) {
+      this.codeChatError = requestError instanceof Error ? requestError.message : 'Unable to delete this conversation.'
+    }
+  }
+
+  async handleCodeChatAsk() {
+    const question = this.codeChatQuestion.trim()
+    if (!question || !this.codeRepoProjectId || this.isCodeChatAsking) return
+
+    const history: CodeChatTurn[] = this.codeChatMessages
+      .filter(message => !message.isError)
+      .slice(-8)
+      .map(message => ({ role: message.role, content: message.text }))
+
+    this.codeChatMessages = [...this.codeChatMessages, this.createCodeChatMessage('user', question)]
+    this.codeChatQuestion = ''
+    this.isCodeChatAsking = true
+    this.codeChatError = ''
+    this.scrollCodeChatToBottom()
+
+    try {
+      const response = await this.api.askCodeChat(this.codeRepoProjectId, question, history, this.codeChatSessionId)
+      this.codeChatSessionId = response.sessionId
+      this.codeChatMessages = [
+        ...this.codeChatMessages,
+        this.createCodeChatMessage('assistant', response.answer, response.citations, response.generatedAt),
+      ]
+      void this.loadCodeChatHistory()
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : 'Unable to answer from repository source.'
+      this.codeChatMessages = [...this.codeChatMessages, { ...this.createCodeChatMessage('assistant', message), isError: true }]
+    } finally {
+      this.isCodeChatAsking = false
+      this.scrollCodeChatToBottom()
+    }
+  }
+
+  handleCodeChatKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      void this.handleCodeChatAsk()
+    }
+  }
+
+  resetCodeChat() {
+    this.codeChatMessages = []
+    this.codeChatSessionId = null
+    this.expandedCodeChatSourcesMessageId = null
+    this.codeChatError = ''
+  }
+
+  toggleCodeChatSources(messageId: number) {
+    this.expandedCodeChatSourcesMessageId = this.expandedCodeChatSourcesMessageId === messageId ? null : messageId
+  }
+
+  trackCodeChatMessage(_index: number, message: CodeChatMessage) {
+    return message.id
+  }
+
+  trackCodeChatSession(_index: number, session: CodeChatSessionSummary) {
+    return session.id
+  }
+
+  private createCodeChatMessage(role: 'user' | 'assistant', text: string, citations: CodeEvidence[] = [], generatedAt = new Date().toISOString()): CodeChatMessage {
+    return {
+      id: Date.now() + Math.random(),
+      role,
+      text,
+      renderedText: role === 'assistant' ? renderMarkdown(text) : '',
+      citations,
+      generatedAt,
+    }
+  }
+
+  private scrollCodeChatToBottom() {
+    setTimeout(() => {
+      const element = this.codeChatTranscript?.nativeElement
+      if (element) element.scrollTop = element.scrollHeight
+    })
   }
 
   toggleSidebar() {
@@ -984,21 +1342,8 @@ export class AppComponent implements OnInit {
       nyraKbNames: project.nyraKbNames,
       githubUrls: project.githubUrls ?? '',
     }
-    const repositoryUrls = (project.githubUrls ?? '').split(';').map(url => url.trim()).filter(Boolean)
-    this.projectRepositoryRows = repositoryUrls.length ? repositoryUrls.map(url => ({ url })) : [{ url: '' }]
     this.projectNotice = `Editing ${project.projectName}.`
     this.projectError = ''
-  }
-
-  addProjectRepository() {
-    this.projectRepositoryRows.push({ url: '' })
-  }
-
-  removeProjectRepository(index: number) {
-    this.projectRepositoryRows.splice(index, 1)
-    if (!this.projectRepositoryRows.length) {
-      this.addProjectRepository()
-    }
   }
 
   cancelProjectEdit() {
@@ -1010,21 +1355,6 @@ export class AppComponent implements OnInit {
 
   async handleProjectSubmit() {
     if (this.isProjectSaving) return
-    const repositoryUrls = this.projectRepositoryRows.flatMap(row => row.url.split(';'))
-      .map(url => url.trim()).filter(Boolean)
-
-    for (const repositoryUrl of repositoryUrls) {
-      try {
-        const parsedUrl = new URL(repositoryUrl)
-        if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
-          throw new Error('Unsupported repository URL protocol')
-        }
-      } catch {
-        this.projectError = 'Enter a valid HTTP or HTTPS URL for each repository.'
-        this.projectNotice = ''
-        return
-      }
-    }
 
     const payload: ProjectConfigInput = {
       ...this.projectForm,
@@ -1033,7 +1363,7 @@ export class AppComponent implements OnInit {
       emailRecipients: this.projectForm.emailRecipients.trim(),
       applicationFilter: this.projectForm.applicationFilter.trim(),
       nyraKbNames: this.projectForm.nyraKbNames.trim(),
-      githubUrls: repositoryUrls.join(';'),
+      githubUrls: this.projectForm.githubUrls,
     }
 
     if (!payload.projectName) {
@@ -1510,7 +1840,6 @@ export class AppComponent implements OnInit {
   private resetProjectForm() {
     this.editingProjectId = null
     this.projectForm = createDefaultProjectForm()
-    this.projectRepositoryRows = [{ url: '' }]
   }
 
   private async initializeSession() {
