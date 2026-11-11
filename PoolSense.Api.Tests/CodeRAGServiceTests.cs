@@ -60,6 +60,26 @@ public sealed class CodeRAGServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishedSnapshotEnqueuesOneCoalescedWarmupRequest()
+    {
+        var builder = new TestBuilder(files);
+        var queue = new CodeSnapshotWarmupQueue(Microsoft.Extensions.Options.Options.Create(new RetrievalCacheWarmupOptions()));
+        var coordinator = new CodeIndexCoordinator(store, github, builder, files, options, TimeProvider.System,
+            warmupQueue: queue);
+
+        await coordinator.RefreshAsync(store.Repository!, default);
+        var published = store.Repository!;
+        var request = await queue.ReadAsync(CancellationToken.None);
+        Assert.Equal(published.Id, request.RepositoryId);
+        Assert.Equal(published.Generation, request.Generation);
+
+        await coordinator.RefreshAsync(published, default);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await queue.ReadAsync(cancellation.Token));
+    }
+
+    [Fact]
     public async Task Retrieval_ChecksQueryingUserAndProject_EvenWhenIndexIsCached()
     {
         await Coordinator(new TestBuilder(files)).RefreshAsync(store.Repository!, default);
@@ -347,7 +367,7 @@ public sealed class CodeRAGServiceTests : IDisposable
         public bool Fail { get; set; }
         public Action? OnBuild { get; set; }
         public string Source { get; set; } = "class OriginalPumpController { void StartPump() {} }";
-        public async Task<IndexSummary> BuildAsync(CodeRepository repository, string commit, CancellationToken token)
+        public async Task<IndexSummary> BuildAsync(CodeRepository repository, string commit, CancellationToken token, string? previousSnapshotFolder = null)
         {
             Builds++;
             if (Fail) throw new IOException("Test failure");
@@ -369,7 +389,13 @@ public sealed class CodeRAGServiceTests : IDisposable
             CheckedUsers.Add(user);
             return user == "alice" && AllowAlice ? Task.FromResult(Commit) : Task.FromException<string>(new CodeAccessException());
         }
-        public Task<GitHubRepository> RepositoryAsync(string user, string fullName, CancellationToken token) => Task.FromResult(new GitHubRepository(123, fullName, "main"));
+        public Task<GitHubRepository> RepositoryAsync(string user, string fullName, CancellationToken token)
+        {
+            CheckedUsers.Add(user);
+            return user == "alice" && AllowAlice
+                ? Task.FromResult(new GitHubRepository(123, fullName, "main"))
+                : Task.FromException<GitHubRepository>(new CodeAccessException());
+        }
         public Task<GitHubBranches> BranchesAsync(string user, string fullName, CancellationToken token) => Task.FromResult(new GitHubBranches(fullName, "main", ["main"], false));
         public Task DownloadAsync(string user, CodeRepository repository, string commit, string destination, CancellationToken token) => throw new NotSupportedException();
     }

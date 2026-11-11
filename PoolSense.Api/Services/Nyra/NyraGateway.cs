@@ -1,7 +1,6 @@
 using System.ClientModel.Primitives;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Azure;
 using Azure.AI.OpenAI;
@@ -11,6 +10,9 @@ namespace PoolSense.Api.Services.Nyra;
 public static class NyraGateway
 {
     private const string NoProxyPattern = @".*\.mfgint\.intel\.com";
+    private static readonly Lazy<NyraTokenProvider> SharedProvider = new(
+        () => new NyraTokenProvider(CreateTokenHttpClient()), LazyThreadSafetyMode.ExecutionAndPublication);
+    internal static NyraTokenProvider TokenProvider => SharedProvider.Value;
 
     public static AzureOpenAIClient Create(
         string? apiKey,
@@ -44,10 +46,13 @@ public static class NyraGateway
         string? scope = null,
         CancellationToken cancellationToken = default)
     {
-        var token = await FetchTokenAsync(tokenUrl, issuer, clientId, clientSecret, audience, scope, cancellationToken).ConfigureAwait(false);
+        await FetchTokenAsync(tokenUrl, issuer, clientId, clientSecret, audience, scope, cancellationToken).ConfigureAwait(false);
         var options = new AzureOpenAIClientOptions();
 
-        options.AddPolicy(new NyraAuthPolicy(token, apiKey), PipelinePosition.PerCall);
+        options.AddPolicy(new NyraAuthPolicy(
+            ct => FetchTokenAsync(tokenUrl, issuer, clientId, clientSecret, audience, scope, ct),
+            () => InvalidateToken(tokenUrl, issuer, clientId, clientSecret, audience, scope),
+            apiKey), PipelinePosition.PerCall);
 
         return new AzureOpenAIClient(endpoint, new AzureKeyCredential("ignored_by_gateway"), options);
     }
@@ -61,91 +66,13 @@ public static class NyraGateway
         string? scope = null,
         CancellationToken cancellationToken = default)
     {
-        using var httpClient = CreateTokenHttpClient();
-        var resolvedTokenUrl = !string.IsNullOrWhiteSpace(tokenUrl)
-            ? tokenUrl
-            : await ResolveTokenUrlAsync(httpClient, issuer, cancellationToken).ConfigureAwait(false);
-
-        var form = new Dictionary<string, string>
-        {
-            ["grant_type"] = "client_credentials",
-            ["client_id"] = GetRequiredOption(clientId, "Nyra:ClientId"),
-            ["client_secret"] = GetRequiredOption(clientSecret, "Nyra:ClientSecret"),
-            ["scope"] = FirstNonEmpty(scope, "openid"),
-            ["audience"] = GetRequiredOption(audience, "Nyra:Audience"),
-        };
-
-        using var content = new FormUrlEncodedContent(form);
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await httpClient
-                .PostAsync(resolvedTokenUrl, content, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new InvalidOperationException($"Token request failed: {ex.Message}", ex);
-        }
-
-        var body = await response.Content
-            .ReadAsStringAsync(cancellationToken)
+        return await SharedProvider.Value.GetTokenAsync(tokenUrl, issuer, clientId, clientSecret, audience, scope, cancellationToken)
             .ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"Token endpoint returned {(int)response.StatusCode}: {body}");
-        }
-
-        using var json = JsonDocument.Parse(body);
-        if (!json.RootElement.TryGetProperty("access_token", out var tokenProp)
-            || tokenProp.GetString() is not { Length: > 0 } accessToken)
-        {
-            throw new InvalidOperationException("Token endpoint returned 200 but no access_token in response.");
-        }
-
-        return accessToken;
     }
 
-    private static async Task<string> ResolveTokenUrlAsync(
-        HttpClient httpClient,
-        string? issuer,
-        CancellationToken cancellationToken)
-    {
-        var resolvedIssuer = GetRequiredOption(issuer, "Nyra:Issuer or Nyra:TokenUrl").TrimEnd('/');
-        var openIdConfigurationUrl = resolvedIssuer + "/.well-known/openid-configuration";
-
-        using var response = await httpClient.GetAsync(openIdConfigurationUrl, cancellationToken).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"OIDC configuration endpoint returned {(int)response.StatusCode}: {body}");
-        }
-
-        using var json = JsonDocument.Parse(body);
-        if (!json.RootElement.TryGetProperty("token_endpoint", out var tokenEndpointProperty)
-            || tokenEndpointProperty.GetString() is not { Length: > 0 } tokenEndpoint)
-        {
-            throw new InvalidOperationException("OIDC configuration endpoint returned 200 but no token_endpoint in response.");
-        }
-
-        return tokenEndpoint;
-    }
-
-    private static string GetRequiredOption(string? value, string configurationKey)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new InvalidOperationException($"{configurationKey} configuration is required.");
-        }
-
-        return value;
-    }
-
-    private static string FirstNonEmpty(params string?[] values) =>
-        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+    internal static void InvalidateToken(string? tokenUrl, string? issuer, string? clientId, string? clientSecret,
+        string? audience, string? scope) =>
+        SharedProvider.Value.InvalidateToken(tokenUrl, issuer, clientId, clientSecret, audience, scope);
 
     private static HttpClient CreateTokenHttpClient()
     {

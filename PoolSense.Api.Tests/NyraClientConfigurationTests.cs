@@ -17,7 +17,7 @@ public sealed class NyraClientConfigurationTests
     private const string DefaultClientSecret = "";
     private const string DefaultScope = "openid";
     private const string DefaultResponsesUrl = "https://imi.cdcprod.mfg.intel.com/api/nyra-gateway/llm-service/openai/responses?api-version=2025-03-01-preview";
-    private const string DefaultLlmModel = "gpt-5.4";
+    private const string DefaultLlmModel = "gpt-6-luna";
     private const string DefaultEmbeddingGenerateUrl = "https://imi.cdcprod.mfg.intel.com/api/nyra-gateway/embedding-service/v1/embeddings/generate";
     private const string DefaultEmbeddingModel = "text-embedding-3-small";
     private const string DefaultEmbeddingSubscriptionType = "azure";

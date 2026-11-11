@@ -4,7 +4,7 @@ Use the following prompts to generate a focused 1 of 12-slide presentation for `
 
 1. Historical closed tickets are polled directly from a SQL source and converted into a reusable, vector-searchable knowledge base.
 2. New tickets trigger AI-based recommendations and email notifications (SMTP or SQL Server Database Mail).
-3. A split-screen operator workspace lets users enter a problem statement, scope searches by project group, and review resolutions alongside an analytics insight panel with telemetry charts.
+3. A split-screen operator workspace lets users enter a problem statement, scope searches by project group, and review resolutions alongside confidence, failure-pattern details, evidence, and reasoning.
 
 v1 knowledge source is pool ticket history. Future releases will add sources such as project wikis, SharePoint, and codebases.
 
@@ -57,7 +57,7 @@ Explain that the initial release delivers 3 core workflows:
    - the user can optionally scope the search to specific project groups
    - the system searches the same knowledge base
    - returns possible resolution, related historical incidents, confidence scoring, failure pattern classification, and AI reasoning in the UI
-   - an insight panel displays telemetry charts, similar incident details, and system context alongside the conversation
+   - an insight panel displays confidence, similar incident evidence, failure-pattern details, reasoning, and system context alongside the conversation
 
 Make it clear that these three workflows are live and operational in v1.
 
@@ -194,7 +194,7 @@ Explain the implemented user-driven workflow:
 6. The system performs similarity search against the stored knowledge base scoped by application and group
 7. Results are displayed in the split-screen layout:
    - Left panel (ChatPanel): conversation thread with suggested root cause and resolution
-   - Right panel (InsightPanel): confidence meter, failure pattern card, AI reasoning, similar incidents list with external ticket links, and a telemetry bar chart
+   - Right panel (InsightPanel): confidence meter, failure pattern card, AI reasoning, similar incidents list with external ticket links, and supporting source context
 
 Include the returned outputs:
 - suggested root cause
@@ -203,7 +203,7 @@ Include the returned outputs:
 - similar incidents (ranked by match %, with links to external ticket system)
 - failure pattern details (system, component, failure type, resolution category)
 - reasoning (transparency into which historical incident informed the suggestion)
-- telemetry snapshot chart (confidence, average similarity, pattern fit in the Angular UI)
+- confidence meter, similar-incident evidence, and source context in the Angular UI
 
 Emphasize:
 - this uses the same historical knowledge generated in Flow 1
@@ -239,7 +239,7 @@ Group them into five categories.
 
 ### `Insights and Analytics`
 - insights API with aggregated failure trends, top components, repeated systems, and monthly incident timeline
-- telemetry snapshot chart (confidence, similarity, pattern fit) in the Angular UI
+- confidence, evidence, failure-pattern details, and reasoning in the Angular UI
 - confidence meter and failure pattern card in the UI
 - reasoning transparency (shows which historical ticket informed the suggestion)
 
@@ -314,7 +314,7 @@ Then include a conclusion statement:
 - `PoolSense v1 is live and has delivered all 3 core workflows in production:`
   - `building a reusable knowledge base from pool ticket history using 5 specialized AI agents`
   - `proactively recommending resolutions for new tickets via email (SMTP or Database Mail)`
-  - `supporting user queries through a split-screen operator workspace with group-scoped search, telemetry charts, and reasoning transparency`
+  - `supporting user queries through a split-screen operator workspace with group-scoped search, confidence, evidence, and reasoning transparency`
 - `Additional platform controls delivered: PoolSense Email master kill switch and a full user activity audit trail for compliance and traceability.`
 
 End with a clear leadership message:
@@ -470,7 +470,7 @@ The system includes:
 - failure pattern extraction and aggregated insights API
 - email recommendation workflow (SMTP or SQL Server Database Mail)
 - Angular 18 / TypeScript split-screen operator workspace
-- Angular/CSS-based telemetry dashboard
+- Angular/CSS-based incident insight panel and rich-response visualizations
 - application sync from `tbl_Application.PoolSense` into `project_configs`
 - UI project enable/disable write-back to `tbl_Application.PoolSense`
 - dark/light theme, GroupSelector, quick prompt chips

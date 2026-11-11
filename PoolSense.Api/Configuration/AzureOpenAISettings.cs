@@ -144,8 +144,8 @@ public static class NyraSettingsResolver
         settings.AuthMode = FirstNonEmpty(settings.AuthMode, NyraAuthModes.ClientCredentials);
         settings.Scope = FirstNonEmpty(settings.Scope, "openid");
         settings.EmbeddingSubscriptionType = FirstNonEmpty(settings.EmbeddingSubscriptionType, "azure");
-        settings.CategorizationModel = FirstNonEmpty(settings.CategorizationModel, "gpt-5.4-mini");
-        settings.ResolutionModel = FirstNonEmpty(settings.ResolutionModel, "gpt-5.5");
+        settings.CategorizationModel = FirstNonEmpty(settings.CategorizationModel, settings.Model);
+        settings.ResolutionModel = FirstNonEmpty(settings.ResolutionModel, settings.Model);
     }
 
     public static bool HasRequiredSettings(NyraSettings settings)
@@ -155,6 +155,8 @@ public static class NyraSettingsResolver
         return HasRequiredAuth(settings)
             && !string.IsNullOrWhiteSpace(settings.GatewayEndpoint)
             && !string.IsNullOrWhiteSpace(settings.Model)
+            && !string.IsNullOrWhiteSpace(settings.CategorizationModel)
+            && !string.IsNullOrWhiteSpace(settings.ResolutionModel)
             && !string.IsNullOrWhiteSpace(settings.EmbeddingModel)
             && (!string.IsNullOrWhiteSpace(settings.EmbeddingGenerateUrl)
                 || !string.IsNullOrWhiteSpace(settings.EmbeddingEndpoint))

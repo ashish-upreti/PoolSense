@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using PoolSense.Api.Models;
 using PoolSense.Api.Orchestration;
+using PoolSense.Api.Services;
+using PoolSense.Api.Services.CodeRAG;
 using PoolSense.Application.Models;
 using System.Security.Authentication;
 using System.Text.Json;
@@ -18,16 +20,19 @@ public class ResolutionController : ControllerBase
     private static readonly JsonSerializerOptions StreamJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ITicketWorkflowOrchestrator _ticketWorkflowOrchestrator;
+    private readonly IPoolChatHistoryStore _chatHistoryStore;
     private readonly ILogger<ResolutionController> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ResolutionController"/> class.
     /// </summary>
     /// <param name="ticketWorkflowOrchestrator">The orchestrator that processes tickets end to end.</param>
+    /// <param name="chatHistoryStore">Store for per-user triage conversation history.</param>
     /// <param name="logger">Logger for persisting errors to the database.</param>
-    public ResolutionController(ITicketWorkflowOrchestrator ticketWorkflowOrchestrator, ILogger<ResolutionController> logger)
+    public ResolutionController(ITicketWorkflowOrchestrator ticketWorkflowOrchestrator, IPoolChatHistoryStore chatHistoryStore, ILogger<ResolutionController> logger)
     {
         _ticketWorkflowOrchestrator = ticketWorkflowOrchestrator;
+        _chatHistoryStore = chatHistoryStore;
         _logger = logger;
     }
 
@@ -47,7 +52,9 @@ public class ResolutionController : ControllerBase
 
         try
         {
-            var result = await _ticketWorkflowOrchestrator.RecommendAsync(request, cancellationToken);
+            var context = await LoadConversationAsync(request, cancellationToken);
+            var result = await _ticketWorkflowOrchestrator.RecommendAsync(request, context, null, cancellationToken);
+            await PersistChatHistoryAsync(request, result, cancellationToken);
 
             return Ok(result);
         }
@@ -78,11 +85,15 @@ public class ResolutionController : ControllerBase
 
         try
         {
+            var context = await LoadConversationAsync(request, cancellationToken);
             var result = await _ticketWorkflowOrchestrator.RecommendAsync(
                 request,
+                context,
                 async (progress, token) => await WriteStreamEventAsync("progress", progress, token),
                 cancellationToken);
 
+            // Persist before writing the final result event so a saved session id reaches the client in-band.
+            await PersistChatHistoryAsync(request, result, cancellationToken);
             await WriteStreamEventAsync("result", result, cancellationToken);
             return new EmptyResult();
         }
@@ -93,12 +104,56 @@ public class ResolutionController : ControllerBase
 
             if (!Response.HasStarted)
             {
+                Response.ContentType = null;
                 return StatusCode(500, message);
             }
 
             await WriteStreamEventAsync("error", new { message }, cancellationToken);
             return new EmptyResult();
         }
+    }
+
+    private async Task PersistChatHistoryAsync(TicketRequest request, TicketWorkflowResult result, CancellationToken cancellationToken)
+    {
+        var user = CodeUser.Name(User);
+        if (user.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var question = request.GetWorkflowTitle();
+            result.ChatSessionId = await _chatHistoryStore.AppendExchangeAsync(
+                user, string.IsNullOrWhiteSpace(request.ChatSessionId) ? null : request.ChatSessionId.Trim(),
+                question, request.SelectedGroupIds, result, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // History is best-effort: the answer must still reach the user, but never claim it was saved.
+            _logger.LogError(ex, "Failed to persist PoolSense chat history for user {User}.", CodeUser.Name(User));
+            result.HistoryPersistenceError = "The answer was generated but could not be saved to your chat history.";
+        }
+    }
+
+    private async Task<TicketConversationContext> LoadConversationAsync(TicketRequest request, CancellationToken cancellationToken)
+    {
+        var user = CodeUser.Name(User);
+        if (user.Length == 0 || string.IsNullOrWhiteSpace(request.ChatSessionId))
+        {
+            request.ChatSessionId = null;
+            return TicketConversationContext.Empty;
+        }
+
+        var session = await _chatHistoryStore.SessionAsync(user, request.ChatSessionId.Trim(), cancellationToken, TicketConversationContextBuilder.MaxTurns);
+        if (session is null || !TicketConversationContextBuilder.SameScope(session.Session.SelectedGroupIds, request.SelectedGroupIds))
+        {
+            request.ChatSessionId = null;
+            return TicketConversationContext.Empty;
+        }
+
+        request.ChatSessionId = session.Session.Id;
+        return TicketConversationContextBuilder.Build(session);
     }
 
     private async Task WriteStreamEventAsync(string type, object payload, CancellationToken cancellationToken)

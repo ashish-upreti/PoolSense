@@ -433,3 +433,33 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_auth_login_audit_username_created_at' AND object_id = OBJECT_ID(N'dbo.auth_login_audit'))
     CREATE INDEX IX_auth_login_audit_username_created_at ON dbo.auth_login_audit (username, created_at DESC);
 GO
+IF OBJECT_ID(N'dbo.pool_chat_sessions', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.pool_chat_sessions (
+        id nvarchar(32) NOT NULL PRIMARY KEY,
+        username nvarchar(128) NOT NULL,
+        title nvarchar(100) NOT NULL,
+        selected_group_ids_json nvarchar(max) NULL,
+        is_pinned bit NOT NULL DEFAULT 0,
+        created_at datetimeoffset NOT NULL,
+        updated_at datetimeoffset NOT NULL
+    );
+
+    CREATE INDEX IX_pool_chat_sessions_user ON dbo.pool_chat_sessions (username, is_pinned, updated_at DESC);
+END
+GO
+
+IF OBJECT_ID(N'dbo.pool_chat_messages', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.pool_chat_messages (
+        id int NOT NULL IDENTITY PRIMARY KEY,
+        session_id nvarchar(32) NOT NULL REFERENCES dbo.pool_chat_sessions(id) ON DELETE CASCADE,
+        role nvarchar(16) NOT NULL CHECK (role IN (N'user', N'assistant')),
+        content nvarchar(max) NOT NULL,
+        result_json nvarchar(max) NULL,
+        created_at datetimeoffset NOT NULL
+    );
+
+    CREATE INDEX IX_pool_chat_messages_session ON dbo.pool_chat_messages (session_id, id);
+END
+GO

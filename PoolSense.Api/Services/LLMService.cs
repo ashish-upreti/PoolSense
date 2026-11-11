@@ -3,6 +3,7 @@ using Microsoft.SemanticKernel;
 using PoolSense.Api.Agents;
 using PoolSense.Api.Configuration;
 using PoolSense.Api.Logging;
+using Microsoft.SemanticKernel.Connectors.OpenAI;
 
 namespace PoolSense.Api.Services;
 
@@ -17,6 +18,8 @@ public interface ILLMService
     /// <param name="prompt">The prompt text to submit.</param>
     /// <returns>The model response.</returns>
     Task<string> GetResponseAsync(string prompt);
+    Task<string> GetBoundedResponseAsync(string prompt, int maxOutputTokens, CancellationToken token) =>
+        throw new NotSupportedException("This provider does not support bounded generation.");
 }
 
 /// <summary>
@@ -56,5 +59,13 @@ public class LLMService : ILLMService
             _tokenUsageRepository,
             "GenericPrompt",
             _nyraSettings.CurrentValue.Model);
+    }
+
+    public Task<string> GetBoundedResponseAsync(string prompt, int maxOutputTokens, CancellationToken token)
+    {
+        if (maxOutputTokens is < 1 or > 4096) throw new ArgumentOutOfRangeException(nameof(maxOutputTokens));
+        return SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(_kernel, prompt,
+            new KernelArguments(new OpenAIPromptExecutionSettings { MaxTokens = maxOutputTokens, Temperature = 0 }),
+            _tokenUsageRepository, "CodeKnowledgePreparation", _nyraSettings.CurrentValue.Model, token);
     }
 }

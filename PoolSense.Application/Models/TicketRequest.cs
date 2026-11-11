@@ -26,6 +26,12 @@ public class TicketRequest
     /// </summary>
     public List<string>? SelectedGroupIds { get; set; } = null;
 
+    /// <summary>
+    /// Optional chat history session id. When empty a new history session is created after a successful run;
+    /// when set, the exchange is appended to that owned session.
+    /// </summary>
+    public string? ChatSessionId { get; set; }
+
     public string GetWorkflowTitle()
     {
         if (!string.IsNullOrWhiteSpace(Title))

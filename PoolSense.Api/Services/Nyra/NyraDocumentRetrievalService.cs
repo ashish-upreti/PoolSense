@@ -25,17 +25,20 @@ public sealed class NyraDocumentRetrievalService : INyraDocumentRetrievalService
     private readonly IOptionsMonitor<NyraSettings> _nyraSettings;
     private readonly IOptionsMonitor<NyraRetrievalSettings> _retrievalSettings;
     private readonly ILogger<NyraDocumentRetrievalService> _logger;
+    private readonly NyraTokenProvider _tokens;
 
     public NyraDocumentRetrievalService(
         HttpClient httpClient,
         IOptionsMonitor<NyraSettings> nyraSettings,
         IOptionsMonitor<NyraRetrievalSettings> retrievalSettings,
-        ILogger<NyraDocumentRetrievalService> logger)
+        ILogger<NyraDocumentRetrievalService> logger,
+        NyraTokenProvider? tokens = null)
     {
         _httpClient = httpClient;
         _nyraSettings = nyraSettings;
         _retrievalSettings = retrievalSettings;
         _logger = logger;
+        _tokens = tokens ?? NyraGateway.TokenProvider;
     }
 
     public async Task<IReadOnlyList<NyraDocumentResult>> RetrieveHybridDocumentsAsync(
@@ -55,80 +58,75 @@ public sealed class NyraDocumentRetrievalService : INyraDocumentRetrievalService
         NyraRetrievalSettingsResolver.ApplyDefaults(retrievalSettings);
 
         var retrieveDocsUrl = GetRetrieveDocsUrl(settings, retrievalSettings);
-        var token = await NyraGateway.FetchTokenAsync(
-            tokenUrl: string.IsNullOrWhiteSpace(settings.TokenUrl) ? null : settings.TokenUrl,
-            issuer: settings.Issuer,
-            clientId: settings.ClientId,
-            clientSecret: settings.ClientSecret,
-            audience: settings.Audience,
-            scope: settings.Scope,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, retrieveDocsUrl);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
+        var tokenUrl = string.IsNullOrWhiteSpace(settings.TokenUrl) ? null : settings.TokenUrl;
         var apiKey = NyraSettingsResolver.GetApiKeyHeaderValue(settings);
-        if (!string.IsNullOrWhiteSpace(apiKey))
-        {
-            request.Headers.Add("NYRA-API-KEY", apiKey);
-        }
-
-        request.Content = JsonContent.Create(new
-        {
-            input = query,
-            embeddings_name = NyraRetrievalSettingsResolver.GetEmbeddingsName(retrievalSettings),
-            vector_db_config = new
-            {
-                vector_db_name = retrievalSettings.VectorDbName,
-                vector_db_type = retrievalSettings.VectorDbType,
-                vector_db_collection = retrievalSettings.VectorDbCollection
-            },
-            search_config = new
-            {
-                // Retrieve a wider candidate pool than rerank_config.k; equal values can break server-side reranker slicing.
-                k = Math.Max(limit * 2, 10),
-                search_type = "similarity",
-                filter = new
-                {
-                    kb_names = NormalizeKbNames(kbNames).ToArray()
-                },
-                include_images = true,
-                include_tables = true
-            },
-            rerank = true,
-            rerank_config = new
-            {
-                k = limit,
-                score_threshold = 0
-            },
-            hybrid_search = true
-        });
-
-
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(DefaultTimeoutSeconds));
 
-        using var response = await _httpClient.SendAsync(request, timeout.Token).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
+        HttpResponseMessage? response = null;
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            throw new InvalidOperationException($"NYRA document retrieval returned {(int)response.StatusCode} from {retrieveDocsUrl}: {Truncate(body, 800)}");
+            var token = await _tokens.GetTokenAsync(tokenUrl, settings.Issuer, settings.ClientId, settings.ClientSecret,
+                settings.Audience, settings.Scope, timeout.Token).ConfigureAwait(false);
+            using var request = new HttpRequestMessage(HttpMethod.Post, retrieveDocsUrl);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (!string.IsNullOrWhiteSpace(apiKey))
+                request.Headers.Add("NYRA-API-KEY", apiKey);
+
+            request.Content = JsonContent.Create(new
+            {
+                input = query,
+                embeddings_name = NyraRetrievalSettingsResolver.GetEmbeddingsName(retrievalSettings),
+                vector_db_config = new
+                {
+                    vector_db_name = retrievalSettings.VectorDbName,
+                    vector_db_type = retrievalSettings.VectorDbType,
+                    vector_db_collection = retrievalSettings.VectorDbCollection
+                },
+                search_config = new
+                {
+                    // Retrieve a wider candidate pool than rerank_config.k; equal values can break server-side reranker slicing.
+                    k = Math.Max(limit * 2, 10),
+                    search_type = "similarity",
+                    filter = new { kb_names = NormalizeKbNames(kbNames).ToArray() },
+                    include_images = true,
+                    include_tables = true
+                },
+                rerank = true,
+                rerank_config = new { k = limit, score_threshold = 0 },
+                hybrid_search = true
+            });
+
+            response = await _httpClient.SendAsync(request, timeout.Token).ConfigureAwait(false);
+            if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized || attempt != 0)
+                break;
+
+            response.Dispose();
+            response = null;
+            _tokens.InvalidateToken(tokenUrl, settings.Issuer, settings.ClientId, settings.ClientSecret,
+                settings.Audience, settings.Scope);
         }
 
-        using var json = JsonDocument.Parse(body);
-        if (!json.RootElement.TryGetProperty("docs", out var docsElement) || docsElement.ValueKind != JsonValueKind.Array)
+        using (response)
         {
-            _logger.LogWarning("NYRA document retrieval response did not include a docs array.");
-            return [];
-        }
+            var body = await response!.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"NYRA document retrieval returned {(int)response.StatusCode} from {retrieveDocsUrl}: {Truncate(body, 800)}");
 
-        return docsElement
-            .EnumerateArray()
-            .Select(MapDocument)
-            .Where(document => !string.IsNullOrWhiteSpace(document.Content) || !string.IsNullOrWhiteSpace(document.SourceUrl))
-            .Take(limit)
-            .ToList();
+            using var json = JsonDocument.Parse(body);
+            if (!json.RootElement.TryGetProperty("docs", out var docsElement) || docsElement.ValueKind != JsonValueKind.Array)
+            {
+                _logger.LogWarning("NYRA document retrieval response did not include a docs array.");
+                return [];
+            }
+
+            return docsElement
+                .EnumerateArray()
+                .Select(MapDocument)
+                .Where(document => !string.IsNullOrWhiteSpace(document.Content) || !string.IsNullOrWhiteSpace(document.SourceUrl))
+                .Take(limit)
+                .ToList();
+        }
     }
 
     private static Uri GetRetrieveDocsUrl(NyraSettings nyraSettings, NyraRetrievalSettings retrievalSettings)

@@ -15,6 +15,23 @@ export interface CodeEvidence {
   sourceUrl: string
 }
 
+export interface CodeSearchCoverage {
+  authorizedRepositories: number
+  searchedRepositories: number
+  failedRepositories: number
+  authorizationComplete: boolean
+  deadlineExceeded: boolean
+  expandedFallback: boolean
+  semanticStatus: string
+  semanticIndexedChunks?: number
+  semanticEligibleChunks?: number
+  semanticTargetChunks?: number
+  semanticTargetReached?: boolean
+  knowledgeStatus: string
+  oldestIndexedAt?: string | null
+  warnings: string[]
+}
+
 export interface CodeRepository {
   id: string
   projectId: string
@@ -36,6 +53,7 @@ export interface CodeChatTurn {
 }
 
 export interface CodeAskResponse {
+  codeSearchCoverage?: CodeSearchCoverage
   projectId: string
   sessionId: string
   question: string
@@ -66,6 +84,33 @@ export interface CodeChatSession {
   messages: CodeChatStoredMessage[]
 }
 
+export interface PoolChatSessionSummary {
+  id: string
+  title: string
+  selectedGroupIds: string[]
+  isPinned: boolean
+  createdAt: string
+  updatedAt: string
+  messageCount: number
+}
+
+export interface PoolChatStoredMessage {
+  role: 'user' | 'assistant'
+  content: string
+  result: TicketWorkflowResult | null
+  createdAt: string
+}
+
+export interface PoolChatSession {
+  session: PoolChatSessionSummary
+  messages: PoolChatStoredMessage[]
+}
+
+export interface PoolChatSessionPatch {
+  title?: string
+  isPinned?: boolean
+}
+
 export interface SimilarIncident {
   ticketId: string
   problem: string
@@ -85,11 +130,19 @@ export interface FailurePattern {
 }
 
 export interface TicketWorkflowResult {
+  codeSearchCoverage?: CodeSearchCoverage
   codeDocuments?: CodeEvidence[]
   codeKnowledgeStatus?: string
   feedbackAuthorization?: string
   suggestedRootCause: string
   suggestedResolution: string
+  detailedAnalysisMarkdown?: string
+  processDiagramStatus?: 'provided' | 'unavailable' | ''
+  processDiagramMessage?: string
+  visualizationPlan?: { needed: boolean; kind: 'none' | 'relationship' | 'process' | 'table' | 'bar'; explicitRequest: boolean; purpose: string }
+  visualizationStatus?: 'not-needed' | 'provided' | 'partial' | 'unavailable'
+  visualizationMessage?: string
+  sourcePlan?: { pool: boolean; wiki: boolean; code: boolean; label: string; origin: string; clarificationMessage?: string | null }
   confidence: number
   similarIncidents: SimilarIncident[]
   nyraDocuments?: NyraDocumentResult[]
@@ -104,6 +157,9 @@ export interface TicketWorkflowResult {
   failurePattern: FailurePattern
   reasoning: string
   failurePatternFrequency: number
+  chatSessionId?: string
+  historyPersistenceError?: string
+  processingDurationMs?: number
 }
 
 export interface TicketWorkflowProgress {
@@ -186,6 +242,7 @@ export interface PoolRecommendationReportFilters {
 }
 
 export interface PoolTroubleshootResponse {
+  codeSearchCoverage?: CodeSearchCoverage
   codeDocuments?: CodeEvidence[]
   codeKnowledgeStatus?: string
   sourceEventId: string
@@ -419,10 +476,11 @@ export class ApiService {
   }
 
   async logout(): Promise<void> {
-    await fetch(this.apiUrl('/auth/logout'), {
+    const response = await fetch(this.apiUrl('/auth/logout'), {
       method: 'POST',
       credentials: 'include',
     })
+    if (!response.ok) throw new Error(await this.readErrorMessage(response, 'Unable to sign out.'))
   }
 
   async getProjectGroups(): Promise<ProjectGroup[]> {
@@ -581,8 +639,9 @@ export class ApiService {
     return (await response.json()) as ApplicationFeedbackInsights
   }
 
-  async askPoolSense(message: string, selectedGroupIds?: string[]): Promise<TicketWorkflowResult> {
+  async askPoolSense(message: string, selectedGroupIds?: string[], chatSessionId?: string | null, signal?: AbortSignal): Promise<TicketWorkflowResult> {
     const response = await fetch(this.apiUrl('/ticket/process'), {
+      signal,
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -592,6 +651,7 @@ export class ApiService {
         title: message,
         description: message,
         selectedGroupIds: selectedGroupIds ?? null,
+        ...(chatSessionId ? { chatSessionId } : {}),
       }),
     })
 
@@ -607,8 +667,11 @@ export class ApiService {
     message: string,
     selectedGroupIds: string[] | undefined,
     onProgress: (progress: TicketWorkflowProgress) => void,
+    chatSessionId?: string | null,
+    signal?: AbortSignal,
   ): Promise<TicketWorkflowResult> {
     const response = await fetch(this.apiUrl('/ticket/process-progress'), {
+      signal,
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -618,6 +681,7 @@ export class ApiService {
         title: message,
         description: message,
         selectedGroupIds: selectedGroupIds ?? null,
+        ...(chatSessionId ? { chatSessionId } : {}),
       }),
     })
 
@@ -627,7 +691,7 @@ export class ApiService {
     }
 
     if (!response.body) {
-      return await this.askPoolSense(message, selectedGroupIds)
+      return await this.askPoolSense(message, selectedGroupIds, chatSessionId, signal)
     }
 
     const reader = response.body.getReader()
@@ -679,6 +743,33 @@ export class ApiService {
     }
 
     return result
+  }
+
+  private async poolHistoryRequest<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
+    const response = await fetch(this.apiUrl('/ticket/history' + path), {
+      method, credentials: 'include', cache: 'no-store',
+      signal,
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(await this.readErrorMessage(response, 'Unable to load your chat history.'))
+    return response.status === 204 ? undefined as T : await response.json() as T
+  }
+
+  listPoolChatSessions(): Promise<PoolChatSessionSummary[]> {
+    return this.poolHistoryRequest<PoolChatSessionSummary[]>('')
+  }
+
+  getPoolChatSession(sessionId: string, signal?: AbortSignal): Promise<PoolChatSession> {
+    return this.poolHistoryRequest<PoolChatSession>('/' + encodeURIComponent(sessionId), 'GET', undefined, signal)
+  }
+
+  patchPoolChatSession(sessionId: string, patch: PoolChatSessionPatch): Promise<void> {
+    return this.poolHistoryRequest<void>('/' + encodeURIComponent(sessionId), 'PATCH', patch)
+  }
+
+  deletePoolChatSession(sessionId: string): Promise<void> {
+    return this.poolHistoryRequest<void>('/' + encodeURIComponent(sessionId), 'DELETE')
   }
 
   async getPoolReport(poolId: string): Promise<PoolReport> {

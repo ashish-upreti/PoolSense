@@ -22,7 +22,9 @@ public sealed class NyraConfigurationTests
                 ["Nyra:Profiles:staging:Issuer"] = "https://sso.test",
                 ["Nyra:Profiles:staging:Audience"] = "nyra-web-core-api-cdcprod",
                 ["Nyra:Profiles:staging:GatewayEndpoint"] = "https://nyra.test/api/nyra-gateway/llm-service/",
-                ["Nyra:Model"] = "gpt-5.4",
+                ["Nyra:Model"] = "gpt-6-luna",
+                ["Nyra:CategorizationModel"] = "gpt-6-luna",
+                ["Nyra:ResolutionModel"] = "gpt-6.1-sol",
                 ["Nyra:Profiles:staging:EmbeddingGenerateUrl"] = "https://nyra.test/api/nyra-gateway/embedding-service/v1/embeddings/generate",
                 ["Nyra:EmbeddingModel"] = "text-embedding-3-small",
                 ["Nyra:EmbeddingSubscriptionType"] = "azure",
@@ -40,7 +42,9 @@ public sealed class NyraConfigurationTests
         Assert.Equal("https://sso.test", settings.Issuer);
         Assert.Equal("nyra-web-core-api-cdcprod", settings.Audience);
         Assert.Equal("https://nyra.test/api/nyra-gateway/llm-service/", settings.GatewayEndpoint);
-        Assert.Equal("gpt-5.4", settings.Model);
+        Assert.Equal("gpt-6-luna", settings.Model);
+        Assert.Equal("gpt-6-luna", settings.CategorizationModel);
+        Assert.Equal("gpt-6.1-sol", settings.ResolutionModel);
         Assert.Equal("https://nyra.test/api/nyra-gateway/embedding-service/v1/embeddings/generate", settings.EmbeddingGenerateUrl);
         Assert.Equal("text-embedding-3-small", settings.EmbeddingModel);
         Assert.Equal("azure", settings.EmbeddingSubscriptionType);
@@ -60,7 +64,7 @@ public sealed class NyraConfigurationTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Nyra:Model"] = "gpt-5.4",
+                ["Nyra:Model"] = "gpt-6-luna",
                 ["Nyra:EmbeddingModel"] = "text-embedding-3-large",
                 ["NyraRetrieval:BaseUrl"] = "https://nyra.test/api/nyra-gateway/retrieval-service/v1",
                 ["NyraRetrieval:EmbeddingsName"] = NyraRetrievalSettings.SupportedEmbeddingsName
@@ -72,7 +76,7 @@ public sealed class NyraConfigurationTests
 
         Assert.NotNull(nyraSettings);
         Assert.NotNull(retrievalSettings);
-        Assert.Equal("gpt-5.4", nyraSettings.Model);
+        Assert.Equal("gpt-6-luna", nyraSettings.Model);
         Assert.Equal("text-embedding-3-large", nyraSettings.EmbeddingModel);
         Assert.Equal("https://nyra.test/api/nyra-gateway/retrieval-service/v1", retrievalSettings.BaseUrl);
         Assert.Equal(NyraRetrievalSettings.SupportedEmbeddingsName, NyraRetrievalSettingsResolver.GetEmbeddingsName(retrievalSettings));

@@ -20,6 +20,7 @@ public interface ITicketWorkflowOrchestrator
     Task<TicketWorkflowResult> ProcessAsync(TicketRequest request, CancellationToken cancellationToken = default);
     Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, CancellationToken cancellationToken = default);
     Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken = default);
+    Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, TicketConversationContext context, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken = default);
 }
 
 public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
@@ -113,9 +114,13 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         return await ProcessInternalAsync(request, persistKnowledge: false, progressCallback, cancellationToken);
     }
 
-    private async Task<TicketWorkflowResult> ProcessInternalAsync(TicketRequest request, bool persistKnowledge, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken)
+    public Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, TicketConversationContext context, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken = default) =>
+        ProcessInternalAsync(request, false, progressCallback, cancellationToken, context);
+
+    private async Task<TicketWorkflowResult> ProcessInternalAsync(TicketRequest request, bool persistKnowledge, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken, TicketConversationContext? conversation = null)
     {
         ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var processingStopwatch = Stopwatch.StartNew();
 
@@ -128,28 +133,82 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
 
         var title = request.GetWorkflowTitle();
         var description = request.GetWorkflowDescription();
+        var context = persistKnowledge ? TicketConversationContext.Empty : conversation ?? TicketConversationContext.Empty;
 
-        await ReportProgressAsync(progressCallback, "categorize", "Classifying request", "Hybrid search is always enabled: querying pool data and NYRA Wiki.", "active", 1, cancellationToken);
+        await ReportProgressAsync(progressCallback, "categorize", "Classifying request", "Determining requested sources and query intent.", "active", 1, cancellationToken);
 
-        // Query categorization is temporarily disabled; always run the full hybrid search (Pool DB + NYRA Wiki).
-        // _logger.LogInformation("Categorizing query for ticket {TicketId}.", request.TicketId);
-        // var categorizationJson = await _queryCategorizationAgent.CategorizeQueryAsync(title, description);
-        // var categorization = JsonSerializer.Deserialize<QueryCategorizationResult>(AiJsonResponseSanitizer.Normalize(categorizationJson), JsonOptions)
-        //     ?? new QueryCategorizationResult { Category = "Issue" };
-        var categorization = new QueryCategorizationResult { Category = "Issue", Reasoning = "Classification disabled; hybrid search always runs." };
-        _logger.LogInformation("Query categorization is disabled for ticket {TicketId}; always using hybrid search (Pool DB + NYRA Wiki).", request.TicketId);
-        await ReportProgressAsync(progressCallback, "categorize", "Classifying request", "Hybrid search enabled (pool data + NYRA Wiki).", "completed", 1, cancellationToken);
-
-        // Info-only branch disabled so every request queries both the Pool DB and NYRA Wiki.
-        // var isInfoOnlyQuery = !persistKnowledge && categorization.Category.Equals("Info", StringComparison.OrdinalIgnoreCase);
-        // if (isInfoOnlyQuery)
-        // {
-        //     return await ProcessInfoQueryAsync(request, title, description, categorization, processingStopwatch, progressCallback, cancellationToken);
-        // }
+        QueryCategorizationResult categorization;
+        var sourcePlan = TicketSourceRouting.Explicit(title, description);
+        var visualizationPlan = VisualizationPolicy.Fallback(title, description);
+        if (persistKnowledge || !string.IsNullOrWhiteSpace(request.SourceEventId))
+        {
+            categorization = new() { Category = "Issue", Reasoning = "Background ticket processing uses incident retrieval." };
+            sourcePlan = TicketSourceRouting.Background();
+            visualizationPlan = VisualizationPlan.None;
+        }
+        else if (sourcePlan?.ClarificationMessage is not null)
+            categorization = new() { Category = sourcePlan.Intent == ResolutionAnswerIntent.Explanation ? "Info" : "Issue", Reasoning = "Current explicit source instruction takes precedence over classification." };
+        else
+        {
+            var fallback = false;
+            try
+            {
+                var categoryJson = await _queryCategorizationAgent.CategorizeQueryAsync(title, description, context, cancellationToken);
+                using var classified = JsonDocument.Parse(AiJsonResponseSanitizer.Normalize(categoryJson));
+                var root = classified.RootElement;
+                visualizationPlan = VisualizationPolicy.ReadPlan(root.TryGetProperty("visualizationPlan", out var rawPlan) ? rawPlan : null,
+                    visualizationPlan, problem => _logger.LogWarning("Visualization planning {PlanProblem}; preserving safe deterministic visual intent.", problem));
+                categorization = new()
+                {
+                    Category = root.TryGetProperty("category", out var category) && category.ValueKind == JsonValueKind.String ? category.GetString()! : "",
+                    Reasoning = root.TryGetProperty("reasoning", out var reason) && reason.ValueKind == JsonValueKind.String ? reason.GetString()! : ""
+                };
+                if (!categorization.Category.Equals("Info", StringComparison.OrdinalIgnoreCase) && !categorization.Category.Equals("Issue", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Unsupported classification category.");
+                categorization.Category = categorization.Category.Equals("Info", StringComparison.OrdinalIgnoreCase) ? "Info" : "Issue";
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                _logger.LogWarning("Query classification unavailable ({FailureType}); falling back to Issue/all-source retrieval.", exception.GetType().Name);
+                categorization = new() { Category = "Issue", Reasoning = "Classification unavailable or invalid; explicitly falling back to Issue/all-source retrieval." };
+                fallback = true;
+            }
+            if (sourcePlan is null)
+                sourcePlan = TicketSourceRouting.Classified(categorization.Category, title, description, fallback);
+            else
+                categorization = new() { Category = sourcePlan.Intent == ResolutionAnswerIntent.Explanation ? "Info" : "Issue",
+                    Reasoning = "Current explicit source instruction takes precedence; classification was used only for visualization planning." };
+        }
+        var usePool = sourcePlan.Pool;
+        var intent = sourcePlan.Intent;
+        _logger.LogInformation("Answer intent {Intent} for ticket {TicketId}; Pool retrieval enabled: {UsePool}.", intent, request.TicketId, usePool);
+        await ReportProgressAsync(progressCallback, "categorize", "Classifying request", $"{categorization.Category}: {sourcePlan.Label} ({sourcePlan.Origin}). {categorization.Reasoning}", "completed", 1, cancellationToken);
+        if (sourcePlan.ClarificationMessage is { } sourceClarification)
+        {
+            foreach (var (stage, order) in new[] { ("pool-data", 3), ("nyra-wiki", 4), ("code-repositories", 5) })
+                await ReportProgressAsync(progressCallback, stage, "Source search skipped", "Conflicting source instructions need clarification; no source was searched.", "skipped", order, cancellationToken);
+            return new TicketWorkflowResult
+            {
+                SuggestedResolution = sourceClarification,
+                QueryCategory = categorization.Category,
+                QueryCategorizationReasoning = categorization.Reasoning,
+                SourcePlan = sourcePlan,
+                VisualizationPlan = visualizationPlan,
+                VisualizationStatus = visualizationPlan.Needed ? "unavailable" : "not-needed",
+                VisualizationMessage = "Conflicting source instructions require clarification before visualization.",
+                ProcessDiagramStatus = visualizationPlan.IsGraph ? "unavailable" : "",
+                ProcessDiagramMessage = visualizationPlan.IsGraph ? sourceClarification : "",
+                CodeKnowledgeStatus = "not-requested",
+                ProcessingDurationMs = processingStopwatch.Elapsed.TotalMilliseconds
+            };
+        }
 
         await ReportProgressAsync(progressCallback, "analyze", "Analyzing issue", "Extracting problem details, symptoms, and keywords.", "active", 2, cancellationToken);
         _logger.LogInformation("Analyzing ticket {TicketId}.", request.TicketId);
-        var analysisJson = await _ticketAnalyzerAgent.AnalyzeTicketAsync(title, description);
+        var analysisJson = context.HasTurns
+            ? await _ticketAnalyzerAgent.AnalyzeTicketAsync(title, description, context)
+            : await _ticketAnalyzerAgent.AnalyzeTicketAsync(title, description);
         var analysis = JsonSerializer.Deserialize<TicketAnalysisResult>(AiJsonResponseSanitizer.Normalize(analysisJson), JsonOptions)
             ?? throw new InvalidOperationException("The ticket analyzer returned an empty result.");
         await ReportProgressAsync(progressCallback, "analyze", "Analyzing issue", "Problem summary extracted for retrieval.", "completed", 2, cancellationToken);
@@ -157,34 +216,65 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         var searchText = string.IsNullOrWhiteSpace(analysis.Problem)
             ? $"Title: {title}{Environment.NewLine}Description: {description}"
             : analysis.Problem;
-        await ReportProgressAsync(progressCallback, "pool-data", "Pulling pool data", "Generating an embedding and searching scoped incident history.", "active", 3, cancellationToken);
-        _logger.LogInformation("Generating search embedding for ticket {TicketId}.", request.TicketId);
-        var nyraScopeTask = ResolveNyraRetrievalScopeAsync(request, cancellationToken);
-        var searchEmbedding = await _embeddingService.GenerateEmbedding(searchText);
-        var similaritySearchLimit = request.SimilaritySearchLimitOverride is > 0
-            ? request.SimilaritySearchLimitOverride.Value
-            : _settings.SimilaritySearchLimit;
-        var similarTicketsTask = _vectorStore.SearchSimilarTickets(searchEmbedding, similaritySearchLimit, request.SelectedGroupIds, cancellationToken);
+        if (context.HasTurns && analysis.RequiresClarification)
+        {
+            searchText = $"Title: {title}{Environment.NewLine}Description: {description}";
+            analysis.Problem = searchText;
+            analysis.RootCause = "";
+            analysis.Resolution = "";
+            analysis.Keywords = [];
+        }
+        var nyraScopeTask = sourcePlan.Wiki ? ResolveNyraRetrievalScopeAsync(request, cancellationToken)
+            : Task.FromResult(new NyraRetrievalScope([], []));
+        float[] searchEmbedding = [];
+        CodeQueryEmbedding? reusableCodeEmbedding = null;
+        Task<IReadOnlyList<TicketKnowledge>> similarTicketsTask;
+        if (usePool)
+        {
+            await ReportProgressAsync(progressCallback, "pool-data", "Pulling pool data", "Generating an embedding and searching scoped incident history.", "active", 3, cancellationToken);
+            var embeddingProfile = _embeddingService.Profile;
+            searchEmbedding = await _embeddingService.GenerateEmbedding(searchText);
+            reusableCodeEmbedding = embeddingProfile == _embeddingService.Profile ? new(searchText, embeddingProfile, searchEmbedding) : null;
+            var limit = request.SimilaritySearchLimitOverride is > 0 ? request.SimilaritySearchLimitOverride.Value : _settings.SimilaritySearchLimit;
+            similarTicketsTask = _vectorStore.SearchSimilarTickets(searchEmbedding, limit, request.SelectedGroupIds, cancellationToken);
+        }
+        else
+        {
+            await ReportProgressAsync(progressCallback, "pool-data", "Pool incident search", $"Skipped by {sourcePlan.Label}: no Pool embedding or historical search.", "skipped", 3, cancellationToken);
+            similarTicketsTask = Task.FromResult<IReadOnlyList<TicketKnowledge>>([]);
+        }
+
         var nyraScope = await nyraScopeTask;
         LogNyraRetrievalScope(request, nyraScope);
-        var nyraRetrievalTask = RetrieveNyraDocumentsAsync(searchText, nyraScope.KbNames, cancellationToken);
-        var codeTask = persistKnowledge
-            ? Task.FromResult(CodeRetrievalResult.Skipped)
-            : _codeKnowledge.ForRequestAsync($"{title}\n{description}\n{searchText}", request, cancellationToken);
-
-        var similarTickets = await similarTicketsTask;
-        await ReportProgressAsync(progressCallback, "pool-data", "Pulling pool data", $"Found {similarTickets.Count} similar incident candidate(s).", "completed", 3, cancellationToken);
-
         await ReportProgressAsync(
             progressCallback,
             "nyra-wiki",
             "Querying NYRA Wiki",
-            nyraScope.KbNames.Count > 0 ? $"Searching {string.Join(", ", nyraScope.KbNames)}." : "No NYRA Wiki scope matched this request.",
+            !sourcePlan.Wiki ? $"Wiki excluded by {sourcePlan.Label}." : nyraScope.KbNames.Count > 0 ? $"Searching {string.Join(", ", nyraScope.KbNames)}." : "No NYRA Wiki scope matched this request.",
             nyraScope.KbNames.Count > 0 ? "active" : "skipped",
             4,
             cancellationToken);
-        var nyraRetrieval = await nyraRetrievalTask;
+        var nyraRetrievalTask = sourcePlan.Wiki ? RetrieveNyraDocumentsAsync(searchText, nyraScope.KbNames, cancellationToken)
+            : Task.FromResult(new NyraDocumentRetrievalOutcome([], ""));
+
+        await ReportProgressAsync(progressCallback, "code-repositories", "Querying repository code", sourcePlan.Code ? "Checking GitHub access and indexed code." : $"Code excluded by {sourcePlan.Label}.", sourcePlan.Code && !persistKnowledge ? "active" : "skipped", 5, cancellationToken);
+        var codeTask = persistKnowledge || !sourcePlan.Code
+            ? Task.FromResult(sourcePlan.Code ? CodeRetrievalResult.Skipped : new CodeRetrievalResult("not-requested", []))
+            : _codeKnowledge.ForRequestAsync(!usePool || context.HasTurns ? searchText : $"{title}\n{description}\n{searchText}", request, cancellationToken,
+                reusableCodeEmbedding);
+
+        // Fan in: wait for all three sources together; a failure still propagates with its original exception.
+        await Task.WhenAll(similarTicketsTask, nyraRetrievalTask, codeTask);
+        var similarTickets = similarTicketsTask.Result;
+        var nyraRetrieval = nyraRetrievalTask.Result;
         var nyraDocuments = nyraRetrieval.Documents;
+        var code = codeTask.Result;
+
+        // Completion events are centralized after the fan-in in stable stage order (pool-data=3, nyra-wiki=4,
+        // code-repositories=5). All progress writes stay on the orchestrator's logical thread, keeping the
+        // NDJSON response single-writer.
+        if (usePool) await ReportProgressAsync(progressCallback, "pool-data", "Pulling pool data", $"Found {similarTickets.Count} similar incident candidate(s).", "completed", 3, cancellationToken);
+
         await ReportProgressAsync(
             progressCallback,
             "nyra-wiki",
@@ -193,68 +283,166 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             nyraScope.KbNames.Count > 0 ? "completed" : "skipped",
             4,
             cancellationToken);
+
+        await ReportProgressAsync(progressCallback, "code-repositories", "Querying repository code", sourcePlan.Code ? $"Code source: {code.Status}. {code.Documents.Count} excerpt(s)." : $"Skipped: code excluded by {sourcePlan.Label}.",
+            code.Documents.Count > 0 ? "completed" : "skipped", 5, cancellationToken);
+
         _logger.LogInformation("Found {SimilarTicketCount} similar tickets for ticket {TicketId}.", similarTickets.Count, request.TicketId);
         _logger.LogInformation("Found {NyraDocumentCount} NYRA document(s) for ticket {TicketId}.", nyraDocuments.Count, request.TicketId);
 
-        await ReportProgressAsync(progressCallback, "code-repositories", "Querying repository code", "Checking GitHub access and indexed code.", "active", 5, cancellationToken);
-        var code = await codeTask;
-        await ReportProgressAsync(progressCallback, "code-repositories", "Querying repository code", $"Code source: {code.Status}. {code.Documents.Count} excerpt(s).",
-            code.Documents.Count > 0 ? "completed" : "skipped", 5, cancellationToken);
+        var resolutionIncidents = new List<ResolutionIncident>();
+        if (usePool)
+        {
+            await ReportProgressAsync(progressCallback, "enrich", "Enriching context", "Applying feedback evidence and human-validated fixes.", "active", 5, cancellationToken);
+            var feedbackEvidenceByTicketId = await _feedbackRepository.GetFeedbackEvidence(
+                similarTickets.Select(ticket => ticket.TicketId).ToArray(),
+                cancellationToken);
 
-        await ReportProgressAsync(progressCallback, "enrich", "Enriching context", "Applying feedback evidence and human-validated fixes.", "active", 5, cancellationToken);
-        var feedbackEvidenceByTicketId = await _feedbackRepository.GetFeedbackEvidence(
-            similarTickets.Select(ticket => ticket.TicketId).ToArray(),
-            cancellationToken);
+            var validatedResolutionsByTicketId = await _validatedResolutionRepository.GetByTicketIdsAsync(
+                similarTickets.Select(ticket => ticket.TicketId).ToArray(),
+                cancellationToken);
 
-        var validatedResolutionsByTicketId = await _validatedResolutionRepository.GetByTicketIdsAsync(
-            similarTickets.Select(ticket => ticket.TicketId).ToArray(),
-            cancellationToken);
+            resolutionIncidents = similarTickets
+                .Select(ticket =>
+                {
+                    feedbackEvidenceByTicketId.TryGetValue(ticket.TicketId, out var evidence);
+                    return new ResolutionIncident
+                    {
+                        TicketId = ticket.TicketId,
+                        Problem = ticket.Problem,
+                        RootCause = ticket.RootCause,
+                        Resolution = ticket.Resolution,
+                        FeedbackScore = evidence?.Score ?? 0,
+                        LatestHumanValidatedFix = GetLatestHumanValidatedFix(validatedResolutionsByTicketId, ticket.TicketId),
+                        LatestHumanAvoidanceNote = GetLatestHumanAvoidanceNote(validatedResolutionsByTicketId, ticket.TicketId),
+                        LatestHelpfulComment = evidence?.LatestHelpfulComment ?? string.Empty,
+                        LatestNotHelpfulComment = evidence?.LatestNotHelpfulComment ?? string.Empty
+                    };
+                })
+                .ToList();
+            await ReportProgressAsync(progressCallback, "enrich", "Enriching context", "Context package is ready for recommendation.", "completed", 5, cancellationToken);
+        }
+        else await ReportProgressAsync(progressCallback, "enrich", "Incident enrichment", $"Skipped by {sourcePlan.Label}: no historical feedback, validated-resolution or failure-pattern reads.", "skipped", 5, cancellationToken);
 
-        var resolutionIncidents = similarTickets
-            .Select(ticket =>
+        await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Generating root cause, recommended fix, and reasoning.", "active", 6, cancellationToken);
+        _logger.LogInformation("Generating resolution for ticket {TicketId}.", request.TicketId);
+        ResolutionResult resolution;
+        if (context.HasTurns && analysis.RequiresClarification)
+        {
+            var question = string.IsNullOrWhiteSpace(analysis.ClarificationQuestion)
+                ? "Which earlier option or step are you referring to? Please quote it so I can investigate it against fresh evidence."
+                : analysis.ClarificationQuestion[..Math.Min(analysis.ClarificationQuestion.Length, 1000)];
+            resolution = new ResolutionResult
             {
-                feedbackEvidenceByTicketId.TryGetValue(ticket.TicketId, out var evidence);
-                return new ResolutionIncident
+                SuggestedResolution = question,
+                Reasoning = "The follow-up reference is ambiguous; earlier assistant claims are not current evidence.",
+                Confidence = 0
+            };
+        }
+        else
+        {
+            var codeNotice = CodeRetrievalMessages.Notice(code);
+            var resolutionDescription = $"{description}\n\nActual source plan (system metadata): {sourcePlan.Label}; Pool={sourcePlan.Pool}, Wiki={sourcePlan.Wiki}, code={sourcePlan.Code}. Do not imply excluded sources were searched.";
+            if (codeNotice.Length > 0) resolutionDescription += $"\nCurrent code-search coverage (system metadata, not evidence): {codeNotice}";
+            var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, resolutionDescription, resolutionIncidents.Take(5).ToList(),
+                nyraDocuments.Take(5).ToList(), code.Documents, context, searchText, intent, visualizationPlan, cancellationToken);
+            resolution = JsonSerializer.Deserialize<ResolutionResult>(AiJsonResponseSanitizer.Normalize(resolutionJson), JsonOptions)
+                ?? throw new InvalidOperationException("The resolution agent returned an empty result.");
+        }
+
+        var visualizationStatus = visualizationPlan.Needed ? "unavailable" : "not-needed";
+        var visualizationMessage = visualizationPlan.Needed ? "The reference needs clarification before a visualization can be grounded." : "";
+        var diagramStatus = visualizationPlan.IsGraph ? "unavailable" : "";
+        var diagramMessage = visualizationPlan.IsGraph ? visualizationMessage : "";
+        if (visualizationPlan.Needed && !analysis.RequiresClarification)
+        {
+            var sources = ProcessAnswerPolicy.Sources(resolutionIncidents.Take(5).ToList(), nyraDocuments.Take(5).ToList(), code.Documents);
+            var graph = ProcessAnswerPolicy.Parse(resolution.ProcessGraph);
+            var diagram = VisualizationPolicy.Build(visualizationPlan, resolution.ProcessGraph, resolution.VisualizationTable, resolution.VisualizationChart, sources);
+            if (!diagram.Provided && sources.Count > 0 && _resolutionAgent is IProcessDiagramRepair repair)
+            {
+                var repairSources = ProcessAnswerPolicy.RepairSources(sources);
+                try
+                {
+                    var repairQuestion = ProcessAnswerPolicy.Plain(title + "\n" + description, 1200);
+                    var repairedJson = await repair.RepairVisualizationAsync(repairQuestion, visualizationPlan, repairSources, cancellationToken);
+                    var repaired = JsonSerializer.Deserialize<ResolutionResult>(AiJsonResponseSanitizer.Normalize(repairedJson), JsonOptions);
+                    resolution.ProcessGraph = repaired?.ProcessGraph;
+                    resolution.VisualizationTable = repaired?.VisualizationTable;
+                    resolution.VisualizationChart = repaired?.VisualizationChart;
+                    graph = ProcessAnswerPolicy.Parse(resolution.ProcessGraph);
+                    diagram = VisualizationPolicy.Build(visualizationPlan, resolution.ProcessGraph, resolution.VisualizationTable, resolution.VisualizationChart, repairSources);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception exception)
+                {
+                    _logger.LogWarning("Visualization repair unavailable ({FailureType}); an explicit unavailable message will be returned.", exception.GetType().Name);
+                }
+            }
+            visualizationStatus = diagram.Provided ? diagram.Partial ? "partial" : "provided" : "unavailable";
+            visualizationMessage = diagram.Message;
+            if (visualizationPlan.IsGraph)
+            {
+                diagramStatus = diagram.Provided ? "provided" : "unavailable";
+                diagramMessage = diagram.Message;
+            }
+            resolution.DetailedAnalysisMarkdown = ProcessAnswerPolicy.Attach(resolution.DetailedAnalysisMarkdown, diagram,
+                visualizationPlan.Kind == "process" ? "Process flow" : "Visualization");
+            if (!diagram.Provided)
+            {
+                resolution.SuggestedRootCause = VisualizationPolicy.RemoveUnverifiedClaims(resolution.SuggestedRootCause);
+                resolution.SuggestedResolution = VisualizationPolicy.RemoveUnverifiedClaims(resolution.SuggestedResolution);
+                resolution.Reasoning = VisualizationPolicy.RemoveUnverifiedClaims(resolution.Reasoning);
+                resolution.SuggestedResolution = (resolution.SuggestedResolution + " Visualization unavailable. " + diagram.Message).Trim();
+            }
+            if (intent == ResolutionAnswerIntent.Explanation && diagram.Provided && visualizationPlan.IsGraph && graph is { } supportedGraph)
+            {
+                resolution.SuggestedRootCause = ProcessAnswerPolicy.Plain(supportedGraph.Title, 160);
+                resolution.SuggestedResolution = string.IsNullOrWhiteSpace(supportedGraph.Summary)
+                    ? "The supported process stages and transitions are shown below. " + diagram.Message
+                    : ProcessAnswerPolicy.Plain(supportedGraph.Summary, 600);
+                if (diagram.Partial) resolution.SuggestedResolution += " " + diagram.Message;
+            }
+        }
+
+        if (code.Documents.Count > 0 || !persistKnowledge && (!usePool || intent == ResolutionAnswerIntent.Explanation))
+        {
+            await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Recommendation is ready.", "completed", 6, cancellationToken);
+            return new TicketWorkflowResult
+            {
+                SuggestedRootCause = resolution.SuggestedRootCause,
+                SuggestedResolution = resolution.SuggestedResolution,
+                DetailedAnalysisMarkdown = resolution.DetailedAnalysisMarkdown,
+                ProcessDiagramStatus = diagramStatus,
+                ProcessDiagramMessage = diagramMessage,
+                VisualizationPlan = visualizationPlan,
+                VisualizationStatus = visualizationStatus,
+                VisualizationMessage = visualizationMessage,
+                Confidence = resolution.Confidence,
+                Reasoning = resolution.Reasoning,
+                CodeDocuments = code.Documents,
+                CodeKnowledgeStatus = code.Status,
+                CodeSearchCoverage = code.Coverage,
+                SourcePlan = sourcePlan,
+                FeedbackAuthorization = code.Documents.Count == 0 ? _codeFeedback.Permit(resolution.SuggestedResolution) : "",
+                SimilarIncidents = similarTickets.Select(ticket => new SimilarIncidentResult
                 {
                     TicketId = ticket.TicketId,
                     Problem = ticket.Problem,
                     RootCause = ticket.RootCause,
                     Resolution = ticket.Resolution,
-                    FeedbackScore = evidence?.Score ?? 0,
-                    LatestHumanValidatedFix = GetLatestHumanValidatedFix(validatedResolutionsByTicketId, ticket.TicketId),
-                    LatestHumanAvoidanceNote = GetLatestHumanAvoidanceNote(validatedResolutionsByTicketId, ticket.TicketId),
-                    LatestHelpfulComment = evidence?.LatestHelpfulComment ?? string.Empty,
-                    LatestNotHelpfulComment = evidence?.LatestNotHelpfulComment ?? string.Empty
-                };
-            })
-            .ToList();
-        await ReportProgressAsync(progressCallback, "enrich", "Enriching context", "Context package is ready for recommendation.", "completed", 5, cancellationToken);
-
-        await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Generating root cause, recommended fix, and reasoning.", "active", 6, cancellationToken);
-        _logger.LogInformation("Generating resolution for ticket {TicketId}.", request.TicketId);
-        var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, description, resolutionIncidents.Take(5).ToList(), nyraDocuments.Take(5).ToList(), code.Documents);
-        var resolution = JsonSerializer.Deserialize<ResolutionResult>(AiJsonResponseSanitizer.Normalize(resolutionJson), JsonOptions)
-            ?? throw new InvalidOperationException("The resolution agent returned an empty result.");
-
-        if (code.Documents.Count > 0)
-        {
-            await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Recommendation is ready.", "completed", 6, cancellationToken);
-            return new TicketWorkflowResult
-            {
-                SuggestedRootCause = resolution.SuggestedRootCause, SuggestedResolution = resolution.SuggestedResolution,
-                Confidence = resolution.Confidence, Reasoning = resolution.Reasoning,
-                CodeDocuments = code.Documents, CodeKnowledgeStatus = code.Status,
-                SimilarIncidents = similarTickets.Select(ticket => new SimilarIncidentResult
-                {
-                    TicketId = ticket.TicketId, Problem = ticket.Problem, RootCause = ticket.RootCause,
-                    Resolution = ticket.Resolution, Similarity = ticket.Similarity
+                    Similarity = ticket.Similarity
                 }).ToList(),
-                NyraDocuments = nyraDocuments, NyraKnowledgeBaseUsed = nyraScope.KbNames.Count > 0,
+                NyraDocuments = nyraDocuments,
+                NyraKnowledgeBaseUsed = nyraScope.KbNames.Count > 0,
                 NyraKnowledgeBaseStatus = GetNyraKnowledgeBaseStatus(nyraScope, nyraRetrieval),
                 NyraKnowledgeBaseMessage = GetNyraKnowledgeBaseMessage(nyraScope, nyraRetrieval),
-                NyraKnowledgeBaseNames = nyraScope.KbNames, NyraKnowledgeBaseProjects = nyraScope.ProjectLabels,
-                QueryCategory = categorization.Category, QueryCategorizationReasoning = categorization.Reasoning,
-                UsedPoolDatabase = true
+                NyraKnowledgeBaseNames = nyraScope.KbNames,
+                NyraKnowledgeBaseProjects = nyraScope.ProjectLabels,
+                QueryCategory = categorization.Category,
+                QueryCategorizationReasoning = categorization.Reasoning,
+                UsedPoolDatabase = usePool,
+                ProcessingDurationMs = processingStopwatch.Elapsed.TotalMilliseconds
             };
         }
 
@@ -322,8 +510,6 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             await _failurePatternRepository.InsertFailurePattern(failurePattern, cancellationToken);
         }
 
-        var patternFrequency = await _failurePatternRepository.CountPatternOccurrences(
-            failurePattern.System, failurePattern.FailureType, cancellationToken);
         await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Recommendation is ready.", "completed", 6, cancellationToken);
 
         _logger.LogInformation(
@@ -336,8 +522,16 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         {
             SuggestedRootCause = resolution.SuggestedRootCause,
             SuggestedResolution = resolution.SuggestedResolution,
+            DetailedAnalysisMarkdown = resolution.DetailedAnalysisMarkdown,
+            ProcessDiagramStatus = diagramStatus,
+            ProcessDiagramMessage = diagramMessage,
+            VisualizationPlan = visualizationPlan,
+            VisualizationStatus = visualizationStatus,
+            VisualizationMessage = visualizationMessage,
             Confidence = resolution.Confidence,
             CodeKnowledgeStatus = code.Status,
+            CodeSearchCoverage = code.Coverage,
+            SourcePlan = sourcePlan,
             FeedbackAuthorization = _codeFeedback.Permit(resolution.SuggestedResolution),
             SimilarIncidents = similarTickets.Select(ticket => new SimilarIncidentResult
             {
@@ -358,73 +552,7 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
             UsedPoolDatabase = true,
             FailurePattern = failurePattern,
             Reasoning = resolution.Reasoning,
-            FailurePatternFrequency = patternFrequency
-        };
-    }
-
-    private async Task<TicketWorkflowResult> ProcessInfoQueryAsync(
-        TicketRequest request,
-        string title,
-        string description,
-        QueryCategorizationResult categorization,
-        Stopwatch processingStopwatch,
-        Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Skipping PoolSense database retrieval for ticket {TicketId}; query categorized as Info.", request.TicketId);
-
-        var searchText = $"Title: {title}{Environment.NewLine}Description: {description}";
-        await ReportProgressAsync(progressCallback, "pool-data", "Pulling pool data", "Skipped because this was classified as an informational query.", "skipped", 3, cancellationToken);
-        await ReportProgressAsync(progressCallback, "nyra-wiki", "Querying NYRA Wiki", "Resolving configured knowledge bases for this request.", "active", 4, cancellationToken);
-        var nyraScope = await ResolveNyraRetrievalScopeAsync(request, cancellationToken);
-        LogNyraRetrievalScope(request, nyraScope);
-        var nyraRetrieval = await RetrieveNyraDocumentsAsync(searchText, nyraScope.KbNames, cancellationToken);
-        var nyraDocuments = nyraRetrieval.Documents;
-        await ReportProgressAsync(
-            progressCallback,
-            "nyra-wiki",
-            "Querying NYRA Wiki",
-            nyraScope.KbNames.Count > 0 ? $"Retrieved {nyraDocuments.Count} NYRA document(s)." : "No NYRA Wiki scope matched this request.",
-            nyraScope.KbNames.Count > 0 ? "completed" : "skipped",
-            4,
-            cancellationToken);
-        _logger.LogInformation("Found {NyraDocumentCount} NYRA document(s) for ticket {TicketId}.", nyraDocuments.Count, request.TicketId);
-
-        await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Generating response from available knowledge context.", "active", 6, cancellationToken);
-        var resolutionJson = await _resolutionAgent.GenerateResolutionAsync(title, description, [], nyraDocuments.Take(5).ToList());
-        var resolution = JsonSerializer.Deserialize<ResolutionResult>(AiJsonResponseSanitizer.Normalize(resolutionJson), JsonOptions)
-            ?? throw new InvalidOperationException("The resolution agent returned an empty result.");
-
-        await _interactionLogger.LogInteractionAsync(
-            searchText,
-            [],
-            resolution.SuggestedResolution,
-            resolution.Confidence,
-            processingStopwatch.Elapsed,
-            0,
-            cancellationToken);
-
-        _logger.LogInformation("Completed workflow mode Recommend (Info) for ticket {TicketId}.", request.TicketId);
-    await ReportProgressAsync(progressCallback, "prepare-results", "Preparing results", "Recommendation is ready.", "completed", 6, cancellationToken);
-
-        return new TicketWorkflowResult
-        {
-            SuggestedRootCause = resolution.SuggestedRootCause,
-            SuggestedResolution = resolution.SuggestedResolution,
-            Confidence = resolution.Confidence,
-            SimilarIncidents = [],
-            NyraDocuments = nyraDocuments,
-            NyraKnowledgeBaseUsed = nyraScope.KbNames.Count > 0,
-            NyraKnowledgeBaseStatus = GetNyraKnowledgeBaseStatus(nyraScope, nyraRetrieval),
-            NyraKnowledgeBaseMessage = GetNyraKnowledgeBaseMessage(nyraScope, nyraRetrieval),
-            NyraKnowledgeBaseNames = nyraScope.KbNames,
-            NyraKnowledgeBaseProjects = nyraScope.ProjectLabels,
-            QueryCategory = categorization.Category,
-            QueryCategorizationReasoning = categorization.Reasoning,
-            UsedPoolDatabase = false,
-            FailurePattern = new FailurePattern(),
-            Reasoning = resolution.Reasoning,
-            FailurePatternFrequency = 0
+            ProcessingDurationMs = processingStopwatch.Elapsed.TotalMilliseconds
         };
     }
 
@@ -599,6 +727,8 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
 
     private sealed class TicketAnalysisResult
     {
+        public bool RequiresClarification { get; set; }
+        public string ClarificationQuestion { get; set; } = string.Empty;
         public string Problem { get; set; } = string.Empty;
         public string RootCause { get; set; } = string.Empty;
         public string Resolution { get; set; } = string.Empty;
@@ -607,10 +737,14 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
 
     private sealed class ResolutionResult
     {
+        public JsonElement? ProcessGraph { get; set; }
+        public JsonElement? VisualizationTable { get; set; }
+        public JsonElement? VisualizationChart { get; set; }
         public string SuggestedRootCause { get; set; } = string.Empty;
         public string SuggestedResolution { get; set; } = string.Empty;
         public double Confidence { get; set; }
         public string Reasoning { get; set; } = string.Empty;
+        public string DetailedAnalysisMarkdown { get; set; } = string.Empty;
     }
 
     private sealed class FailurePatternResult

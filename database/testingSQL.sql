@@ -437,7 +437,7 @@ FROM [dbo].[llm_token_usage]
 GROUP BY service_type
 ORDER BY SUM(total_tokens) DESC
 
--- Pricing: text-embedding-3-large $0.13/1M | gpt-5.4 input $2.50/1M | gpt-5.4 output $15.00/1M
+-- Pricing: text-embedding-3-large $0.13/1M | gpt-6-luna input $2.50/1M | gpt-6-luna output $15.00/1M
 SELECT 
     service_type,
     model,
@@ -447,20 +447,20 @@ SELECT
     CAST(SUM(prompt_tokens) / 1000000.0 * 
         CASE model
             WHEN 'text-embedding-3-large' THEN 0.13 
-            WHEN 'gpt-5.4'               THEN 2.50 
+            WHEN 'gpt-6-luna'               THEN 2.50 
             ELSE 0.00
         END AS DECIMAL(10,6))                                               AS [Est. Input Price (USD)],
     CAST(SUM(completion_tokens) / 1000000.0 * 
         CASE model
             WHEN 'text-embedding-3-large' THEN 0.00 
-            WHEN 'gpt-5.4'               THEN 15.00 
+            WHEN 'gpt-6-luna'               THEN 15.00 
             ELSE 0.00
         END AS DECIMAL(10,6))                                               AS [Est. Output Price (USD)],
     CAST(
         (SUM(prompt_tokens) / 1000000.0 * 
-            CASE model WHEN 'text-embedding-3-large' THEN 0.13 WHEN 'gpt-5.4' THEN 2.50 ELSE 0.00 END) +
+            CASE model WHEN 'text-embedding-3-large' THEN 0.13 WHEN 'gpt-6-luna' THEN 2.50 ELSE 0.00 END) +
         (SUM(completion_tokens) / 1000000.0 * 
-            CASE model WHEN 'text-embedding-3-large' THEN 0.00 WHEN 'gpt-5.4' THEN 15.00 ELSE 0.00 END)
+            CASE model WHEN 'text-embedding-3-large' THEN 0.00 WHEN 'gpt-6-luna' THEN 15.00 ELSE 0.00 END)
     AS DECIMAL(10,6))                                                       AS [Est. Total Price (USD)]
 FROM [dbo].[llm_token_usage]
 GROUP BY service_type, model
