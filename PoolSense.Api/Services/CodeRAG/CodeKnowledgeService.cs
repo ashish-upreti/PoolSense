@@ -11,10 +11,11 @@ namespace PoolSense.Api.Services.CodeRAG;
 public interface ICodeKnowledgeService
 {
     Task<CodeRetrievalResult> ForRequestAsync(string query, TicketRequest request, CancellationToken token, CodeQueryEmbedding? reusable = null);
+    Task<CodeRetrievalResult> ForBackgroundPollingAsync(string query, TicketRequest request, CancellationToken token);
     Task<CodeRetrievalResult> RetrieveAsync(string query, IReadOnlyList<string> projectIds, CancellationToken token);
 }
 
-public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRepository projects, IGitHubCodeClient github,
+public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRepository projects, IGitHubCodeClient github, IManagedGitHubAccess access,
     CodeIndexFiles files, IHttpContextAccessor context, IOptions<CodeRAGOptions> options,
     ILogger<CodeKnowledgeService>? logger = null, CodeSemanticIndex? semantic = null, IOptions<OkfOptions>? knowledgeOptions = null) : ICodeKnowledgeService
 {
@@ -34,6 +35,21 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         token.ThrowIfCancellationRequested();
         if (!options.Value.Enabled) return new("disabled", []);
         if (CodeUser.Name(context.HttpContext?.User).Length == 0) return new("not-authenticated", []);
+        return await ForScopedRequestAsync(query, request, token, reusable, backgroundPolling: false);
+    }
+
+    public async Task<CodeRetrievalResult> ForBackgroundPollingAsync(string query, TicketRequest request, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!options.Value.Enabled) return new("disabled", []);
+        if (!access.IsConfigured)
+            return new("not-configured", []) { Coverage = new() { Warnings = ["Configure the server-managed GitHub PAT to enable code retrieval for new-pool polling."] } };
+        return await ForScopedRequestAsync(query, request, token, reusable: null, backgroundPolling: true);
+    }
+
+    private async Task<CodeRetrievalResult> ForScopedRequestAsync(string query, TicketRequest request, CancellationToken token,
+        CodeQueryEmbedding? reusable, bool backgroundPolling)
+    {
         try
         {
             IReadOnlyList<string> ids;
@@ -44,8 +60,8 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                 ids = project is null ? [] : [project.ProjectId];
             }
             else if (!string.IsNullOrWhiteSpace(request.ApplicationId)) ids = [request.ApplicationId];
-            else ids = (await projects.GetAllProjectsAsync(token)).Select(project => project.ProjectId).ToArray();
-            return await RetrieveCoreAsync(query, ids, reusable, token);
+            else ids = backgroundPolling ? [] : (await projects.GetAllProjectsAsync(token)).Select(project => project.ProjectId).ToArray();
+            return await RetrieveCoreAsync(query, ids, reusable, token, backgroundPolling);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (Exception exception)
@@ -56,12 +72,13 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
     }
 
     public Task<CodeRetrievalResult> RetrieveAsync(string query, IReadOnlyList<string> projectIds, CancellationToken token) =>
-        RetrieveCoreAsync(query, projectIds, null, token);
+        RetrieveCoreAsync(query, projectIds, null, token, backgroundPolling: false);
 
-    private async Task<CodeRetrievalResult> RetrieveCoreAsync(string query, IReadOnlyList<string> projectIds, CodeQueryEmbedding? reusable, CancellationToken token)
+    private async Task<CodeRetrievalResult> RetrieveCoreAsync(string query, IReadOnlyList<string> projectIds, CodeQueryEmbedding? reusable,
+        CancellationToken token, bool backgroundPolling)
     {
         token.ThrowIfCancellationRequested();
-        var user = CodeUser.Name(context.HttpContext?.User);
+        var user = backgroundPolling ? SharedGitHubConnection.ServiceIdentity : CodeUser.Name(context.HttpContext?.User);
         var settings = options.Value;
         if (!settings.Enabled) return new("disabled", []);
         if (user.Length == 0) return new("not-authenticated", []);
@@ -85,11 +102,11 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         var authorizationComplete = false;
         var expanded = false;
         var timedOut = false;
-        GitHubConnection? connection;
+        ManagedGitHubIdentity? connection;
         CodeRepository[] repositories;
         try
         {
-            connection = await store.ConnectionAsync(user, deadline.Token);
+            connection = await access.GetIdentityAsync(deadline.Token);
             repositories = (await store.RepositoriesAsync(deadline.Token))
                 .Where(repository => repository.Enabled && projectIds.Contains(repository.ProjectId, StringComparer.OrdinalIgnoreCase)).ToArray();
         }
@@ -98,6 +115,11 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
             return new("timed-out", []) { Coverage = new() { DeadlineExceeded = true, AuthorizationComplete = false } };
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (CodeAccessException exception)
+        {
+            var accessStatus = access.IsConfigured ? "not-connected" : "not-configured";
+            return new(accessStatus, []) { Coverage = new() { Warnings = [exception.Message] } };
+        }
         catch (Exception exception)
         {
             logger?.LogWarning("Code repository catalog unavailable ({FailureType}).", exception.GetType().Name);
@@ -106,7 +128,8 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         if (connection is null) return new("not-connected", []);
         var parallel = new ParallelOptions { MaxDegreeOfParallelism = settings.SearchConcurrency, CancellationToken = deadline.Token };
         var semanticQuery = new Lazy<Task<CodeSemanticQueryResult>>(
-            () => CreateSemanticQueryAsync(query, reusable, QueryCacheScope(context.HttpContext?.User, user), deadline.Token),
+            () => CreateSemanticQueryAsync(query, reusable,
+                QueryCacheScope(backgroundPolling ? null : context.HttpContext?.User, user), deadline.Token),
             LazyThreadSafetyMode.ExecutionAndPublication);
 
         async ValueTask SearchRepository(CodeRepository repository, bool authorize, bool allowDeferral, CancellationToken ct)
@@ -119,8 +142,8 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                 {
                     // This is a CURRENT permission check, not a head/freshness lookup.
                     // No OKF, embeddings, files, names or routing metadata are consumed before it.
-                    var access = await github.RepositoryAsync(user, repository.FullName, ct);
-                    if (access.Id != repository.GitHubId) throw new CodeAccessException();
+                    var repositoryAccess = await github.RepositoryAsync(repository.FullName, ct);
+                    if (repositoryAccess.Id != repository.GitHubId) throw new CodeAccessException();
                     accessible = true;
                     authorized[repository.Id] = repository;
                 }
@@ -191,6 +214,11 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (CodeAccessException)
+            {
+                warnings.TryAdd("The server-managed PAT could not access one or more configured repositories. Verify its validity, repository permissions and organization SSO authorization.", 0);
+                logger?.LogWarning("GitHub repository access denied for record {RepositoryId}.", repository.Id);
+            }
             catch (Exception exception)
             {
                 if (ct.IsCancellationRequested) throw new OperationCanceledException(ct);
@@ -274,7 +302,7 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         verification.CancelAfter(TimeSpan.FromSeconds(2));
         try
         {
-            if (await store.ConnectionAsync(user, verification.Token) != connection) return new("not-connected", []);
+            if (await access.GetIdentityAsync(verification.Token) != connection) return new("not-connected", []);
             current = (await store.RepositoriesAsync(verification.Token)).ToDictionary(repository => repository.Id);
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)

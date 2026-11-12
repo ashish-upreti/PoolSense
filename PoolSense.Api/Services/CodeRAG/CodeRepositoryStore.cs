@@ -6,9 +6,6 @@ namespace PoolSense.Api.Services.CodeRAG;
 
 public interface ICodeRepositoryStore
 {
-    Task<GitHubConnection?> ConnectionAsync(string user, CancellationToken token);
-    Task SaveConnectionAsync(GitHubConnection connection, CancellationToken token);
-    Task DisconnectAsync(string user, CancellationToken token);
     Task<IReadOnlyList<CodeRepository>> RepositoriesAsync(CancellationToken token);
     Task AddAsync(CodeRepository repository, CancellationToken token);
     Task<bool> UpdateAsync(CodeRepository repository, int expectedRevision, CancellationToken token);
@@ -26,39 +23,6 @@ public sealed class CodeRepositoryStore(IPoolSenseSqlConnectionFactory factory) 
             return connection;
         }
         catch { await connection.DisposeAsync(); throw; }
-    }
-
-    public async Task<GitHubConnection?> ConnectionAsync(string user, CancellationToken token)
-    {
-        await using var connection = await OpenAsync(token);
-        await using var command = new SqlCommand("SELECT github_id,login,protected_token FROM dbo.github_connections WHERE username=@user", connection);
-        command.Parameters.AddWithValue("@user", user);
-        await using var reader = await command.ExecuteReaderAsync(token);
-        return await reader.ReadAsync(token) ? new(user, reader.GetInt64(0), reader.GetString(1), reader.GetString(2)) : null;
-    }
-
-    public async Task SaveConnectionAsync(GitHubConnection value, CancellationToken token)
-    {
-        await using var connection = await OpenAsync(token);
-        await using var command = new SqlCommand("""
-            MERGE dbo.github_connections WITH (HOLDLOCK) AS target
-            USING (SELECT @user AS username) AS source ON target.username=source.username
-            WHEN MATCHED THEN UPDATE SET github_id=@github,login=@login,protected_token=@secret
-            WHEN NOT MATCHED THEN INSERT(username,github_id,login,protected_token) VALUES(@user,@github,@login,@secret);
-            """, connection);
-        command.Parameters.AddWithValue("@user", value.UserName);
-        command.Parameters.AddWithValue("@github", value.GitHubId);
-        command.Parameters.AddWithValue("@login", value.Login);
-        command.Parameters.AddWithValue("@secret", value.ProtectedToken);
-        await command.ExecuteNonQueryAsync(token);
-    }
-
-    public async Task DisconnectAsync(string user, CancellationToken token)
-    {
-        await using var connection = await OpenAsync(token);
-        await using var command = new SqlCommand("DELETE FROM dbo.github_connections WHERE username=@user", connection);
-        command.Parameters.AddWithValue("@user", user);
-        await command.ExecuteNonQueryAsync(token);
     }
 
     public async Task<IReadOnlyList<CodeRepository>> RepositoriesAsync(CancellationToken token)

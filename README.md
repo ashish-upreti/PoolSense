@@ -2,9 +2,9 @@
 
 PoolSense is a .NET 10 incident-assistance platform with an ASP.NET Core API, an Angular 18 operator console, NYRA gateway-backed inference, embedding, and Wiki document retrieval, and SQL Server persistence for knowledge, project configuration, ingestion tracking, feedback, telemetry, and operational logging.
 
-PoolSense combines pool ticket history, project-scoped NYRA Wiki documents, and optional GitHub repository code. Code evidence requires the querying user's own GitHub authorization; Wiki and Pool DB access behavior is unchanged.
+PoolSense combines pool ticket history, project-scoped NYRA Wiki documents, and optional GitHub repository code. Code evidence uses the administrator-managed GitHub PAT for registered repositories; Wiki and Pool DB access behavior is unchanged.
 
-See [GitHub Code Knowledge setup](CodeKnowledge.md) for OAuth, database setup, hourly refresh, security boundaries, and verification steps.
+See [GitHub Code Knowledge setup](CodeKnowledge.md) for PAT configuration, database setup, hourly refresh, security boundaries, and verification steps.
 
 At a high level, PoolSense does four things:
 

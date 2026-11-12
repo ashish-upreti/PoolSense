@@ -219,6 +219,24 @@ public sealed class TicketWorkflowOrchestratorTests
         Assert.False(resolution.Plan!.Needed);
     }
 
+    [Fact]
+    public async Task ManagedPatRetrievalRequiresTheExplicitBackgroundPollingEntryPoint()
+    {
+        var request = NewRequest();
+        request.SourceEventId = "new-ticket-event";
+        var code = FreshCode();
+        var orchestrator = CreateOrchestrator(new StubTicketAnalyzer(), new StubVectorStore(),
+            new StubNyraRetrieval(), code);
+
+        await orchestrator.RecommendAsync(request);
+        Assert.Equal(0, code.BackgroundCalls);
+        Assert.Equal(1, code.Calls);
+
+        await orchestrator.RecommendForBackgroundPollingAsync(request);
+        Assert.Equal(1, code.BackgroundCalls);
+        Assert.Equal(1, code.Calls);
+    }
+
     [Theory]
     [InlineData("search wiki for publication flow", 0, 1, 0)]
     [InlineData("look in the repo for publication flow", 0, 0, 1)]
@@ -871,6 +889,7 @@ public sealed class TicketWorkflowOrchestratorTests
     private sealed class StubCodeKnowledge(RetrievalGate? gate = null) : ICodeKnowledgeService
     {
         public int Calls { get; private set; }
+        public int BackgroundCalls { get; private set; }
         public string? Query { get; private set; }
         public CodeQueryEmbedding? Reusable { get; private set; }
         public CodeRetrievalResult Result { get; set; } = CodeRetrievalResult.Skipped;
@@ -887,6 +906,13 @@ public sealed class TicketWorkflowOrchestratorTests
             gate?.MarkStarted("code");
             await WaitAsync(gate);
             return Result;
+        }
+
+        public Task<CodeRetrievalResult> ForBackgroundPollingAsync(string query, TicketRequest request, CancellationToken token)
+        {
+            BackgroundCalls++;
+            Query = query;
+            return Task.FromResult(Result);
         }
 
         public Task<CodeRetrievalResult> RetrieveAsync(

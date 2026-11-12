@@ -14,7 +14,7 @@ namespace PoolSense.Api.Tests;
 public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
 {
     private static CodeKnowledgeService Service(RetrievalFixture fixture, CodeSemanticIndex? semantic = null, OkfOptions? knowledge = null) =>
-        new(fixture.Store, null!, fixture.GitHub, fixture.Files, fixture.Context,
+        new(fixture.Store, null!, fixture.GitHub, fixture.Access, fixture.Files, fixture.Context,
             Microsoft.Extensions.Options.Options.Create(fixture.Settings), NullLogger<CodeKnowledgeService>.Instance, semantic,
             knowledge is null ? null : Microsoft.Extensions.Options.Options.Create(knowledge));
 
@@ -252,7 +252,7 @@ public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
         Assert.Equal(0, provider.Calls);
         Assert.Equal("not-available", denied.Coverage.KnowledgeStatus);
         fixture.GitHub.Denied = false;
-        fixture.GitHub.OnAccess = () => fixture.Store.Connections.TryRemove("test", out _);
+        fixture.GitHub.OnAccess = () => fixture.Access.Identity = new(2, "rotated", "different-protected-token");
         var disconnected = await Service(fixture, semantic).RetrieveAsync("CaptureCharge", ["project"], default);
         Assert.Equal("not-connected", disconnected.Status);
         Assert.Empty(disconnected.Documents);
@@ -500,7 +500,7 @@ public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
         using var reader = fixture.Files.Lease(original)!;
         fixture.GitHub.HeadOverride = new string('b', 40);
         var builder = new PausedBuilder(fixture.Files);
-        var coordinator = new CodeIndexCoordinator(fixture.Store, fixture.GitHub, builder, fixture.Files,
+        var coordinator = new CodeIndexCoordinator(fixture.Store, fixture.GitHub, fixture.Access, builder, fixture.Files,
             Microsoft.Extensions.Options.Options.Create(fixture.Settings), TimeProvider.System);
         var refresh = coordinator.RefreshAsync(original, default);
         await builder.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));

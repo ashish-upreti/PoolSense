@@ -12,6 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="PoolSense.Api.Tests" />
     <ProjectReference Include="..\PoolSense.Application\PoolSense.Application.csproj" />
     <ProjectReference Include="..\PoolSense.CodeRAG\PoolSense.CodeRAG.csproj" />
   </ItemGroup>

@@ -149,7 +149,7 @@ public sealed class OkfKnowledgeEvaluationTests(ITestOutputHelper output)
                     {
                         fixture.Settings.RepositoryRoutingEnabled = enabled;
                         var accessBefore = fixture.GitHub.AccessCalls;
-                        var service = new CodeKnowledgeService(fixture.Store, null!, fixture.GitHub, fixture.Files, fixture.Context,
+                        var service = new CodeKnowledgeService(fixture.Store, null!, fixture.GitHub, fixture.Access, fixture.Files, fixture.Context,
                             Microsoft.Extensions.Options.Options.Create(fixture.Settings),
                             knowledgeOptions: Microsoft.Extensions.Options.Options.Create(new OkfOptions()));
                         var watch = Stopwatch.StartNew();
@@ -167,7 +167,7 @@ public sealed class OkfKnowledgeEvaluationTests(ITestOutputHelper output)
                 }
                 Assert.Equal(0, fixture.GitHub.HeadCalls);
                 fixture.GitHub.Denied = true;
-                var denied = await new CodeKnowledgeService(fixture.Store, null!, fixture.GitHub, fixture.Files, fixture.Context,
+                var denied = await new CodeKnowledgeService(fixture.Store, null!, fixture.GitHub, fixture.Access, fixture.Files, fixture.Context,
                     Microsoft.Extensions.Options.Options.Create(fixture.Settings),
                     knowledgeOptions: Microsoft.Extensions.Options.Options.Create(new OkfOptions())).RetrieveAsync("CaptureCharge", ["project"], default);
                 Assert.Empty(denied.Documents);

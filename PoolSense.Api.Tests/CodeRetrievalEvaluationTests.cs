@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
@@ -63,6 +62,7 @@ internal sealed class RetrievalFixture : IDisposable
     public string DirectoryPath { get; } = Path.Combine(Path.GetTempPath(), "poolsense-retrieval-eval", Guid.NewGuid().ToString("N"));
     public FixtureStore Store { get; } = new();
     public FixtureGitHub GitHub { get; } = new();
+    public FixtureAccess Access { get; } = new();
     public CodeRAGOptions Settings { get; }
     public CodeIndexFiles Files { get; }
     public IHttpContextAccessor Context { get; } = new FixtureContextAccessor
@@ -73,7 +73,6 @@ internal sealed class RetrievalFixture : IDisposable
     {
         Settings = new() { Enabled = true, StoragePath = DirectoryPath };
         Files = new(new FixtureEnvironment(DirectoryPath), Microsoft.Extensions.Options.Options.Create(Settings));
-        Store.Connections["test"] = new("test", 1, "test", "opaque-fixture-credential");
     }
     public static async Task<RetrievalFixture> CreateAsync()
     {
@@ -88,7 +87,7 @@ internal sealed class RetrievalFixture : IDisposable
         foreach (var (name, path, source) in sources)
         {
             var repo = new CodeRepository { Id = Guid.NewGuid().ToString("N"), ProjectId = name == "shipping" ? "shipping-only" : "project",
-                FullName = "fixture/" + name, GitHubId = name.GetHashCode(StringComparison.Ordinal), Branch = "main", IndexingUser = "test",
+                FullName = "fixture/" + name, GitHubId = name.GetHashCode(StringComparison.Ordinal), Branch = "main",
                 Generation = Guid.NewGuid().ToString("N"), IndexedCommit = new string('a', 40), Status = "ready", LastCheckedAt = DateTimeOffset.UtcNow, LastIndexedAt = DateTimeOffset.UtcNow };
             Directory.CreateDirectory(fixture.Files.Source(repo));
             await File.WriteAllTextAsync(Path.Combine(fixture.Files.Source(repo), path), source);
@@ -112,7 +111,7 @@ internal sealed class RetrievalFixture : IDisposable
             {
                 try
                 {
-                    var head = await GitHub.CommitAsync("test", repo, deadline.Token);
+                    var head = await GitHub.CommitAsync(repo, deadline.Token);
                     stale |= head != repo.IndexedCommit || repo.Status is "error" or "access-required";
                     await Files.Gate.WaitAsync(deadline.Token);
                     try
@@ -137,10 +136,6 @@ internal sealed class RetrievalFixture : IDisposable
     internal sealed class FixtureStore : ICodeRepositoryStore
     {
         public List<CodeRepository> Entries { get; } = [];
-        public ConcurrentDictionary<string, GitHubConnection> Connections { get; } = new();
-        public Task<GitHubConnection?> ConnectionAsync(string user, CancellationToken token) => Task.FromResult(Connections.GetValueOrDefault(user));
-        public Task SaveConnectionAsync(GitHubConnection connection, CancellationToken token) { Connections[connection.UserName] = connection; return Task.CompletedTask; }
-        public Task DisconnectAsync(string user, CancellationToken token) { Connections.TryRemove(user, out _); return Task.CompletedTask; }
         public Task<IReadOnlyList<CodeRepository>> RepositoriesAsync(CancellationToken token) => Task.FromResult<IReadOnlyList<CodeRepository>>(Entries.ToArray());
         public Task AddAsync(CodeRepository repository, CancellationToken token) { Entries.Add(repository); return Task.CompletedTask; }
         public Task<bool> UpdateAsync(CodeRepository repository, int revision, CancellationToken token)
@@ -151,6 +146,14 @@ internal sealed class RetrievalFixture : IDisposable
         }
         public Task<bool> DeleteAsync(string id, int revision, CancellationToken token) => Task.FromResult(Entries.RemoveAll(repo => repo.Id == id && repo.Revision == revision) > 0);
     }
+    internal sealed class FixtureAccess : IManagedGitHubAccess
+    {
+        public bool IsConfigured => true;
+        public ManagedGitHubIdentity Identity { get; set; } =
+            new(1, "fixture", "opaque-fixture-credential");
+        public Task<ManagedGitHubIdentity> GetIdentityAsync(CancellationToken token) =>
+            Task.FromResult(Identity);
+    }
     internal sealed class FixtureGitHub : IGitHubCodeClient
     {
         public bool Denied { get; set; }
@@ -159,14 +162,14 @@ internal sealed class RetrievalFixture : IDisposable
         public int HeadCalls, AccessCalls;
         public Action? OnAccess { get; set; }
         public int Active, MaxActive;
-        public async Task<GitHubRepository> RepositoryAsync(string user, string fullName, CancellationToken token)
+        public async Task<GitHubRepository> RepositoryAsync(string fullName, CancellationToken token)
         {
             Interlocked.Increment(ref AccessCalls);
             await Delay(fullName, token);
             OnAccess?.Invoke();
             return new(fullName.Split('/')[^1].GetHashCode(StringComparison.Ordinal), fullName, "main");
         }
-        public async Task<string> CommitAsync(string user, CodeRepository repository, CancellationToken token)
+        public async Task<string> CommitAsync(CodeRepository repository, CancellationToken token)
         {
             Interlocked.Increment(ref HeadCalls);
             await Delay(repository.FullName, token);
@@ -184,8 +187,8 @@ internal sealed class RetrievalFixture : IDisposable
             }
             finally { Interlocked.Decrement(ref Active); }
         }
-        public Task<GitHubBranches> BranchesAsync(string user, string name, CancellationToken token) => throw new NotSupportedException();
-        public Task DownloadAsync(string user, CodeRepository repository, string commit, string destination, CancellationToken token) => throw new NotSupportedException();
+        public Task<GitHubBranches> BranchesAsync(string name, CancellationToken token) => throw new NotSupportedException();
+        public Task DownloadAsync(CodeRepository repository, string commit, string destination, CancellationToken token) => throw new NotSupportedException();
     }
     internal sealed class FixtureEnvironment(string root) : IHostEnvironment
     {

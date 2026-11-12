@@ -50,45 +50,41 @@ public sealed class ProjectCodeRepositoriesController(ICodeRepositoryService ser
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<CodeRepositoryResponse>>> List(string projectId, CancellationToken token) =>
-        Ok(await service.ListAsync(CodeUser.Name(User), projectId, token));
+        Ok(await service.ListAsync(projectId, token));
 
     [HttpGet("branches")]
     public async Task<ActionResult<GitHubBranches>> Branches(string projectId, [FromQuery] string url, CancellationToken token)
     {
         if (string.IsNullOrWhiteSpace(url) || url.Length > 300) throw new ArgumentException("A GitHub repository URL is required.");
-        return Ok(await service.BranchesAsync(CodeUser.Name(User), url, token));
+        return Ok(await service.BranchesAsync(url, token));
     }
 
     [HttpGet("{id}")]
     public async Task<ActionResult<CodeRepositoryResponse>> Get(string projectId, string id, CancellationToken token)
     {
-        var record = (await service.ListAsync(CodeUser.Name(User), projectId, token)).FirstOrDefault(entry => entry.Id == id);
+        var record = (await service.ListAsync(projectId, token)).FirstOrDefault(entry => entry.Id == id);
         return record is null ? NotFound() : Ok(record);
     }
 
     [HttpPost]
     public async Task<ActionResult<CodeRepositoryResponse>> Create(string projectId, SaveCodeRepositoryRequest request, CancellationToken token)
     {
-        var record = await service.SaveAsync(CodeUser.Name(User), projectId, null, request, token);
+        var record = await service.SaveAsync(projectId, null, request, token);
         return CreatedAtAction(nameof(Get), new { projectId, id = record.Id }, record);
     }
 
     [HttpPut("{id}")]
     public async Task<ActionResult<CodeRepositoryResponse>> Update(string projectId, string id, SaveCodeRepositoryRequest request, CancellationToken token) =>
-        Ok(await service.SaveAsync(CodeUser.Name(User), projectId, id, request, token));
+        Ok(await service.SaveAsync(projectId, id, request, token));
 
     [HttpPost("{id}/refresh")]
     public async Task<ActionResult<CodeRepositoryResponse>> Refresh(string projectId, string id, CancellationToken token) =>
-        AcceptedAtAction(nameof(Get), new { projectId, id }, await service.RefreshAsync(CodeUser.Name(User), projectId, id, false, token));
-
-    [HttpPost("{id}/take-ownership")]
-    public async Task<ActionResult<CodeRepositoryResponse>> TakeOwnership(string projectId, string id, CancellationToken token) =>
-        AcceptedAtAction(nameof(Get), new { projectId, id }, await service.RefreshAsync(CodeUser.Name(User), projectId, id, true, token));
+        AcceptedAtAction(nameof(Get), new { projectId, id }, await service.RefreshAsync(projectId, id, token));
 
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(string projectId, string id, CancellationToken token)
     {
-        await service.DeleteAsync(CodeUser.Name(User), projectId, id, token);
+        await service.DeleteAsync(projectId, id, token);
         return NoContent();
     }
 }

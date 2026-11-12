@@ -19,6 +19,8 @@ public interface ITicketWorkflowOrchestrator
     Task<TicketWorkflowResult> ProcessAsync(string title, string description, string? ticketId = null, CancellationToken cancellationToken = default);
     Task<TicketWorkflowResult> ProcessAsync(TicketRequest request, CancellationToken cancellationToken = default);
     Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, CancellationToken cancellationToken = default);
+    Task<TicketWorkflowResult> RecommendForBackgroundPollingAsync(TicketRequest request, CancellationToken cancellationToken = default) =>
+        RecommendAsync(request, cancellationToken);
     Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken = default);
     Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, TicketConversationContext context, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken = default);
 }
@@ -109,6 +111,9 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         return await ProcessInternalAsync(request, persistKnowledge: false, progressCallback: null, cancellationToken);
     }
 
+    public Task<TicketWorkflowResult> RecommendForBackgroundPollingAsync(TicketRequest request, CancellationToken cancellationToken = default) =>
+        ProcessInternalAsync(request, persistKnowledge: false, progressCallback: null, cancellationToken, backgroundPolling: true);
+
     public async Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken = default)
     {
         return await ProcessInternalAsync(request, persistKnowledge: false, progressCallback, cancellationToken);
@@ -117,7 +122,9 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
     public Task<TicketWorkflowResult> RecommendAsync(TicketRequest request, TicketConversationContext context, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken = default) =>
         ProcessInternalAsync(request, false, progressCallback, cancellationToken, context);
 
-    private async Task<TicketWorkflowResult> ProcessInternalAsync(TicketRequest request, bool persistKnowledge, Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken, TicketConversationContext? conversation = null)
+    private async Task<TicketWorkflowResult> ProcessInternalAsync(TicketRequest request, bool persistKnowledge,
+        Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback, CancellationToken cancellationToken,
+        TicketConversationContext? conversation = null, bool backgroundPolling = false)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
@@ -260,6 +267,8 @@ public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
         await ReportProgressAsync(progressCallback, "code-repositories", "Querying repository code", sourcePlan.Code ? "Checking GitHub access and indexed code." : $"Code excluded by {sourcePlan.Label}.", sourcePlan.Code && !persistKnowledge ? "active" : "skipped", 5, cancellationToken);
         var codeTask = persistKnowledge || !sourcePlan.Code
             ? Task.FromResult(sourcePlan.Code ? CodeRetrievalResult.Skipped : new CodeRetrievalResult("not-requested", []))
+            : backgroundPolling
+                ? _codeKnowledge.ForBackgroundPollingAsync(!usePool || context.HasTurns ? searchText : $"{title}\n{description}\n{searchText}", request, cancellationToken)
             : _codeKnowledge.ForRequestAsync(!usePool || context.HasTurns ? searchText : $"{title}\n{description}\n{searchText}", request, cancellationToken,
                 reusableCodeEmbedding);
 

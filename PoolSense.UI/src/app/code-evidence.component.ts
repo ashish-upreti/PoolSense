@@ -7,7 +7,7 @@ import { CodeSearchStatusComponent } from './code-search-status.component'
   selector: 'app-code-evidence', standalone: true, imports: [CommonModule, CodeSearchStatusComponent],
   template: `
     <app-code-search-status [status]="status" [coverage]="coverage"></app-code-search-status>
-    <p *ngIf="!documents.length" class="status">{{ status === 'not-connected' ? 'GitHub is not connected.' : 'No accessible code evidence.' }}</p>
+    <p *ngIf="!documents.length" class="status">{{ status === 'not-connected' ? 'Server-managed GitHub access is unavailable or the PAT was rejected.' : 'No accessible code evidence.' }}</p>
     <section *ngIf="entries.length" aria-label="Code source references">
       <h4>Code source references</h4>
       <p class="status">Indexed source; verify that this commit matches the deployed version.</p>

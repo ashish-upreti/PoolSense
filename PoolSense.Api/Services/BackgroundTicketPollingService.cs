@@ -192,7 +192,7 @@ public class BackgroundTicketPollingService : BackgroundService
 
         foreach (var ticket in tickets)
         {
-            ApplyProjectScope(ticket, project);
+            ApplyProjectScope(ticket, project, restrictToProject: true);
 
             if (string.IsNullOrWhiteSpace(ticket.SourceEventId)
                 || await processedSourceEventRepository.HasBeenProcessedAsync(ticket.SourceEventId, NewRecommendationKind, cancellationToken))
@@ -210,7 +210,7 @@ public class BackgroundTicketPollingService : BackgroundService
 
             _logger.LogInformation("Processing new ticket {TicketId} (sourceEventId: {SourceEventId}).", ticket.TicketId, ticket.SourceEventId);
 
-            var workflowResult = await orchestrator.RecommendAsync(ticket, cancellationToken);
+            var workflowResult = await orchestrator.RecommendForBackgroundPollingAsync(ticket, cancellationToken);
 
             var emailSent = false;
             try
@@ -252,12 +252,16 @@ public class BackgroundTicketPollingService : BackgroundService
         _logger.LogInformation("New ticket processing complete. Processed: {ProcessedCount}, Skipped: {SkippedCount}.", processedCount, skippedCount);
     }
 
-    private static void ApplyProjectScope(TicketRequest ticket, Models.ProjectConfig project)
+    private static void ApplyProjectScope(TicketRequest ticket, Models.ProjectConfig project, bool restrictToProject = false)
     {
         ArgumentNullException.ThrowIfNull(ticket);
         ArgumentNullException.ThrowIfNull(project);
 
-        if (ticket.SelectedGroupIds is not { Count: > 0 } && !string.IsNullOrWhiteSpace(project.ProjectId))
+        if (restrictToProject)
+        {
+            ticket.SelectedGroupIds = string.IsNullOrWhiteSpace(project.ProjectId) ? [] : [project.ProjectId];
+        }
+        else if (ticket.SelectedGroupIds is not { Count: > 0 } && !string.IsNullOrWhiteSpace(project.ProjectId))
         {
             ticket.SelectedGroupIds = [project.ProjectId];
         }

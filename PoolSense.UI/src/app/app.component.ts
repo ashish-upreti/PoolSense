@@ -93,7 +93,7 @@ type FeedbackState = {
 
 type AppSection = 'main' | 'poolRecommendations' | 'projectConfig' | 'codeRepositories' | 'applicationFeedback'
 
-type GitHubConnectionStatus = { connected: boolean; login: string; shared?: boolean }
+type GitHubAccessStatus = { configured: boolean; available: boolean; login: string | null; message: string }
 
 type CodeChatMessage = {
   id: number
@@ -333,7 +333,7 @@ export class AppComponent implements OnInit, OnDestroy {
   codeRepoBranchesTruncated = false
   isCodeRepoBranchesLoading = false
   codeRepoList: CodeRepository[] = []
-  codeRepoConnection: GitHubConnectionStatus | null = null
+  codeRepoConnection: GitHubAccessStatus | null = null
   codeRepoError = ''
   codeRepoNotice = ''
   isCodeRepoLoading = false
@@ -1264,8 +1264,8 @@ export class AppComponent implements OnInit, OnDestroy {
     const version = ++this.codeRepoLoadVersion
     if (!silent) this.isCodeRepoLoading = true
     try {
-      this.codeRepoConnection = await this.api.codeRequest<GitHubConnectionStatus>('/github/connection')
-      const records = this.codeRepoProjectId && this.codeRepoConnection.connected
+      this.codeRepoConnection = await this.api.codeRequest<GitHubAccessStatus>('/github/access')
+      const records = this.codeRepoProjectId && this.codeRepoConnection.available
         ? await this.api.codeRequest<CodeRepository[]>(this.codeRepoPath())
         : []
       if (version !== this.codeRepoLoadVersion) return
@@ -1273,7 +1273,7 @@ export class AppComponent implements OnInit, OnDestroy {
       if (!silent) this.codeRepoError = ''
     } catch (requestError) {
       if (version !== this.codeRepoLoadVersion) return
-      if (!this.codeRepoConnection) this.codeRepoConnection = { connected: false, login: '' }
+      if (!this.codeRepoConnection) this.codeRepoConnection = { configured: false, available: false, login: null, message: '' }
       this.codeRepoError = requestError instanceof Error ? requestError.message : 'Unable to load code repositories.'
     } finally {
       if (version === this.codeRepoLoadVersion) this.isCodeRepoLoading = false
@@ -1363,8 +1363,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.codeRepoError = ''
     this.codeRepoNotice = ''
     try {
-      const path = repo.status === 'access-required' ? '/take-ownership' : '/refresh'
-      await this.api.codeRequest<CodeRepository>(this.codeRepoPath(repo.id) + path, 'POST', {})
+      await this.api.codeRequest<CodeRepository>(this.codeRepoPath(repo.id) + '/refresh', 'POST', {})
       this.codeRepoNotice = `${this.codeRepoName(repo)} queued for re-indexing.`
       await this.loadCodeRepositories(true)
     } catch (requestError) {

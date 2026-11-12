@@ -36,10 +36,6 @@ public static class CodeRAGRegistration
                 || settings.Semantic.MediumRepositoryThreshold < settings.Semantic.SmallRepositoryThreshold
                 || settings.Semantic.MaxManifestBytes is < 1024 or > 8388608)
                 throw new InvalidOperationException("Invalid CodeRAG semantic coverage/batch limits. Total capacity is at most 768, new-vector batches at most 64, cooldown 60-3600 seconds, and manifests at most 8 MiB.");
-            var sharedToken = !string.IsNullOrWhiteSpace(settings.GitHubToken);
-            if (!sharedToken && (!Uri.TryCreate(settings.CallbackUrl, UriKind.Absolute, out var callback)
-                || callback.Scheme != "https" && !(callback.IsLoopback && callback.Scheme == "http")))
-                throw new InvalidOperationException("CodeRAG CallbackUrl must use HTTPS (HTTP is allowed only on loopback).");
             var storagePath = CodeStoragePath.Resolve(settings.StoragePath, environment.ContentRootPath);
             CodeStoragePath.EnsureWritable(storagePath);
             protection.PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(storagePath, "keys")))
@@ -49,16 +45,13 @@ public static class CodeRAGRegistration
         services.AddSingleton<CodeIndexFiles>();
         services.AddSingleton<CodeSnapshotWarmupQueue>();
         services.AddSingleton<ICodeSnapshotWarmupQueue>(sp => sp.GetRequiredService<CodeSnapshotWarmupQueue>());
-        services.AddSingleton<GitHubOAuthStates>();
         services.AddScoped<CodeRepositoryStore>();
+        services.AddScoped<ICodeRepositoryStore>(sp => sp.GetRequiredService<CodeRepositoryStore>());
         services.AddSingleton<SharedGitHubConnection>();
+        services.AddSingleton<IManagedGitHubAccess>(sp => sp.GetRequiredService<SharedGitHubConnection>());
         services.AddHttpClient(SharedGitHubConnection.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
             .RemoveAllLoggers();
-        if (string.IsNullOrWhiteSpace(settings.GitHubToken))
-            services.AddScoped<ICodeRepositoryStore>(sp => sp.GetRequiredService<CodeRepositoryStore>());
-        else
-            services.AddScoped<ICodeRepositoryStore, SharedGitHubConnectionStore>();
         services.AddScoped<ICodeRepositoryService, CodeRepositoryService>();
         services.AddScoped<ICodeKnowledgeService, CodeKnowledgeService>();
         services.AddSingleton<CodeQueryEmbeddingCache>();
@@ -71,9 +64,6 @@ public static class CodeRAGRegistration
         services.AddScoped<CodeIndexCoordinator>();
         services.AddScoped<CodeApiFilter>();
         services.AddHttpClient<IGitHubCodeClient, GitHubCodeClient>(client => client.Timeout = TimeSpan.FromMinutes(5))
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
-            .RemoveAllLoggers();
-        services.AddHttpClient<GitHubOAuthService>(client => client.Timeout = TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
             .RemoveAllLoggers();
         services.AddHostedService<CodeIndexWorker>();

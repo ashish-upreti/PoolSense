@@ -5,19 +5,16 @@
 Code knowledge is disabled by default. Deploy and verify the .NET 10 upgrade before enabling it. Install a supported, patched .NET 10 runtime (and the .NET 10 Hosting Bundle when using IIS); Angular remains on version 18.
 
 1. Apply [database/sqlserver-bootstrap.sql](database/sqlserver-bootstrap.sql) for the existing PoolSense schema, then [database/coderag-bootstrap.sql](database/coderag-bootstrap.sql) to the intended PoolSense SQL Server database. The additive CodeRAG script is idempotent. The runtime does not silently modify your database schema.
-2. Register a GitHub OAuth App. Set its callback to the exact public PoolSense URL ending in `/api/github/callback`. For local development through the Angular proxy, use `http://localhost:4200/api/github/callback`.
-3. Provide the following configuration. Supply the client secret through .NET user secrets or a server environment variable, not a committed settings file. Existing local appsettings files are ignored by Git.
-4. Use one always-running Windows API instance, with persistent storage and the same Windows service identity. Grant only that identity and administrators access to the storage directory. Restart the API after configuration.
-5. Sign in to PoolSense, open Application Configuration, and edit a saved application. Connect GitHub in the application's Git repositories section, then use Add repository for each URL and optional branch. Click Update Application to save the changes and queue indexing. New repositories default to `master`; a blank branch also resolves to `master`. Enter another branch explicitly when needed.
+2. Configure a server-managed GitHub personal access token (PAT) as `CodeRAG:GitHubToken` using .NET user secrets or the API host's protected environment configuration. Do not put a real token in source-controlled settings, HTTP examples, URLs, chat, or logs. Grant only the read permissions needed for repository metadata and contents, and authorize the token for organization SSO when required.
+3. Provide the non-secret settings below. Existing local appsettings files are ignored by Git.
+4. Use one always-running Windows API instance, with persistent storage and the same Windows service identity. Grant only that identity and administrators access to the storage directory. Restart the API after configuration changes.
+5. Sign in to PoolSense, open Application Configuration, and edit a saved application. GitHub access is managed by the administrator; add repositories and optional branches in the application's Git repositories section. Click Update Application to save changes and queue indexing. New repositories default to `master`; a blank branch also resolves to `master`.
 
 ```json
 {
   "CodeRAG": {
     "Enabled": true,
     "StoragePath": "artifacts/code-knowledge",
-    "GitHubClientId": "YOUR_OAUTH_APP_CLIENT_ID",
-    "CallbackUrl": "https://poolsense.example.com/api/github/callback",
-    "ReturnUrl": "/",
     "RefreshMinutes": 60,
     "MaxArchiveMegabytes": 100,
     "MaxExtractedMegabytes": 500,
@@ -27,14 +24,13 @@ Code knowledge is disabled by default. Deploy and verify the .NET 10 upgrade bef
 }
 ```
 
-The secret configuration key is `CodeRAG:GitHubClientSecret`; its environment variable equivalent is `CodeRAG__GitHubClientSecret`. Never paste real secrets into source-controlled HTTP examples, URLs, chat, or logs.
+The PAT configuration key is `CodeRAG:GitHubToken`; its environment variable equivalent is `CodeRAG__GitHubToken`. For local development, store it in the API project's .NET user-secrets. The browser never receives the PAT. Never paste real secrets into source-controlled HTTP examples, URLs, chat, or logs.
 
 ## Connection Troubleshooting
 
-- A `503` with `Code knowledge is not enabled.` means the API's effective `CodeRAG:Enabled` setting is false. Enable it only after completing the database and OAuth setup above, then restart the API. An environment override uses `CodeRAG__Enabled=true`.
-- Both `CodeRAG:GitHubClientId` and `CodeRAG:GitHubClientSecret` must be configured for OAuth. Register a [GitHub OAuth App](https://github.com/settings/applications/new) and supply its values on the server; signing in to PoolSense does not configure these values. For local development, use `http://localhost:4200` as the homepage and store the client ID and secret in the API project's .NET user-secrets. Restart the API after configuring them.
-- For local development, the OAuth App callback must be `http://localhost:4200/api/github/callback`, matching `CodeRAG:CallbackUrl`. Access PoolSense through `http://localhost:4200` so its session cookie accompanies the callback.
-- Git repositories appears inside the saved application's edit form, not in the configured-applications list. Connect GitHub first to reveal repository rows. When the connection-status request fails, Connect is disabled. Use Reload GitHub connection after correcting server configuration.
+- A `503` with `Code knowledge is not enabled.` means the API's effective `CodeRAG:Enabled` setting is false. An environment override uses `CodeRAG__Enabled=true`.
+- The Git repositories section reports whether administrator-managed access is configured and available. If it is unavailable, check the API host's `CodeRAG:GitHubToken`, token validity, repository permissions and organization SSO authorization. The status endpoint never returns the token.
+- Missing GitHub PAT does not prevent PoolSense startup or disable Wiki/Pool features. Code retrieval and repository-management actions report that managed access is unavailable until an administrator configures it.
 
 ## Rich repository answers
 
@@ -63,12 +59,12 @@ is deployed.
 
 Main chat continuation never carries raw earlier repository evidence or code-backed
 assistant answers into the next prompt. Those assistant turns are withheld; fresh
-retrieval checks the current user's GitHub access for each follow-up. Previous
+retrieval checks the managed PAT's GitHub access for each follow-up. Previous
 access, citations or a saved answer cannot substitute for current authorization.
 
 ## Application Editing
 
-- Each project supports multiple repositories. GitHub authorization belongs to the signed-in user; repository registrations belong to the selected project.
+- Each project supports multiple repositories. GitHub access is shared through the administrator-managed PAT; repository registrations belong to the selected project.
 - Add repository creates a local draft row. URL, branch, enabled-state changes and removals remain unsaved until Update Application. Cancel edit discards pending repository changes without making repository requests.
 - Update Application saves application settings first, then applies repository changes. New or changed enabled repositories are queued for indexing; unchanged enabled repositories are queued for a branch check unless already queued or indexing. Disabled repositories are not queued.
 - Indexing runs asynchronously in the existing background worker. The application editor remains open to display repository status and the queued count. Saving does not wait for indexing to complete.
@@ -76,16 +72,12 @@ access, citations or a saved answer cannot substitute for current authorization.
 
 ## Access Rules
 
-- PoolSense/AD login and GitHub authorization are separate. Each user connects their own GitHub account; no email-based account matching is used.
-- The configuring user must be able to access the repository. Repository metadata is also filtered for the viewing user.
-- Every interactive query checks the querying user's current GitHub repository/branch access before opening a cached index. Indexing-owner credentials are never a fallback for answering another user.
-- Public repositories are allowed when readable through the user's connected GitHub authorization. Private repositories require that user's own access. OAuth's `repo` scope is broader than read-only; this integration performs only read operations. Organizations may require OAuth approval/SSO authorization.
+- PoolSense/AD login remains required for interactive HTTP endpoints. GitHub authorization is separate and is not connected per user; all repository access uses the configured administrator-managed PAT.
+- Every interactive query and trusted new-ticket polling checks the managed PAT's current access to each repository before opening a cached index. Repository IDs, project scope, and generation/configuration are revalidated before evidence is returned. Warmed or cached data does not grant authorization.
+- The PAT must be able to read repository metadata and contents for every configured repository. Organizations may require token SSO authorization. This integration performs GitHub read operations only.
 - GitHub outages, rate limits, missing authorization and denied access exclude code evidence. Wiki and PoolDB still use their existing behavior.
-- Unattended ticket processing has no querying GitHub user, so its stored recommendations and emails remain Wiki/PoolDB-only.
+- Trusted new-ticket polling can retrieve code with the managed PAT and keeps repository evidence in its normal stored recommendation/email result. Other background ingestion paths retain their existing behavior. Missing, invalid, revoked or inaccessible PAT access produces explicit coverage/status and no code evidence; there is no alternate per-user GitHub credential path.
 - Code-backed answers are interactive and ephemeral: they do not enter shared interaction content, incident knowledge, failure-pattern storage, or feedback promotion. Non-code answers receive a user/answer-bound feedback permit. When CodeRAG is enabled, older clients must forward `feedbackAuthorization` when submitting feedback; regenerate old answers before submitting feedback.
-- Manual Disconnect always deletes the local connection and cancels pending OAuth callbacks, then makes a best-effort request to revoke the user's GitHub grant for this OAuth app (invalidating all of that user's tokens for the app). If revocation is not confirmed (missing OAuth settings, unreadable stored token, GitHub error or timeout), the disconnect still succeeds and the UI shows a warning with a link to the GitHub authorization settings so the user can revoke PoolSense manually. Dependent indexing pauses when next checked; repository registrations are retained.
-- PoolSense does not reconnect automatically. The user must click Connect GitHub again. Every connection requests GitHub's account picker (`prompt=select_account`) and the `repo` scope. After grant revocation, GitHub requests authorization again; users can review available organization access. PoolSense cannot force a new password entry, sign users out of GitHub globally, or bypass organization approval/SSO policies. If only an individual token was already invalid, review or revoke any remaining app authorization in GitHub Settings > Applications to reset consent.
-- Another authorized project-config user can take indexing ownership. Signing out of PoolSense does not cancel the separately granted unattended indexing authorization.
 
 ## Search and background preparation
 
@@ -95,11 +87,11 @@ GitHub repository-access checks**; permission checks are not head/freshness chec
 and are not replaced with an indefinitely cached authorization verdict. OKF,
 vectors and cached source are read only after access succeeds. Coverage reports
 only confirmed accessible repositories, not denied repository names/counts.
-Existing administrator-managed `CodeRAG:GitHubToken` deployments retain their
-shared-grant policy: checks use that configured grant, not proof of each AD user's
-individual GitHub entitlements. Use the existing per-user OAuth mode when
-individual GitHub permissions are required; this change does not broaden or
-replace the deployment's authorization policy.
+All deployments use the shared-grant policy: checks use the configured PAT, not
+proof of each PoolSense user's individual GitHub entitlements. A user who can
+query an application can receive evidence from repositories registered to that
+application whenever the server PAT can read them. Do not use this model if
+individual GitHub entitlements must constrain each user's code access.
 
 Ready generations are immutable. Each reader holds a generation lease while
 using its own read-only SQLite connection; publication switches the SQL generation
@@ -562,7 +554,7 @@ to production databases.
 
 ## Storage and Operations
 
-SQL stores repository configuration/status and encrypted OAuth tokens. Source and index snapshots live under `StoragePath`; Data Protection keys are in its `keys` directory, encrypted using Windows DPAPI. Do not publish this directory as static content. There is no plaintext-token fallback; non-Windows hosting needs a separately designed protected-key configuration and is rejected when the feature is enabled.
+SQL stores repository configuration/status. The legacy `github_connections` table may remain in an existing database for compatibility, but current code does not read or write it; no rows or schema are deleted. The configured PAT is held in host configuration and protected in memory with Data Protection before use by the GitHub client. Source and index snapshots live under `StoragePath`; Data Protection keys are in its `keys` directory, encrypted using Windows DPAPI. Do not publish this directory as static content. There is no plaintext-token fallback; non-Windows hosting needs a separately designed protected-key configuration and is rejected when the feature is enabled.
 
 The portable default `artifacts/code-knowledge` is relative to the API **content root**,
 not the shell's working directory. For example, an API content root of
@@ -581,11 +573,11 @@ changing the root does not migrate them, and pointing at an empty root can requi
 background indexing or GitHub reconnection. Do not delete or rebuild a healthy
 existing root just to correct a documentation example.
 
-Back up SQL and protected key material together. DPAPI keys are tied to the Windows identity/machine; moving hosts requires an appropriate key migration or GitHub reconnection. Source/index caches can be rebuilt. A single shared local directory is not a supported multi-instance deployment.
+Back up SQL and protected key material together. DPAPI keys are tied to the Windows identity/machine; moving hosts requires an appropriate key migration. Source/index caches can be rebuilt. A single shared local directory is not a supported multi-instance deployment.
 
-Application HTTP client logging is disabled for GitHub OAuth/download clients. Request-start diagnostics are suppressed to avoid recording OAuth callback parameters. Configure IIS/reverse-proxy/APM logging to omit query strings on `/api/github/callback` and never capture OAuth bodies, authorization headers, or source/answer content.
+Application HTTP client logging is disabled for GitHub API/download clients. Never capture authorization headers, the configured PAT, repository source, or answer content in IIS/reverse-proxy/APM logs.
 
-New repository mutations require the `X-PoolSense-CSRF: 1` header as well as existing PoolSense authentication. The UI supplies it. There is no new global project RBAC model: existing project-configuration users retain management access, additionally constrained by GitHub access.
+New repository mutations require the `X-PoolSense-CSRF: 1` header as well as existing PoolSense authentication. The UI supplies it. There is no new global project RBAC model: existing project-configuration users retain management access, with GitHub operations performed through the server-managed PAT.
 
 ## Verify
 
@@ -602,6 +594,6 @@ With the UI development server running on localhost:4200:
 npm run test:code --prefix .\PoolSense.UI
 ```
 
-The browser tests mock API responses; they verify desktop/mobile repository operations without using real credentials. Unit tests verify commit reuse/change, graph retrieval and deleted files, access isolation, snapshot publication races, archive traversal, OAuth state consumption and feedback permits.
+The browser tests mock API responses; they verify desktop/mobile repository operations and the read-only managed-access status without using real credentials. Unit tests verify commit reuse/change, graph retrieval and deleted files, authenticated interactive retrieval, explicit PAT-only polling retrieval, project scoping, snapshot publication races, archive traversal and feedback permits.
 
-Before production enablement, test against a dedicated non-production SQL database and GitHub repository: authorize two users with different access, add/index/query, verify an unchanged refresh, push changed/deleted files, refresh and verify commit-pinned citations, revoke access, then restart the host and check recovery. Real OAuth exchange, organization policies, SQL schema compatibility and production hosting cannot be certified by mocked tests alone. Do not run NYRA live smoke tests without an intended test environment.
+Before production enablement, test against a dedicated non-production SQL database and GitHub repository: configure the intended PAT and organization SSO access, add/index/query, verify an unchanged refresh, push changed/deleted files, refresh and verify commit-pinned citations, revoke/rotate the PAT, then restart the host and check recovery. GitHub token permissions, organization policies, SQL schema compatibility and production hosting cannot be certified by mocked tests alone. Do not run NYRA live smoke tests without an intended test environment.

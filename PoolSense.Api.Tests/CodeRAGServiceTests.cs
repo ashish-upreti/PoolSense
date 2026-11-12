@@ -9,6 +9,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using PoolSense.Api.Services.CodeRAG;
+using PoolSense.Application.Models;
 using Xunit;
 
 namespace PoolSense.Api.Tests;
@@ -18,6 +19,7 @@ public sealed class CodeRAGServiceTests : IDisposable
     private readonly string directory = Path.Combine(Path.GetTempPath(), "poolsense-coderag", Guid.NewGuid().ToString("N"));
     private readonly MemoryStore store = new();
     private readonly FakeGitHub github = new();
+    private readonly FakeManagedGitHubAccess access = new();
     private readonly IOptions<CodeRAGOptions> options;
     private readonly CodeIndexFiles files;
     private readonly IHttpContextAccessor context = new HttpContextAccessor();
@@ -26,9 +28,8 @@ public sealed class CodeRAGServiceTests : IDisposable
     {
         options = Microsoft.Extensions.Options.Options.Create(new CodeRAGOptions { Enabled = true, StoragePath = directory });
         files = new CodeIndexFiles(new TestEnvironment(directory), options);
-        store.Connections["alice"] = new("alice", 1, "alice-gh", "protected-test-value");
         context.HttpContext = new DefaultHttpContext { User = Principal("alice") };
-        store.Repository = new() { ProjectId = "project", FullName = "owner/repo", GitHubId = 123, Branch = "main", IndexingUser = "alice" };
+        store.Repository = new() { ProjectId = "project", FullName = "owner/repo", GitHubId = 123, Branch = "main" };
     }
 
     [Fact]
@@ -64,7 +65,7 @@ public sealed class CodeRAGServiceTests : IDisposable
     {
         var builder = new TestBuilder(files);
         var queue = new CodeSnapshotWarmupQueue(Microsoft.Extensions.Options.Options.Create(new RetrievalCacheWarmupOptions()));
-        var coordinator = new CodeIndexCoordinator(store, github, builder, files, options, TimeProvider.System,
+        var coordinator = new CodeIndexCoordinator(store, github, access, builder, files, options, TimeProvider.System,
             warmupQueue: queue);
 
         await coordinator.RefreshAsync(store.Repository!, default);
@@ -80,20 +81,84 @@ public sealed class CodeRAGServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Retrieval_ChecksQueryingUserAndProject_EvenWhenIndexIsCached()
+    public async Task BackgroundPollingUsesManagedAccessWithoutHttpUser_WhileInteractiveRetrievalStillRequiresSignIn()
     {
         await Coordinator(new TestBuilder(files)).RefreshAsync(store.Repository!, default);
-        Assert.NotEmpty((await Knowledge().RetrieveAsync("OriginalPumpController", ["project"], default)).Documents);
-        Assert.Empty((await Knowledge().RetrieveAsync("OriginalPumpController", ["other-project"], default)).Documents);
-        store.Connections["bob"] = new("bob", 2, "bob-gh", "protected-other-value");
-        context.HttpContext!.User = Principal("bob");
-        Assert.Empty((await Knowledge().RetrieveAsync("OriginalPumpController", ["project"], default)).Documents);
-        Assert.Contains("bob", github.CheckedUsers);
-        context.HttpContext.User = Principal("alice");
-        github.AllowAlice = false;
-        Assert.Empty((await Knowledge().RetrieveAsync("OriginalPumpController", ["project"], default)).Documents);
-        context.HttpContext.User = new ClaimsPrincipal();
-        Assert.Empty((await Knowledge().RetrieveAsync("OriginalPumpController", ["project"], default)).Documents);
+        context.HttpContext!.User = new ClaimsPrincipal();
+        var service = Knowledge();
+        var polling = await service.ForBackgroundPollingAsync("OriginalPumpController",
+            new TicketRequest { ApplicationId = "project" }, default);
+        Assert.NotEmpty(polling.Documents);
+        Assert.All(polling.Documents, document => Assert.Equal("project", document.ProjectId));
+        Assert.Equal("not-authenticated", (await service.ForRequestAsync("OriginalPumpController",
+            new TicketRequest { ApplicationId = "project" }, default)).Status);
+        Assert.Empty((await service.ForBackgroundPollingAsync("OriginalPumpController",
+            new TicketRequest { ApplicationId = "other-project" }, default)).Documents);
+        access.IsConfiguredValue = false;
+        Assert.Equal("not-configured", (await service.ForBackgroundPollingAsync("OriginalPumpController",
+            new TicketRequest { ApplicationId = "project" }, default)).Status);
+    }
+
+    [Fact]
+    public async Task RevokedManagedAccessCannotUseCachedCodeEvidence()
+    {
+        await Coordinator(new TestBuilder(files)).RefreshAsync(store.Repository!, default);
+        access.ThrowAccessException = true;
+        context.HttpContext!.User = Principal("alice");
+        var result = await Knowledge().RetrieveAsync("OriginalPumpController", ["project"], default);
+        Assert.Empty(result.Documents);
+        Assert.Equal("not-connected", result.Status);
+    }
+
+    [Fact]
+    public async Task ManagedAccessUsesOnlyConfiguredPat_AndRefreshesIdentityWhenRotated()
+    {
+        var noPatOptions = new MutableOptionsMonitor(new CodeRAGOptions());
+        var requests = 0;
+        var protection = new EphemeralDataProtectionProvider();
+        var factory = new TestHttpClientFactory(new TestHttpHandler(request =>
+        {
+            requests++;
+            var token = request.Headers.Authorization?.Parameter;
+            var id = token == "managed-pat-b" ? 2 : 1;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent($$"""{"id":{{id}},"login":"managed"}""")
+            });
+        }));
+        var missing = new SharedGitHubConnection(factory, protection, noPatOptions);
+        Assert.False(missing.IsConfigured);
+        var missingError = await Assert.ThrowsAsync<CodeAccessException>(() => missing.GetIdentityAsync(default));
+        Assert.Contains("not configured", missingError.Message);
+        Assert.Equal(0, requests);
+
+        noPatOptions.CurrentValue.GitHubToken = "managed-pat-a";
+        Assert.True(missing.IsConfigured);
+        var first = await missing.GetIdentityAsync(default);
+        Assert.Equal("managed", first.Login);
+        Assert.Equal("managed-pat-a", protection.CreateProtector(GitHubCodeClient.TokenPurpose).Unprotect(first.ProtectedToken));
+        Assert.Equal(first, await missing.GetIdentityAsync(default));
+        Assert.Equal(1, requests);
+
+        noPatOptions.CurrentValue.GitHubToken = "managed-pat-b";
+        var rotated = await missing.GetIdentityAsync(default);
+        Assert.Equal(2, rotated.GitHubId);
+        Assert.Equal(2, requests);
+    }
+
+    [Fact]
+    public async Task ManagedAccessStatusIsReadOnlyAndNeverReturnsThePat()
+    {
+        access.IsConfiguredValue = false;
+        var controller = new PoolSense.Api.Controllers.GitHubAccessController(access);
+        var result = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(await controller.Status(default));
+        var configured = result.Value!.GetType().GetProperty("configured")!.GetValue(result.Value);
+        var available = result.Value.GetType().GetProperty("available")!.GetValue(result.Value);
+        var message = result.Value.GetType().GetProperty("message")!.GetValue(result.Value)?.ToString();
+        Assert.Equal(false, configured);
+        Assert.Equal(false, available);
+        Assert.Contains("administrator", message);
+        Assert.DoesNotContain("opaque-managed-token", message);
     }
 
     [Fact]
@@ -152,148 +217,10 @@ public sealed class CodeRAGServiceTests : IDisposable
     [InlineData("file:///tmp/repo")]
     public void GitHubUrl_RejectsUntrustedInputs(string url) => Assert.Throws<ArgumentException>(() => GitHubCodeClient.ParseUrl(url));
 
-    [Fact]
-    public void OAuthBegin_RequiresAccountSelectionAndRepositoryConsent()
-    {
-        options.Value.GitHubClientId = "test-client";
-        options.Value.GitHubClientSecret = "test-secret";
-        options.Value.CallbackUrl = "http://localhost:4200/api/github/callback";
-        using var http = new HttpClient();
-        var states = new GitHubOAuthStates();
-        var oauth = new GitHubOAuthService(http, store, states, new EphemeralDataProtectionProvider(), options);
-
-        var authorization = oauth.Begin("alice", "session");
-        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(authorization.Url).Query);
-
-        Assert.Equal("select_account", query["prompt"].ToString());
-        Assert.Equal("repo", query["scope"].ToString());
-        Assert.Equal("S256", query["code_challenge_method"].ToString());
-        Assert.Equal(authorization.State, query["state"].ToString());
-        Assert.False(query.ContainsKey("login"));
-        Assert.DoesNotContain("test-secret", authorization.Url);
-        Assert.Equal("alice", states.Consume(authorization.State)?.User);
-    }
-
-    [Fact]
-    public void OAuthStates_AreSingleUseAndExpire()
-    {
-        var states = new GitHubOAuthStates();
-        states.Add("state", new("alice", "session", "verifier", DateTimeOffset.UtcNow.AddMinutes(1)));
-        Assert.NotNull(states.Consume("state"));
-        Assert.Null(states.Consume("state"));
-        states.Add("expired", new("alice", "session", "verifier", DateTimeOffset.UtcNow.AddMinutes(-1)));
-        Assert.Null(states.Consume("expired"));
-    }
-
     [Theory]
-    [InlineData(204)]
-    [InlineData(404)]
-    public async Task OAuthDisconnect_RevokesGrant_ClearsLocalConnectionAndPendingCallbacks(int status)
-    {
-        options.Value.GitHubClientId = "test-client";
-        options.Value.GitHubClientSecret = "test-secret";
-        var protection = new EphemeralDataProtectionProvider();
-        store.Connections["alice"] = new("alice", 1, "alice-gh", protection.CreateProtector(GitHubCodeClient.TokenPurpose).Protect("test-access-token"));
-        store.Connections["bob"] = new("bob", 2, "bob-gh", "other-protected-token");
-        var states = new GitHubOAuthStates();
-        states.Add("old-state", new("alice", "session", "verifier", DateTimeOffset.UtcNow.AddMinutes(1)));
-        states.Add("other-state", new("bob", "other-session", "other-verifier", DateTimeOffset.UtcNow.AddMinutes(1)));
-        var requests = 0;
-        using var http = new HttpClient(new OAuthHandler(async request =>
-        {
-            requests++;
-            Assert.Equal(HttpMethod.Delete, request.Method);
-            Assert.Equal("https://api.github.com/applications/test-client/grant", request.RequestUri!.AbsoluteUri);
-            Assert.Equal("Basic", request.Headers.Authorization?.Scheme);
-            Assert.Equal(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("test-client:test-secret")), request.Headers.Authorization?.Parameter);
-            using var body = System.Text.Json.JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
-            Assert.Equal("test-access-token", body.RootElement.GetProperty("access_token").GetString());
-            Assert.False(store.Connections.ContainsKey("alice"));
-            Assert.Null(states.Consume("old-state"));
-            return new HttpResponseMessage((System.Net.HttpStatusCode)status);
-        }));
-        var oauth = new GitHubOAuthService(http, store, states, protection, options);
-
-        var result = await oauth.DisconnectAsync("alice", default);
-
-        Assert.True(result.Disconnected);
-        Assert.Equal(status == 204, result.AuthorizationRevoked);
-        Assert.Equal(status == 204, string.IsNullOrEmpty(result.Warning));
-        Assert.False(store.Connections.ContainsKey("alice"));
-        Assert.True(store.Connections.ContainsKey("bob"));
-        Assert.NotNull(states.Consume("other-state"));
-        await Assert.ThrowsAsync<CodeAccessException>(() => oauth.CompleteAsync("alice", "session", "old-state", "code", default));
-        await oauth.DisconnectAsync("alice", default);
-        Assert.Equal(1, requests);
-    }
-
-    [Theory]
-    [InlineData(401)]
-    [InlineData(403)]
-    [InlineData(422)]
-    [InlineData(500)]
-    public async Task OAuthDisconnect_FailedRevocationStillDisconnectsLocallyWithWarning(int status)
-    {
-        options.Value.GitHubClientId = "test-client";
-        options.Value.GitHubClientSecret = "test-secret";
-        var protection = new EphemeralDataProtectionProvider();
-        store.Connections["alice"] = new("alice", 1, "alice-gh", protection.CreateProtector(GitHubCodeClient.TokenPurpose).Protect("test-access-token"));
-        var states = new GitHubOAuthStates();
-        states.Add("old-state", new("alice", "session", "verifier", DateTimeOffset.UtcNow.AddMinutes(1)));
-        using var http = new HttpClient(new OAuthHandler(_ => Task.FromResult(new HttpResponseMessage((System.Net.HttpStatusCode)status))));
-        var oauth = new GitHubOAuthService(http, store, states, protection, options);
-
-        var result = await oauth.DisconnectAsync("alice", default);
-
-        Assert.True(result.Disconnected);
-        Assert.False(result.AuthorizationRevoked);
-        Assert.False(store.Connections.ContainsKey("alice"));
-        Assert.Null(states.Consume("old-state"));
-        Assert.Contains("GitHub authorization may still be active", result.Warning);
-        Assert.Equal("https://github.com/settings/connections/applications/test-client", result.AuthorizationUrl);
-        Assert.DoesNotContain("test-secret", result.Warning);
-        Assert.DoesNotContain("test-access-token", result.Warning);
-    }
-
-    [Theory]
-    [InlineData("missing-secret")]
-    [InlineData("unreadable-token")]
-    [InlineData("network-error")]
-    [InlineData("timeout")]
-    public async Task OAuthDisconnect_LocalCleanupDoesNotDependOnRemoteCredentialsOrNetwork(string failure)
-    {
-        options.Value.GitHubClientId = "test-client";
-        options.Value.GitHubClientSecret = failure == "missing-secret" ? "" : "test-secret";
-        var protection = new EphemeralDataProtectionProvider();
-        var protectedToken = failure == "unreadable-token" ? "unreadable" : protection.CreateProtector(GitHubCodeClient.TokenPurpose).Protect("test-access-token");
-        store.Connections["alice"] = new("alice", 1, "alice-gh", protectedToken);
-        var states = new GitHubOAuthStates();
-        var requests = 0;
-        using var http = new HttpClient(new OAuthHandler(_ =>
-        {
-            requests++;
-            return Task.FromException<HttpResponseMessage>(failure == "timeout" ? new TaskCanceledException() : new HttpRequestException());
-        }));
-        var oauth = new GitHubOAuthService(http, store, states, protection, options);
-
-        var result = await oauth.DisconnectAsync("alice", default);
-
-        Assert.True(result.Disconnected);
-        Assert.False(result.AuthorizationRevoked);
-        Assert.False(store.Connections.ContainsKey("alice"));
-        Assert.NotEmpty(result.Warning);
-        Assert.Equal(failure is "network-error" or "timeout" ? 1 : 0, requests);
-    }
-
-    private sealed class OAuthHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handle) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => handle(request);
-    }
-
-    [Theory]
-    [InlineData(401, "", "expired or was revoked")]
-    [InlineData(403, "", "organization-owner approval")]
-    [InlineData(403, "sso", "SSO authorization")]
+    [InlineData(401, "", "server-managed PAT")]
+    [InlineData(403, "", "server-managed PAT's repository permissions")]
+    [InlineData(403, "sso", "server-managed PAT")]
     [InlineData(403, "rate-limit", "rate limit")]
     [InlineData(404, "", "could not find or access this repository")]
     [InlineData(404, "branch", "selected branch")]
@@ -302,8 +229,12 @@ public sealed class CodeRAGServiceTests : IDisposable
     public async Task GitHubAccessFailure_ReportsActionableGuidanceThroughApi(int status, string scenario, string expected)
     {
         var protection = new EphemeralDataProtectionProvider();
-        store.Connections["alice"] = new("alice", 1, "alice-gh", protection.CreateProtector(GitHubCodeClient.TokenPurpose).Protect("test-access-token"));
-        using var http = new HttpClient(new OAuthHandler(request =>
+        var clientAccess = new FakeManagedGitHubAccess
+        {
+            Identity = new(1, "managed",
+                protection.CreateProtector(GitHubCodeClient.TokenPurpose).Protect("test-access-token"))
+        };
+        using var http = new HttpClient(new TestHttpHandler(request =>
         {
             if (scenario == "branch" && request.RequestUri!.AbsolutePath == "/repos/owner/repo")
                 return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
@@ -318,12 +249,12 @@ public sealed class CodeRAGServiceTests : IDisposable
             if (scenario == "rate-limit") response.Headers.RetryAfter = new(TimeSpan.FromMinutes(1));
             return Task.FromResult(response);
         }));
-        var client = new GitHubCodeClient(http, store, protection, options);
+        var client = new GitHubCodeClient(http, clientAccess, protection, options);
 
         var exception = await Assert.ThrowsAsync<CodeAccessException>(async () =>
         {
-            if (scenario == "branch") await client.CommitAsync("alice", store.Repository!, default);
-            else await client.RepositoryAsync("alice", "owner/repo", default);
+            if (scenario == "branch") await client.CommitAsync(store.Repository!, default);
+            else await client.RepositoryAsync("owner/repo", default);
         });
 
         Assert.Contains(expected, exception.Message);
@@ -356,8 +287,8 @@ public sealed class CodeRAGServiceTests : IDisposable
         await Assert.ThrowsAsync<IOException>(() => GitHubCodeClient.ExtractAsync(path, Path.Combine(directory, "source"), 10000, default));
     }
 
-    private CodeIndexCoordinator Coordinator(TestBuilder builder) => new(store, github, builder, files, options, TimeProvider.System);
-    private CodeKnowledgeService Knowledge() => new(store, null!, github, files, context, options);
+    private CodeIndexCoordinator Coordinator(TestBuilder builder) => new(store, github, access, builder, files, options, TimeProvider.System);
+    private CodeKnowledgeService Knowledge() => new(store, null!, github, access, files, context, options);
     private static ClaimsPrincipal Principal(string user) => new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user)], "test"));
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
 
@@ -382,31 +313,24 @@ public sealed class CodeRAGServiceTests : IDisposable
     private sealed class FakeGitHub : IGitHubCodeClient
     {
         public string Commit { get; set; } = new('a', 40);
-        public bool AllowAlice { get; set; } = true;
-        public List<string> CheckedUsers { get; } = [];
-        public Task<string> CommitAsync(string user, CodeRepository repository, CancellationToken token)
+        public bool AllowAccess { get; set; } = true;
+        public Task<string> CommitAsync(CodeRepository repository, CancellationToken token)
         {
-            CheckedUsers.Add(user);
-            return user == "alice" && AllowAlice ? Task.FromResult(Commit) : Task.FromException<string>(new CodeAccessException());
+            return AllowAccess ? Task.FromResult(Commit) : Task.FromException<string>(new CodeAccessException());
         }
-        public Task<GitHubRepository> RepositoryAsync(string user, string fullName, CancellationToken token)
+        public Task<GitHubRepository> RepositoryAsync(string fullName, CancellationToken token)
         {
-            CheckedUsers.Add(user);
-            return user == "alice" && AllowAlice
+            return AllowAccess
                 ? Task.FromResult(new GitHubRepository(123, fullName, "main"))
                 : Task.FromException<GitHubRepository>(new CodeAccessException());
         }
-        public Task<GitHubBranches> BranchesAsync(string user, string fullName, CancellationToken token) => Task.FromResult(new GitHubBranches(fullName, "main", ["main"], false));
-        public Task DownloadAsync(string user, CodeRepository repository, string commit, string destination, CancellationToken token) => throw new NotSupportedException();
+        public Task<GitHubBranches> BranchesAsync(string fullName, CancellationToken token) => Task.FromResult(new GitHubBranches(fullName, "main", ["main"], false));
+        public Task DownloadAsync(CodeRepository repository, string commit, string destination, CancellationToken token) => throw new NotSupportedException();
     }
 
     private sealed class MemoryStore : ICodeRepositoryStore
     {
         public CodeRepository? Repository { get; set; }
-        public Dictionary<string, GitHubConnection> Connections { get; } = [];
-        public Task<GitHubConnection?> ConnectionAsync(string user, CancellationToken token) => Task.FromResult(Connections.GetValueOrDefault(user));
-        public Task SaveConnectionAsync(GitHubConnection connection, CancellationToken token) { Connections[connection.UserName] = connection; return Task.CompletedTask; }
-        public Task DisconnectAsync(string user, CancellationToken token) { Connections.Remove(user); return Task.CompletedTask; }
         public Task<IReadOnlyList<CodeRepository>> RepositoriesAsync(CancellationToken token) => Task.FromResult<IReadOnlyList<CodeRepository>>(Repository is null ? [] : [Repository]);
         public Task AddAsync(CodeRepository repository, CancellationToken token) { Repository = repository; return Task.CompletedTask; }
         public Task<bool> UpdateAsync(CodeRepository repository, int expectedRevision, CancellationToken token)
@@ -416,6 +340,35 @@ public sealed class CodeRAGServiceTests : IDisposable
             return Task.FromResult(true);
         }
         public Task<bool> DeleteAsync(string id, int revision, CancellationToken token) { Repository = null; return Task.FromResult(true); }
+    }
+
+    private sealed class FakeManagedGitHubAccess : IManagedGitHubAccess
+    {
+        public bool IsConfiguredValue { get; set; } = true;
+        public bool ThrowAccessException { get; set; }
+        public ManagedGitHubIdentity Identity { get; set; } = new(1, "managed", "opaque-managed-token");
+        public bool IsConfigured => IsConfiguredValue;
+        public Task<ManagedGitHubIdentity> GetIdentityAsync(CancellationToken token) =>
+            !IsConfiguredValue || ThrowAccessException
+                ? Task.FromException<ManagedGitHubIdentity>(new CodeAccessException("Managed GitHub access is unavailable."))
+                : Task.FromResult(Identity);
+    }
+
+    private sealed class TestHttpHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handle) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => handle(request);
+    }
+
+    private sealed class TestHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
+    }
+
+    private sealed class MutableOptionsMonitor(CodeRAGOptions value) : IOptionsMonitor<CodeRAGOptions>
+    {
+        public CodeRAGOptions CurrentValue { get; set; } = value;
+        public CodeRAGOptions Get(string? name) => CurrentValue;
+        public IDisposable? OnChange(Action<CodeRAGOptions, string?> listener) => null;
     }
 
     private sealed class TestEnvironment(string directory) : IHostEnvironment

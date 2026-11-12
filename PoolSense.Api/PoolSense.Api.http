@@ -5,15 +5,8 @@ Accept: application/json
 
 ###
 
-### GitHub connection status (sign in to PoolSense first)
-GET {{PoolSense.Api_HostAddress}}/api/github/connection
-
-### Start GitHub OAuth; open the returned URL in the same authenticated browser
-POST {{PoolSense.Api_HostAddress}}/api/github/connect
-X-PoolSense-CSRF: 1
-Content-Type: application/json
-
-{}
+### Managed GitHub PAT status (sign in to PoolSense first)
+GET {{PoolSense.Api_HostAddress}}/api/github/access
 
 ### List accessible repository registrations
 @projectId = YOUR_PROJECT_ID
@@ -30,7 +23,7 @@ Content-Type: application/json
 ### Get one registration
 GET {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}
 
-### Update branch/settings; authorize indexing as the current user
+### Update branch/settings; the API verifies access using its managed PAT
 PUT {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}
 X-PoolSense-CSRF: 1
 Content-Type: application/json
@@ -41,14 +34,6 @@ Content-Type: application/json
 POST {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}/refresh
 X-PoolSense-CSRF: 1
 
-### Take indexing ownership using your connected GitHub account
-POST {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}/take-ownership
-X-PoolSense-CSRF: 1
-
 ### Remove a repository
 DELETE {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}
-X-PoolSense-CSRF: 1
-
-### Disconnect GitHub for the current user
-DELETE {{PoolSense.Api_HostAddress}}/api/github/connection
 X-PoolSense-CSRF: 1

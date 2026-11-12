@@ -15,16 +15,16 @@ public sealed record GitHubBranches(string FullName, string DefaultBranch, IRead
 
 public interface IGitHubCodeClient
 {
-    Task<GitHubRepository> RepositoryAsync(string user, string fullName, CancellationToken token);
-    Task<GitHubBranches> BranchesAsync(string user, string fullName, CancellationToken token);
-    Task<string> CommitAsync(string user, CodeRepository repository, CancellationToken token);
-    Task DownloadAsync(string user, CodeRepository repository, string commit, string destination, CancellationToken token);
+    Task<GitHubRepository> RepositoryAsync(string fullName, CancellationToken token);
+    Task<GitHubBranches> BranchesAsync(string fullName, CancellationToken token);
+    Task<string> CommitAsync(CodeRepository repository, CancellationToken token);
+    Task DownloadAsync(CodeRepository repository, string commit, string destination, CancellationToken token);
 }
 
-public sealed partial class GitHubCodeClient(HttpClient http, ICodeRepositoryStore store,
+public sealed partial class GitHubCodeClient(HttpClient http, IManagedGitHubAccess access,
     IDataProtectionProvider protection, IOptions<CodeRAGOptions> options) : IGitHubCodeClient
 {
-    public const string TokenPurpose = "PoolSense.GitHub.OAuth.v1";
+    public const string TokenPurpose = "PoolSense.GitHub.ManagedToken.v1";
     private readonly IDataProtector protector = protection.CreateProtector(TokenPurpose);
 
     public static string ParseUrl(string url)
@@ -40,9 +40,9 @@ public sealed partial class GitHubCodeClient(HttpClient http, ICodeRepositorySto
     [GeneratedRegex(@"^https://github\.com/([A-Za-z0-9][A-Za-z0-9_.-]*)/([A-Za-z0-9][A-Za-z0-9_.-]*)/?$", RegexOptions.IgnoreCase)]
     private static partial Regex RepositoryUrl();
 
-    public async Task<GitHubRepository> RepositoryAsync(string user, string fullName, CancellationToken token)
+    public async Task<GitHubRepository> RepositoryAsync(string fullName, CancellationToken token)
     {
-        using var response = await SendAsync(user, $"repos/{fullName}", token);
+        using var response = await SendAsync($"repos/{fullName}", token);
         using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(token), cancellationToken: token);
         var root = document.RootElement;
         return new(root.GetProperty("id").GetInt64(), root.GetProperty("full_name").GetString()!, root.GetProperty("default_branch").GetString()!);
@@ -50,14 +50,14 @@ public sealed partial class GitHubCodeClient(HttpClient http, ICodeRepositorySto
 
     private const int BranchPageSize = 100, MaxBranchPages = 5;
 
-    public async Task<GitHubBranches> BranchesAsync(string user, string fullName, CancellationToken token)
+    public async Task<GitHubBranches> BranchesAsync(string fullName, CancellationToken token)
     {
-        var metadata = await RepositoryAsync(user, fullName, token);
+        var metadata = await RepositoryAsync(fullName, token);
         var branches = new List<string>();
         var truncated = false;
         for (var page = 1; ; page++)
         {
-            using var response = await SendAsync(user, $"repos/{metadata.FullName}/branches?per_page={BranchPageSize}&page={page}", token);
+            using var response = await SendAsync($"repos/{metadata.FullName}/branches?per_page={BranchPageSize}&page={page}", token);
             using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(token), cancellationToken: token);
             var count = 0;
             foreach (var element in document.RootElement.EnumerateArray())
@@ -72,20 +72,20 @@ public sealed partial class GitHubCodeClient(HttpClient http, ICodeRepositorySto
         return new(metadata.FullName, metadata.DefaultBranch, branches, truncated);
     }
 
-    public async Task<string> CommitAsync(string user, CodeRepository repository, CancellationToken token)
+    public async Task<string> CommitAsync(CodeRepository repository, CancellationToken token)
     {
-        var metadata = await RepositoryAsync(user, repository.FullName, token);
+        var metadata = await RepositoryAsync(repository.FullName, token);
         if (metadata.Id != repository.GitHubId) throw new CodeAccessException();
-        using var response = await SendAsync(user, $"repos/{metadata.FullName}/commits/{Uri.EscapeDataString(repository.Branch)}", token, branchLookup: true);
+        using var response = await SendAsync($"repos/{metadata.FullName}/commits/{Uri.EscapeDataString(repository.Branch)}", token, branchLookup: true);
         using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(token), cancellationToken: token);
         var sha = document.RootElement.GetProperty("sha").GetString()!;
         if (!Regex.IsMatch(sha, "^[a-f0-9]{40}$")) throw new CodeAccessException();
         return sha;
     }
 
-    private async Task<HttpResponseMessage> SendAsync(string user, string path, CancellationToken token, bool archive = false, bool branchLookup = false)
+    private async Task<HttpResponseMessage> SendAsync(string path, CancellationToken token, bool archive = false, bool branchLookup = false)
     {
-        var connection = await store.ConnectionAsync(user, token) ?? throw new CodeAccessException();
+        var connection = await access.GetIdentityAsync(token);
         string credential;
         try { credential = protector.Unprotect(connection.ProtectedToken); }
         catch (CryptographicException) { throw new CodeAccessException(); }
@@ -105,22 +105,22 @@ public sealed partial class GitHubCodeClient(HttpClient http, ICodeRepositorySto
             && sso.Any(value => value.StartsWith("required", StringComparison.OrdinalIgnoreCase));
         var message = response.StatusCode switch
         {
-            HttpStatusCode.Unauthorized => "GitHub authorization has expired or was revoked. Disconnect and reconnect GitHub.",
-            HttpStatusCode.Forbidden when ssoRequired => "GitHub requires organization SSO authorization. Sign in through your organization's SSO and authorize PoolSense for repository access.",
+            HttpStatusCode.Unauthorized => "GitHub rejected the server-managed PAT. Check its validity and organization SSO authorization.",
+            HttpStatusCode.Forbidden when ssoRequired => "GitHub requires organization SSO authorization for the server-managed PAT.",
             HttpStatusCode.TooManyRequests => "GitHub API rate limit reached. Wait before retrying repository changes.",
             HttpStatusCode.Forbidden when retryAt is not null => "GitHub API rate limit reached. Wait before retrying repository changes.",
-            HttpStatusCode.Forbidden => "GitHub denied repository access. Check your repository permissions and the OAuth app's organization approval in GitHub Settings > Applications. Pending requests require organization-owner approval; reconnecting does not grant approval.",
+            HttpStatusCode.Forbidden => "GitHub denied repository access. Check the server-managed PAT's repository permissions and organization approval.",
             HttpStatusCode.NotFound when branchLookup => "GitHub could not find the selected branch or access changed. Verify the branch name and repository permissions.",
-            HttpStatusCode.NotFound => "GitHub could not find or access this repository. Verify the URL and your permissions. For organization repositories, check the OAuth app's organization approval in GitHub Settings > Applications; a pending request needs organization-owner approval.",
+            HttpStatusCode.NotFound => "GitHub could not find or access this repository. Verify the URL and server-managed PAT permissions.",
             _ => "GitHub could not complete the repository request. Try again later."
         };
         response.Dispose();
         throw new CodeAccessException(message, retryAt);
     }
 
-    public async Task DownloadAsync(string user, CodeRepository repository, string commit, string destination, CancellationToken token)
+    public async Task DownloadAsync(CodeRepository repository, string commit, string destination, CancellationToken token)
     {
-        using var redirect = await SendAsync(user, $"repos/{repository.FullName}/zipball/{commit}", token, archive: true);
+        using var redirect = await SendAsync($"repos/{repository.FullName}/zipball/{commit}", token, archive: true);
         var location = redirect.Headers.Location;
         if (location is null || !location.IsAbsoluteUri || location.Scheme != "https" || location.Host != "codeload.github.com"
             || !string.IsNullOrEmpty(location.UserInfo) || location.Port != 443) throw new CodeAccessException();

@@ -39,7 +39,7 @@ export class CodeSearchStatusComponent implements OnChanges {
       'not-ready': 'Code indexes are not ready. Indexing and refresh run in the background.',
       failed: 'Code search could not finish. This does not mean relevant code is absent.',
       'authorization-unavailable': 'Current code access could not be verified; evidence was withheld.',
-      'not-connected': 'GitHub is not connected.',
+      'not-connected': 'Server-managed GitHub access is unavailable or the PAT was rejected. Verify the token and organization SSO authorization.',
       disabled: 'Code retrieval is disabled.',
       'not-authenticated': 'Sign in before searching code.',
       'not-scoped': 'No application code scope was selected or resolved.',

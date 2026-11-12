@@ -64,7 +64,7 @@ async function fixture(page: Page, responseMarkdown = markdown) {
     else if (path === '/api/ticket/process-progress') {
       await route.fulfill({ contentType: 'application/x-ndjson', body: JSON.stringify({ type: 'result', result: { ...result, detailedAnalysisMarkdown: responseMarkdown } }) + '\n' }); return
     }
-    else if (path === '/api/github/connection') body = { connected: true, login: 'test' }
+    else if (path === '/api/github/access') body = { configured: true, available: true, login: 'test', message: '' }
     else if (path.endsWith('/repositories')) body = [{ id: 'repo', projectId: 'test-project', url: 'https://github.com/example/test', branch: 'main', enabled: true, status: 'ready', message: '', indexedCommit: 'abc', fileCount: 2, symbolCount: 2 }]
     else if (path.endsWith('/code-chat/history/saved-code')) body = { session: { id: 'saved-code', projectId: 'test-project', title: 'Saved rich code', updatedAt: now, messageCount: 2 }, messages: [
       { role: 'user', content: 'Explain architecture', citations: [], createdAt: now },

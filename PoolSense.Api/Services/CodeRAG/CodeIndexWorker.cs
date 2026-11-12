@@ -131,7 +131,7 @@ public sealed class CodeSnapshotBuilder(IGitHubCodeClient github, CodeIndexFiles
         if (reuseSource)
             await CopySourceAsync(previousSource!, files.Source(repository), settings?.Value.MaxExtractedMegabytes ?? 500, token);
         else
-            await github.DownloadAsync(repository.IndexingUser, repository, commit, files.Source(repository), token);
+            await github.DownloadAsync(repository, commit, files.Source(repository), token);
         var previousDatabase = previousSnapshotFolder is null ? null : Path.Combine(previousSnapshotFolder, "index.sqlite3");
         IndexSummary summary;
         if (reuseSource && previousDatabase is not null && GraphStore.IsReady(previousDatabase, [previousSource!]))
@@ -385,7 +385,7 @@ public sealed record CodeSnapshotPreparation(string SettingsProfile, bool Comple
     }
 }
 
-public sealed class CodeIndexCoordinator(ICodeRepositoryStore store, IGitHubCodeClient github,
+public sealed class CodeIndexCoordinator(ICodeRepositoryStore store, IGitHubCodeClient github, IManagedGitHubAccess access,
     ICodeSnapshotBuilder builder, CodeIndexFiles files, IOptions<CodeRAGOptions> options, TimeProvider clock,
     CodeSemanticIndex? semantic = null, IOptions<OkfOptions>? knowledge = null, ILogger<CodeIndexCoordinator>? logger = null,
     ICodeSnapshotWarmupQueue? warmupQueue = null)
@@ -405,8 +405,8 @@ public sealed class CodeIndexCoordinator(ICodeRepositoryStore store, IGitHubCode
         if (!await store.UpdateAsync(working, original.Revision, token)) return;
         try
         {
-            var connection = await store.ConnectionAsync(working.IndexingUser, token) ?? throw new CodeAccessException();
-            var commit = await github.CommitAsync(working.IndexingUser, working, token);
+            var connection = await access.GetIdentityAsync(token);
+            var commit = await github.CommitAsync(working, token);
             var now = clock.GetUtcNow();
             var result = working with { LastCheckedAt = now, NextCheckAt = now.AddMinutes(options.Value.RefreshMinutes), Status = "ready" };
             var preparedThisRun = false;
@@ -419,8 +419,8 @@ public sealed class CodeIndexCoordinator(ICodeRepositoryStore store, IGitHubCode
                 using var previousLease = working.Generation.Length > 0 ? files.Lease(working) : null;
                 var summary = await builder.BuildAsync(staged, commit, token, previousLease is null ? null : files.Folder(working));
                 preparedThisRun = true;
-                var latestHead = await github.CommitAsync(working.IndexingUser, working, token);
-                var currentConnection = await store.ConnectionAsync(working.IndexingUser, token);
+                var latestHead = await github.CommitAsync(working, token);
+                var currentConnection = await access.GetIdentityAsync(token);
                 if (currentConnection != connection) throw new CodeAccessException();
                 result = result with
                 {
@@ -444,7 +444,7 @@ public sealed class CodeIndexCoordinator(ICodeRepositoryStore store, IGitHubCode
                         result = result with { Message = "Index ready; project knowledge covers a bounded source selection." };
                 }
             }
-            if (await store.ConnectionAsync(working.IndexingUser, token) != connection) throw new CodeAccessException();
+            if (await access.GetIdentityAsync(token) != connection) throw new CodeAccessException();
             if (await store.UpdateAsync(result with { Revision = working.Revision + 1 }, working.Revision, token))
             {
                 files.Prune(result);

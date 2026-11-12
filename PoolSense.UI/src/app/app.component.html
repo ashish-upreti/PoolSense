@@ -1423,7 +1423,7 @@
                 </label>
               </div>
 
-              <app-code-repositories *ngIf="editingProjectId" [projectId]="editingProjectId" [saving]="isProjectSaving" (disconnected)="clearCodeAnswers()"></app-code-repositories>
+              <app-code-repositories *ngIf="editingProjectId" [projectId]="editingProjectId" [saving]="isProjectSaving"></app-code-repositories>
 
               <div class="composer-footer application-config-footer">
                 <p class="helper-text application-config-helper">
@@ -1544,8 +1544,8 @@
 
         <p *ngIf="codeRepoError" class="project-feedback-banner">{{ codeRepoError }}</p>
         <p *ngIf="codeRepoNotice" class="project-feedback-banner project-feedback-banner-success">{{ codeRepoNotice }}</p>
-        <p *ngIf="codeRepoConnection && !codeRepoConnection.connected && !codeRepoError" class="project-feedback-banner">
-          GitHub access is not configured on the server. Set <code>CodeRAG:GitHubToken</code> (innersource PAT) on the API host and restart it before adding repositories.
+        <p *ngIf="codeRepoConnection && !codeRepoConnection.available && !codeRepoError" class="project-feedback-banner">
+          {{ codeRepoConnection.message || 'GitHub access is managed by the administrator and is currently unavailable.' }}
         </p>
 
         <section class="project-studio">
@@ -1576,7 +1576,7 @@
               <span class="field-label">Add a GitHub repository</span>
               <div class="code-rag-url-row">
                 <input class="field-input" type="url" name="codeRepoUrl" [ngModel]="codeRepoUrl" (ngModelChange)="handleCodeRepoUrlChange($event)" (keydown.enter)="codeRepoBranchesLoaded ? handleCodeRepoAdd() : handleCodeRepoLoadBranches()" placeholder="https://github.com/owner/repository" autocomplete="off" spellcheck="false" maxlength="300" aria-label="Repository URL" [disabled]="isCodeRepoAdding || isCodeRepoBranchesLoading || !codeRepoProjectId" />
-                <button type="button" class="feedback-button feedback-button-secondary code-rag-branches-button" (click)="handleCodeRepoLoadBranches()" [disabled]="isCodeRepoBusy || !codeRepoProjectId || !codeRepoUrl.trim() || !codeRepoConnection?.connected">
+                <button type="button" class="feedback-button feedback-button-secondary code-rag-branches-button" (click)="handleCodeRepoLoadBranches()" [disabled]="isCodeRepoBusy || !codeRepoProjectId || !codeRepoUrl.trim() || !codeRepoConnection?.available">
                   {{ isCodeRepoBranchesLoading ? 'Loading branches...' : codeRepoBranchesLoaded ? 'Reload branches' : 'Load branches' }}
                 </button>
               </div>
@@ -1585,7 +1585,7 @@
                   <option *ngFor="let branch of codeRepoBranches" [value]="branch">{{ branch }}</option>
                 </select>
                 <input *ngIf="!codeRepoBranchesLoaded" class="field-input code-rag-branch-input" type="text" name="codeRepoBranch" [(ngModel)]="codeRepoBranch" (keydown.enter)="handleCodeRepoAdd()" placeholder="Branch (load branches to choose, or type one)" autocomplete="off" spellcheck="false" maxlength="255" aria-label="Branch" [disabled]="isCodeRepoAdding || !codeRepoProjectId" />
-                <button type="button" class="send-button" (click)="handleCodeRepoAdd()" [disabled]="isCodeRepoBusy || !codeRepoProjectId || !codeRepoUrl.trim() || !codeRepoConnection?.connected">
+                <button type="button" class="send-button" (click)="handleCodeRepoAdd()" [disabled]="isCodeRepoBusy || !codeRepoProjectId || !codeRepoUrl.trim() || !codeRepoConnection?.available">
                   {{ isCodeRepoAdding ? 'Adding...' : 'Add and index' }}
                 </button>
               </div>

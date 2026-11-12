@@ -7,12 +7,8 @@ public sealed class CodeRAGOptions
 {
     public bool Enabled { get; set; }
     public string StoragePath { get; set; } = "artifacts/code-knowledge";
-    public string GitHubClientId { get; set; } = "";
-    public string GitHubClientSecret { get; set; } = "";
-    /// <summary>Server-wide GitHub PAT. When set, per-user OAuth is bypassed and every user shares this token.</summary>
+    /// <summary>Server-wide GitHub PAT used for all repository access.</summary>
     public string GitHubToken { get; set; } = "";
-    public string CallbackUrl { get; set; } = "";
-    public string ReturnUrl { get; set; } = "/";
     public int RefreshMinutes { get; set; } = 60;
     public int MaxArchiveMegabytes { get; set; } = 100;
     public int MaxExtractedMegabytes { get; set; } = 500;
@@ -33,7 +29,7 @@ public sealed class CodeRAGOptions
     public CodeSemanticOptions Semantic { get; set; } = new();
 }
 
-public sealed record GitHubConnection(string UserName, long GitHubId, string Login, string ProtectedToken);
+public sealed record ManagedGitHubIdentity(long GitHubId, string Login, string ProtectedToken);
 
 public sealed record CodeRepository
 {
@@ -42,7 +38,6 @@ public sealed record CodeRepository
     public long GitHubId { get; init; }
     public string FullName { get; init; } = "";
     public string Branch { get; init; } = "";
-    public string IndexingUser { get; init; } = "";
     public bool Enabled { get; init; } = true;
     public int Revision { get; init; }
     public string Status { get; init; } = "queued";
@@ -69,7 +64,7 @@ public sealed record CodeRepositoryResponse(string Id, string ProjectId, string 
     bool Enabled, string Status, string Message, string IndexedCommit, int FileCount, int SymbolCount,
     DateTimeOffset? LastCheckedAt, DateTimeOffset? LastIndexedAt);
 
-/// <summary>Commit-pinned source evidence visible to the current GitHub user.</summary>
+/// <summary>Commit-pinned source evidence returned only after current managed-PAT access checks.</summary>
 public sealed record CodeEvidence(string RepositoryId, string ProjectId, string Repository, string Branch,
     string Commit, string FilePath, string Symbol, int StartLine, int EndLine, string Content, string SourceUrl);
 
@@ -108,7 +103,8 @@ public static class CodeRetrievalMessages
             "not-ready" => "Accessible code indexes are not ready. Indexing and refresh run in the background, not during search.",
             "failed" => "Code search could not finish. Do not interpret this as an absence of relevant code.",
             "authorization-unavailable" => "Current code access could not be verified; source evidence was withheld.",
-            "not-connected" => "GitHub is not connected.",
+            "not-connected" => "Server-managed GitHub access is unavailable or the PAT was rejected. Verify the token and organization SSO authorization.",
+            "not-configured" => "Server-managed GitHub access is not configured. Ask the administrator to configure CodeRAG:GitHubToken.",
             "disabled" => "Code retrieval is disabled.",
             "not-authenticated" => "Sign in before searching code.",
             "not-scoped" => "No application code scope was selected or resolved.",
@@ -163,7 +159,7 @@ public static class CodeUser
         : "";
 }
 
-public sealed class CodeAccessException(string message = "GitHub code access is unavailable. Reconnect GitHub or check repository permissions.", DateTimeOffset? retryAt = null) : Exception(message)
+public sealed class CodeAccessException(string message = "GitHub code access is unavailable. Check the server-managed PAT and repository permissions.", DateTimeOffset? retryAt = null) : Exception(message)
 {
     public DateTimeOffset? RetryAt { get; } = retryAt;
 }

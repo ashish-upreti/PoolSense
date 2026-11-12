@@ -6,7 +6,6 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     test.setTimeout(60000)
     await page.setViewportSize(viewport)
     let repositories: CodeRepository[] = []
-    let connected = false
     let serviceAvailable = false
     let failApplication = false
     let failDeletion = false
@@ -22,7 +21,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await page.route('**/api/**', async route => {
       const request = route.request()
       const path = new URL(request.url()).pathname
-      const repositoryPath = /^\/api\/projects\/([^/]+)\/repositories(?:\/([^/]+))?(?:\/(refresh|take-ownership))?$/.exec(path)
+      const repositoryPath = /^\/api\/projects\/([^/]+)\/repositories(?:\/([^/]+))?(?:\/refresh)?$/.exec(path)
       let body: unknown = []
       if (path === '/api/auth/session') body = { success: true, user: { username: 'alice', displayName: 'Alice', isAdmin: true, email: 'alice@example.test' } }
       else if (path === '/api/projects/groups') body = [project, otherProject].map(entry => ({ groupId: entry.projectId, displayName: entry.projectName }))
@@ -36,21 +35,9 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
       else if (path === '/api/settings/ticket-automation') body = { pollingEnabled: false, pollIntervalSeconds: 60, poolSenseEmail: false, similaritySearchLimit: 5,
         newStatusName: 'New', closedStatusName: 'Closed', email: { recipient: '', fromAddress: '', deliveryMode: 'Smtp', smtpHost: '', port: 25, timeoutMs: 30000, databaseMailProfile: '' } }
       else if (path === '/api/settings/deployment') body = { environmentLabel: 'Test', environmentName: 'Test', machineName: 'Test', poolSenseDatabaseName: 'Test', ticketSourceDatabaseName: 'Test' }
-      else if (path === '/api/github/connect') {
-        expect(serviceAvailable).toBe(true)
-        expect(request.method()).toBe('POST')
-        expect(request.headers()['x-poolsense-csrf']).toBe('1')
-        connected = true
-        body = { url: 'http://localhost:4200/' }
-      }
-      else if (path === '/api/github/connection') {
+      else if (path === '/api/github/access') {
         if (!serviceAvailable) { await route.fulfill({ status: 503, json: { title: 'Code knowledge is not enabled.', status: 503 } }); return }
-        if (request.method() === 'DELETE') {
-          connected = false
-          body = { disconnected: true, authorizationRevoked: false, warning: 'Disconnected from PoolSense. GitHub authorization may still be active.', authorizationUrl: 'https://github.com/settings/connections/applications/test-client' }
-          await route.fulfill({ json: body }); return
-        }
-        body = { connected, login: 'alice-gh' }
+        body = { configured: true, available: true, login: 'managed-github', message: '' }
       } else if (repositoryPath) {
         expect(request.headers()['x-poolsense-csrf']).toBe('1')
         const projectId = repositoryPath[1]
@@ -89,21 +76,12 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await expect(page.locator('form form')).toHaveCount(0)
     await expect(component.getByRole('alert')).toHaveText('Code knowledge is not enabled.')
     await expect(component.getByLabel('Repository URL')).toHaveCount(0)
-    await expect(component.getByRole('button', { name: 'Connect GitHub', exact: true })).toBeDisabled()
     await component.screenshot({ path: testInfo.outputPath('repository-unavailable.png') })
     serviceAvailable = true
-    await component.getByRole('button', { name: 'Reload GitHub connection', exact: true }).click()
+    await component.getByRole('button', { name: 'Reload managed GitHub access', exact: true }).click()
     await expect(component.getByRole('alert')).toHaveCount(0)
-    await expect(component.getByRole('button', { name: 'Connect GitHub', exact: true })).toBeEnabled()
-    await expect(component.getByRole('button', { name: 'Add repository', exact: true })).toHaveCount(0)
-    await component.screenshot({ path: testInfo.outputPath('repository-disconnected.png') })
-    await Promise.all([
-      page.waitForEvent('load'),
-      component.getByRole('button', { name: 'Connect GitHub', exact: true }).click(),
-    ])
-    await page.getByRole('button', { name: 'Open application configuration', exact: true }).click()
-    await editProject('Test Project')
-    await expect(component.getByText('alice-gh')).toBeVisible()
+    await expect(component.getByText('Managed access · managed-github', { exact: true })).toBeVisible()
+    await expect(component.getByRole('button', { name: 'Add repository', exact: true })).toBeVisible()
     const addRepository = component.getByRole('button', { name: 'Add repository', exact: true })
     const update = page.getByRole('button', { name: 'Update Application', exact: true })
     const rows = component.locator('.repository')
@@ -117,7 +95,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await rows.nth(1).getByLabel('Repository URL').fill(secondUrl)
     await rows.nth(1).getByLabel('Branch', { exact: true }).fill('release')
     await expect(component.getByText('Unsaved', { exact: true })).toHaveCount(2)
-    await component.getByRole('button', { name: 'Reload GitHub connection', exact: true }).click()
+    await component.getByRole('button', { name: 'Reload managed GitHub access', exact: true }).click()
     await expect(rows).toHaveCount(2)
     await expect(rows.nth(0).getByLabel('Repository URL')).toHaveValue(firstUrl)
     expect(repositories).toHaveLength(0)
@@ -196,7 +174,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await update.click()
     await expect(component.getByText('disabled', { exact: true })).toBeVisible()
     repositories = repositories.map(entry => ({ ...entry, status: entry.enabled ? 'ready' : 'disabled', indexedCommit: 'a'.repeat(40), fileCount: 3 }))
-    await component.getByRole('button', { name: 'Reload GitHub connection', exact: true }).click()
+    await component.getByRole('button', { name: 'Reload managed GitHub access', exact: true }).click()
     await expect(component.getByText('ready', { exact: true })).toHaveCount(2)
     mutations.length = 0
     await update.click()
@@ -216,7 +194,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     const removedId = repositories.find(entry => entry.projectId === 'other-project')!.id
     mutations.length = 0
     await rows.last().getByRole('button', { name: 'Remove repository', exact: true }).click()
-    await component.getByRole('button', { name: 'Reload GitHub connection', exact: true }).click()
+    await component.getByRole('button', { name: 'Reload managed GitHub access', exact: true }).click()
     await expect(rows).toHaveCount(0)
     await expect(component.getByText('Unsaved repository changes')).toBeVisible()
     expect(repositories.filter(entry => entry.projectId === 'other-project')).toHaveLength(1)
@@ -232,7 +210,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await expect(component.getByText('Unsaved repository changes')).toHaveCount(0)
     expect(mutations).toEqual(['PUT /api/projects/other-project', `DELETE /api/projects/other-project/repositories/${removedId}`])
     expect(repositories.filter(entry => entry.projectId === 'other-project')).toHaveLength(0)
-    await component.getByRole('button', { name: 'Reload GitHub connection', exact: true }).click()
+    await component.getByRole('button', { name: 'Reload managed GitHub access', exact: true }).click()
     await expect(component.getByText('No repositories configured.', { exact: true })).toBeVisible()
     await expect(rows).toHaveCount(0)
     await editProject('Test Project')
@@ -248,13 +226,11 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await expect(page.getByText('Each repository and branch can only be added once.', { exact: true })).toBeVisible()
     expect(mutations).toEqual([])
     await rows.last().getByRole('button', { name: 'Remove repository', exact: true }).click()
-    await component.getByRole('button', { name: 'Disconnect', exact: true }).click()
-    await expect(component.getByRole('button', { name: 'Connect GitHub', exact: true })).toBeVisible()
-    await expect(component.getByRole('status').filter({ hasText: 'GitHub authorization may still be active' })).toBeVisible()
-    await expect(component.getByRole('link', { name: 'Open GitHub authorization settings' })).toHaveAttribute('href', 'https://github.com/settings/connections/applications/test-client')
+    await expect(component.getByText('Managed access · managed-github', { exact: true })).toBeVisible()
+    await expect(component.getByRole('button', { name: /Connect GitHub|Disconnect/ })).toHaveCount(0)
     await expect(component.getByRole('alert')).toHaveCount(0)
-    await expect(component.getByLabel('Repository URL')).toHaveCount(0)
-    await expect(addRepository).toHaveCount(0)
+    await expect(component.getByLabel('Repository URL')).toHaveCount(3)
+    await expect(addRepository).toBeVisible()
     expect(errors).toEqual([])
   })
 }

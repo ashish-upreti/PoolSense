@@ -1,10 +1,10 @@
 import { CommonModule } from '@angular/common'
-import { ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, inject } from '@angular/core'
+import { ChangeDetectorRef, Component, ElementRef, Input, OnChanges, OnDestroy, SimpleChanges, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { createElement, GitBranch, Plus, RefreshCw, Pencil, Trash2, UserCheck, X } from 'lucide'
+import { createElement, GitBranch, Plus, RefreshCw, Pencil, Trash2 } from 'lucide'
 import { ApiService, CodeRepository } from './api.service'
 
-const repositoryIcons = { branch: GitBranch, add: Plus, refresh: RefreshCw, edit: Pencil, remove: Trash2, owner: UserCheck, cancel: X }
+const repositoryIcons = { branch: GitBranch, add: Plus, refresh: RefreshCw, edit: Pencil, remove: Trash2 }
 
 type RepositoryDraft = {
   key: string
@@ -29,16 +29,15 @@ export class RepositoryIconComponent implements OnChanges {
       <header>
         <h3><app-repo-icon name="branch"></app-repo-icon> Git repositories</h3>
         <div class="actions">
-          <span *ngIf="connected && !shared" class="login">{{ login }}</span>
-          <span *ngIf="connected && shared" class="login" title="Repositories are shared by all users through the server-configured GitHub access">Shared access</span>
-          <button *ngIf="!connected && !shared" type="button" (click)="connect()" [disabled]="disabled || !connectionAvailable"><app-repo-icon name="branch"></app-repo-icon>Connect GitHub</button>
-          <button *ngIf="connected && !shared" type="button" (click)="disconnect()" [disabled]="disabled">Disconnect</button>
-          <button type="button" title="Reload GitHub connection" aria-label="Reload GitHub connection" (click)="load()" [disabled]="disabled"><app-repo-icon name="refresh"></app-repo-icon></button>
+          <span *ngIf="accessAvailable" class="login" title="GitHub access is managed by the administrator">Managed access · {{ login }}</span>
+          <span *ngIf="accessConfigured && !accessAvailable" class="login">Managed access unavailable</span>
+          <span *ngIf="!accessConfigured" class="login">Managed access not configured</span>
+          <button type="button" title="Reload managed GitHub access" aria-label="Reload managed GitHub access" (click)="load()" [disabled]="disabled"><app-repo-icon name="refresh"></app-repo-icon></button>
         </div>
       </header>
       <p *ngIf="error" role="alert" class="error">{{ error }}</p>
-      <p *ngIf="warning" role="status" class="warning">{{ warning }} <a *ngIf="warningUrl" [href]="warningUrl" target="_blank" rel="noopener noreferrer">Open GitHub authorization settings</a></p>
-      <ng-container *ngIf="projectId && connected">
+      <p *ngIf="accessMessage" role="status" class="warning">{{ accessMessage }}</p>
+      <ng-container *ngIf="projectId && accessAvailable">
         <p *ngIf="!loading && !repositories.length">No repositories configured.</p>
         <article *ngFor="let repo of repositories; trackBy: trackRepository" class="repository">
           <div class="repo-fields">
@@ -86,17 +85,14 @@ export class RepositoryIconComponent implements OnChanges {
 export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
   @Input() projectId = ''
   @Input() saving = false
-  @Output() disconnected = new EventEmitter<void>()
   private readonly api = inject(ApiService)
   private readonly changes = inject(ChangeDetectorRef)
-  connectionAvailable = false
-  connected = false
-  shared = false
+  accessConfigured = false
+  accessAvailable = false
   login = ''
+  accessMessage = ''
   repositories: RepositoryDraft[] = []
   error = ''
-  warning = ''
-  warningUrl = ''
   busy = false
   loading = false
   private removed: CodeRepository[] = []
@@ -107,7 +103,7 @@ export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
   get disabled() { return this.busy || this.loading || this.saving }
   get hasChanges() { return this.removed.length > 0 || this.repositories.some(repo => this.isChanged(repo)) }
   ngOnChanges(changes: SimpleChanges) {
-    if (changes['projectId']) { this.repositories = []; this.removed = []; this.connected = false; void this.load() }
+    if (changes['projectId']) { this.repositories = []; this.removed = []; this.accessAvailable = false; void this.load() }
   }
   ngOnDestroy() { this.destroyed = true; this.version++; window.clearInterval(this.timer) }
   private path(id = '') { return '/projects/' + encodeURIComponent(this.projectId) + '/repositories' + (id ? '/' + encodeURIComponent(id) : '') }
@@ -119,20 +115,20 @@ export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
     let connectionLoaded = false
     this.loading = true
     try {
-      const connection = await this.api.codeRequest<{ connected: boolean; login: string; shared?: boolean }>('/github/connection')
+      const connection = await this.api.codeRequest<{ configured: boolean; available: boolean; login: string | null; message: string }>('/github/access')
       if (version !== this.version || this.destroyed) return
       connectionLoaded = true
-      this.connectionAvailable = true
-      this.connected = connection.connected
-      this.shared = connection.shared === true
-      this.login = connection.login
-      const records = this.projectId && this.connected ? await this.api.codeRequest<CodeRepository[]>(this.path()) : []
+      this.accessConfigured = connection.configured
+      this.accessAvailable = connection.available
+      this.login = connection.login ?? ''
+      this.accessMessage = connection.message
+      const records = this.projectId && this.accessAvailable ? await this.api.codeRequest<CodeRepository[]>(this.path()) : []
       if (version !== this.version || this.destroyed) return
       if (!this.hasChanges) this.repositories = records.map(record => this.draft(record))
       this.error = ''
     } catch (error) {
       if (version === this.version && !this.destroyed) {
-        if (!connectionLoaded) { this.connectionAvailable = false; this.connected = false; this.login = '' }
+        if (!connectionLoaded) { this.accessConfigured = false; this.accessAvailable = false; this.login = ''; this.accessMessage = '' }
         this.error = error instanceof Error ? error.message : 'Code knowledge is unavailable.'
       }
     } finally { if (version === this.version) this.loading = false; if (!this.destroyed) this.changes.markForCheck() }
@@ -144,21 +140,8 @@ export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
     catch (error) { this.error = error instanceof Error ? error.message : 'Repository operation failed.' }
     finally { this.busy = false; if (!this.destroyed) this.changes.markForCheck() }
   }
-  async connect() { if (!this.connectionAvailable || this.disabled) return; this.warning = ''; this.warningUrl = ''; await this.run(async () => { const result = await this.api.codeRequest<{ url: string }>('/github/connect', 'POST', {}); window.location.assign(result.url) }) }
-  async disconnect() {
-    if (this.disabled || (this.hasChanges && !window.confirm('Discard unsaved repository changes and disconnect GitHub?'))) return
-    this.warning = ''
-    this.warningUrl = ''
-    await this.run(async () => {
-      const result = await this.api.codeRequest<{ warning?: string; authorizationUrl?: string | null } | undefined>('/github/connection', 'DELETE')
-      this.repositories = []; this.removed = []; this.connected = false
-      this.warning = result?.warning ?? ''
-      this.warningUrl = this.warning && result?.authorizationUrl?.startsWith('https://github.com/') ? result.authorizationUrl : ''
-      this.disconnected.emit()
-    })
-  }
   addRepository() {
-    if (this.disabled || !this.connected) return
+    if (this.disabled || !this.accessAvailable) return
     this.repositories = [...this.repositories, { key: crypto.randomUUID(), url: '', branch: 'master', enabled: true, saved: null }]
   }
   remove(repo: RepositoryDraft) {
@@ -168,7 +151,7 @@ export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
   }
   validate() {
     if (this.busy || this.loading) throw new Error('Wait for repository status to finish loading.')
-    if (this.hasChanges && !this.connected) throw new Error('Connect GitHub before saving repository changes.')
+    if (this.hasChanges && !this.accessAvailable) throw new Error('Server-managed GitHub access must be available before saving repository changes.')
     const entries = new Set<string>()
     for (const repo of this.repositories) {
       let url: URL
@@ -182,7 +165,7 @@ export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
     }
   }
   async saveChanges(): Promise<number> {
-    if (!this.connected) return 0
+    if (!this.accessAvailable) return 0
     this.busy = true
     this.version++
     let queued = 0
