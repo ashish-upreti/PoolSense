@@ -31,6 +31,7 @@ The PAT configuration key is `CodeRAG:GitHubToken`; its environment variable equ
 
 - A `503` with `Code knowledge is not enabled.` means the API's effective `CodeRAG:Enabled` setting is false. An environment override uses `CodeRAG__Enabled=true`.
 - The Git repositories section reports whether administrator-managed access is configured and available. If it is unavailable, check the API host's `CodeRAG:GitHubToken`, token validity, repository permissions and organization SSO authorization. The status endpoint never returns the token.
+- If GitHub access reports that Windows Data Protection could not protect the CodeRAG key ring, check that the IIS application pool has **Load User Profile** enabled and that its identity can read/write the configured CodeRAG storage `keys` directory. Recycle the pool after correcting host configuration. Do not delete the existing key ring or disable DPAPI protection; existing protected data depends on those keys.
 - Missing GitHub PAT does not prevent PoolSense startup or disable Wiki/Pool features. Code retrieval and repository-management actions report that managed access is unavailable until an administrator configures it.
 
 ## Rich repository answers
