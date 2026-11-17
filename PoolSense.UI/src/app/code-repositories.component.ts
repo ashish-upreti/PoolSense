@@ -69,7 +69,7 @@ export class RepositoryIconComponent implements OnChanges {
     .repositories { padding: 18px 0; margin-top: 16px; border-block: 1px solid #89929e55; color: inherit; }
     header, .actions, .list-footer, .repo-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     header, .list-footer { justify-content: space-between; }
-    h3 { display: flex; gap: 10px; align-items: center; font-size: 15px; margin: 0; }
+    h3 { display: flex; gap: 10px; align-items: center; font-size: .9375rem; margin: 0; }
     svg { width: 18px; height: 18px; flex: 0 0 18px; }
     button { display: inline-flex; gap: 6px; align-items: center; justify-content: center; min-height: 36px; min-width: 36px; border: 1px solid #89929e88; border-radius: 4px; padding: 6px 10px; color: inherit; background: transparent; cursor: pointer; }
     button:disabled { opacity: .5; cursor: default; }
@@ -77,19 +77,19 @@ export class RepositoryIconComponent implements OnChanges {
     button:focus-visible, input:focus-visible { outline: 2px solid #168782; outline-offset: 2px; }
     .repo-fields { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 12px; align-items: end; }
     .repository-url { grid-column: 1 / -1; }
-    .login { max-width: 160px; overflow-wrap: anywhere; font-size: 13px; }
-    label { display: grid; gap: 6px; font-size: 13px; min-width: 0; }
+    .login { max-width: 160px; overflow-wrap: anywhere; font-size: .8125rem; }
+    label { display: grid; gap: 6px; font-size: .8125rem; min-width: 0; }
     input:not([type=checkbox]), select { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px; border: 1px solid #89929e88; border-radius: 4px; color: inherit; background: transparent; }
     select option { color: initial; }
     label.enabled { display: flex; align-items: center; min-height: 36px; }
     .repository { border-top: 1px solid #89929e44; margin-top: 16px; padding: 16px 0; display: grid; gap: 10px; }
-    .repo-status, .list-footer span, .hint { font-size: 12px; overflow-wrap: anywhere; }
+    .repo-status, .list-footer span, .hint { font-size: .75rem; overflow-wrap: anywhere; }
     .hint { margin: 0; opacity: .8; }
     .list-footer { margin-top: 16px; }
     .error { color: #ba493e; overflow-wrap: anywhere; }
     .warning { color: #946200; overflow-wrap: anywhere; }
     a { color: inherit; }
-    p { font-size: 13px; margin: 8px 0; }
+    p { font-size: .8125rem; margin: 8px 0; }
     @container(max-width: 480px) { .repo-fields { grid-template-columns: minmax(0, 1fr) auto; } .repo-fields > label:not(.enabled), .repo-fields > .branches { grid-column: 1 / -1; } }
   `],
 })
