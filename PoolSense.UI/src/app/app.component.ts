@@ -104,6 +104,7 @@ type CodeChatMessage = {
   isError?: boolean
   codeKnowledgeStatus?: string
   codeSearchCoverage?: CodeSearchCoverage
+  completedInMs?: number
 }
 
 type ApplicationFeedbackForm = ApplicationFeedbackRequest
@@ -1351,13 +1352,15 @@ export class AppComponent implements OnInit, OnDestroy {
     this.isCodeChatAsking = true
     this.codeChatError = ''
     this.scrollCodeChatToBottom()
+    const requestStartedAt = performance.now()
 
     try {
       const response = await this.api.askCodeChat(this.codeRepoScopeIds, question, history, this.codeChatSessionId)
+      const completedInMs = performance.now() - requestStartedAt
       this.codeChatSessionId = response.sessionId
       this.codeChatMessages = [
         ...this.codeChatMessages,
-        this.createCodeChatMessage('assistant', response.answer, response.citations, response.generatedAt, response.codeKnowledgeStatus, response.codeSearchCoverage),
+        { ...this.createCodeChatMessage('assistant', response.answer, response.citations, response.generatedAt, response.codeKnowledgeStatus, response.codeSearchCoverage), completedInMs },
       ]
       void this.loadCodeChatHistory()
     } catch (requestError) {
@@ -1388,6 +1391,11 @@ export class AppComponent implements OnInit, OnDestroy {
 
   trackCodeChatSession(_index: number, session: CodeChatSessionSummary) {
     return session.id
+  }
+
+  codeAnswerDurationLabel(message: CodeChatMessage): string | null {
+    const duration = formatAnswerDuration(message.completedInMs)
+    return duration ? `Completed in ${duration}` : null
   }
 
   private createCodeChatMessage(role: 'user' | 'assistant', text: string, citations: CodeEvidence[] = [], generatedAt = new Date().toISOString(), codeKnowledgeStatus = '', codeSearchCoverage?: CodeSearchCoverage): CodeChatMessage {
@@ -1950,6 +1958,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.expandedWorkflowActivityMessageId = this.isWorkflowActivityExpanded(messageId) ? null : messageId
   }
 
+  readonly completedDurationTitle = 'Elapsed time from sending your question to receiving this completed response.'
+
   answerDurationLabel(message: ChatMessage): string | null {
     if (message.role !== 'assistant') return null
     const clientDuration = formatAnswerDuration(message.completedInMs)
@@ -1961,7 +1971,7 @@ export class AppComponent implements OnInit, OnDestroy {
   answerDurationTitle(message: ChatMessage): string | null {
     if (message.role !== 'assistant') return null
     const clientDuration = formatAnswerDuration(message.completedInMs)
-    if (clientDuration) return 'Elapsed time from sending your question to receiving this completed response.'
+    if (clientDuration) return this.completedDurationTitle
     const serverDuration = formatAnswerDuration(message.result?.processingDurationMs)
     return serverDuration ? 'Server-measured generation time recorded when this answer was saved.' : null
   }
