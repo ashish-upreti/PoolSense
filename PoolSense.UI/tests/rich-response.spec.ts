@@ -303,33 +303,6 @@ for (const width of [1440, 390]) {
   })
 }
 
-test('repository answers show how long they took, in minutes once past sixty seconds', async ({ page }) => {
-  const errors = await fixture(page, 'Timed repository answer.')
-  let release: (() => void) | undefined
-  await page.route('**/api/code-chat/ask', async route => {
-    await new Promise<void>(resolve => { release = resolve })
-    await route.fulfill({ json: { projectId: 'test-project', sessionId: 'new-code', question: 'How long?', answer: 'Timed repository answer.', citations: [], generatedAt: now } })
-  })
-  await page.clock.install()
-  await page.goto(process.env['POOLSENSE_UI_TEST_URL'] ?? 'http://localhost:4200')
-  await page.getByRole('button', { name: 'Open code repositories', exact: true }).click()
-  await page.locator('#code-chat-question').fill('How long?')
-  await page.locator('.code-rag-composer').getByRole('button', { name: 'Send', exact: true }).click()
-  await expect.poll(() => typeof release).toBe('function')
-  const duration = page.locator('.code-rag-transcript .message-bubble-assistant .answer-duration')
-  await expect(duration).toHaveCount(0)
-  await page.clock.fastForward(72_000)
-  release!()
-  // Real time also passes while the fixture responds, so allow a few seconds past the 72 s jump.
-  await expect(duration.locator('.answer-duration-text')).toHaveText(/^Completed in 1 min 1[2-9] s$/)
-  await expect(duration).toHaveAttribute('title', 'Elapsed time from sending your question to receiving this completed response.')
-
-  await page.getByRole('button', { name: 'Saved rich code', exact: false }).click()
-  await expect(page.locator('.code-rag-transcript .message-bubble-user')).toContainText('Explain architecture')
-  await expect(duration).toHaveCount(0)
-  expect(errors).toEqual([])
-})
-
 for (const surface of ['main', 'repository']) {
   test(`route placeholders render literally in ${surface} live and restored diagrams`, async ({ page }) => {
     test.setTimeout(90000)

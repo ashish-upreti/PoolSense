@@ -46,9 +46,6 @@ labelled conceptual diagrams. Only Markdown source is stored; HTML/SVG is
 sanitized again when displayed.
 Paragraphs and headings use explicit vertical spacing in the shared renderer,
 including restored history and narrow/mobile layouts.
-Each live repository chat answer shows its browser-measured completion time
-("Completed in 42.5 s", or "Completed in 1 min 12 s" from one minute onward).
-The time is not stored, so answers reopened from saved history show no duration.
 Flowchart rectangle labels containing route placeholders or parentheses (for
 example `B[POST /pool/{poolId}/troubleshoot]`) are double-quoted in a validated
 rendering copy so Mermaid treats them as text. A rendering notice identifies this
