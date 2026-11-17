@@ -5054,6 +5054,10 @@
   letter-spacing: 0;
 }
 
+.code-rag-message-header {
+  margin-bottom: 0.45rem;
+}
+
 .code-rag-message-error {
   border-color: rgba(239, 68, 68, 0.35);
   background: rgba(239, 68, 68, 0.08);

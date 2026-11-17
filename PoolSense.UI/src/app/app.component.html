@@ -1638,7 +1638,17 @@
                     </article>
 
                     <article *ngIf="message.role === 'assistant'" class="message-bubble message-bubble-assistant" [class.code-rag-message-error]="message.isError">
-                      <p class="message-label">CodeRAG <span class="code-rag-message-time">{{ message.generatedAt | date: 'shortTime' }}</span></p>
+                      <div class="message-bubble-header code-rag-message-header">
+                        <p class="message-label">CodeRAG <span class="code-rag-message-time">{{ message.generatedAt | date: 'shortTime' }}</span></p>
+                        <span *ngIf="codeAnswerDurationLabel(message) as durationLabel" class="answer-duration" [attr.title]="completedDurationTitle">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9"></circle>
+                            <path d="M12 7v5l3 2"></path>
+                          </svg>
+                          <span class="answer-duration-text">{{ durationLabel }}</span>
+                          <span class="sr-only">{{ completedDurationTitle }}</span>
+                        </span>
+                      </div>
                       <app-rich-response class="message-body" [content]="message.text"></app-rich-response>
                       <app-code-evidence *ngIf="message.citations.length > 0" class="code-rag-citations" [documents]="message.citations" [status]="message.codeKnowledgeStatus ?? ''" [coverage]="message.codeSearchCoverage"></app-code-evidence>
                     </article>
