@@ -124,6 +124,44 @@ test('main answers keep inline citations and rail sources without a duplicate so
   expect(errors).toEqual([])
 })
 
+test('repository panels stay stationary at their shared edge and leave room for conversation', async ({ page }) => {
+  await setup(page)
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.goto('http://localhost:4200')
+  await page.getByRole('button', { name: 'Open code repositories', exact: true }).click()
+  const controls = page.locator('.code-rag-controls')
+  const conversation = page.locator('.code-rag-chat-card')
+  await expect(controls.getByRole('combobox', { name: 'Application', exact: true })).toBeEnabled()
+  await page.mouse.move(0, 0)
+  const beforeControls = await controls.boundingBox()
+  const beforeConversation = await conversation.boundingBox()
+  expect(beforeControls).not.toBeNull()
+  expect(beforeConversation).not.toBeNull()
+  if (!beforeControls || !beforeConversation) throw new Error('Code repository panels are missing')
+
+  for (const y of [beforeControls.y + beforeControls.height - 1, beforeConversation.y + 1]) {
+    await page.mouse.move(beforeControls.x + beforeControls.width / 2, y)
+    // Sample across several hover-transition durations with the pointer stationary.
+    for (let sample = 0; sample < 5; sample++) {
+      await page.waitForTimeout(100)
+      expect(await controls.boundingBox()).toEqual(beforeControls)
+      expect(await conversation.boundingBox()).toEqual(beforeConversation)
+    }
+  }
+
+  expect(beforeConversation.y).toBeLessThan(240)
+  await expect(page.locator('.code-rag-composer')).toBeInViewport({ ratio: 1 })
+  await expect(page.locator('.code-rag-transcript')).toBeInViewport({ ratio: 1 })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await conversation.scrollIntoViewIfNeeded()
+  const bounds = await conversation.boundingBox()
+  expect(bounds).not.toBeNull()
+  if (!bounds) throw new Error('Conversation panel is missing')
+  expect(bounds.x).toBeGreaterThanOrEqual(0)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390)
+})
+
 test('repository live and restored answers expose shared source links without expanding excerpts', async ({ page }) => {
   const errors = await setup(page)
   await page.goto('http://localhost:4200')

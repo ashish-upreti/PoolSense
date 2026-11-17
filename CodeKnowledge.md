@@ -9,6 +9,7 @@ Code knowledge is disabled by default. Deploy and verify the .NET 10 upgrade bef
 3. Provide the non-secret settings below. Existing local appsettings files are ignored by Git.
 4. Use one always-running Windows API instance, with persistent storage and the same Windows service identity. Grant only that identity and administrators access to the storage directory. Restart the API after configuration changes.
 5. Sign in to PoolSense, open Application Configuration, and edit a saved application. GitHub access is managed by the administrator; add repositories and optional branches in the application's Git repositories section. Click Update Application to save changes and queue indexing. New repositories default to `master`; a blank branch also resolves to `master`.
+6. Open Code Repositories to chat against the indexed source. The application scope works like the main search scope: it defaults to **All Applications**, or pick one application from the dropdown and use **+ Add** to include more. Answers draw on the indexed repositories of every application in scope, and saved conversations are kept per exact scope (single-application conversations stay visible when only that application is selected). Re-run [database/coderag-bootstrap.sql](database/coderag-bootstrap.sql) on existing databases to add the `scope_json` column this relies on.
 
 ```json
 {
@@ -43,6 +44,44 @@ behavior. Charts and diagrams load only when needed. Numeric charts require
 supplied quantitative evidence; qualitative source relationships should be
 labelled conceptual diagrams. Only Markdown source is stored; HTML/SVG is
 sanitized again when displayed.
+Paragraphs and headings use explicit vertical spacing in the shared renderer,
+including restored history and narrow/mobile layouts.
+Flowchart rectangle labels containing route placeholders or parentheses (for
+example `B[POST /pool/{poolId}/troubleshoot]`) are double-quoted in a validated
+rendering copy so Mermaid treats them as text. A rendering notice identifies this
+adjustment; saved Markdown, Source, Copy and source downloads remain unchanged.
+This also applies to restored history. Existing quoted labels and other node
+shapes/diagram types are not rewritten; unsafe content still fails validation.
+
+Repository process and relationship requests (for example, "Show the scheduler
+workflow" or "Draw the dependencies") use the same structured graph validation
+as Issues. The model returns an explanation plus nodes and edges referencing
+current code evidence IDs (`C1`, `C2`, etc.). The server checks graph structure
+and source references, generates bounded Mermaid, and removes model-authored
+Mermaid/chart fences from that explanation. Citations remain outside the graph;
+the renderer's restrictions on directives, links, HTML and custom styling remain
+unchanged. Graphs are limited to 12 nodes and 20 edges. Missing connections are
+shown as explicit gaps, not invented links; invalid or unsupported graphs produce
+an unavailable notice. Reference validation does not prove that an edge is
+semantically correct or that indexed code is deployed.
+
+The final graph-containing Markdown is saved with the conversation, so new
+answers and restored history use the same renderer. Ordinary non-graph answers
+keep their existing Markdown behavior. Existing saved answers are not rewritten:
+if an old answer reports "Unsafe diagram", ask the graph question again after
+deploying the updated API to generate a validated replacement.
+
+Follow-up requests send a bounded copy of earlier messages: each history entry
+is limited to the API's 8,000-character `Content` limit, with a truncation marker
+when necessary. The current question and full displayed/stored answers are not
+shortened. This also applies when continuing a restored conversation.
+
+Assembled generic LLM prompts bind source/history/question text into a fixed
+Semantic Kernel user-message template. Retrieved code containing `{{...}}` or XML
+message markup stays literal text rather than being parsed as template functions
+or new chat messages. This applies to repository answers and bounded knowledge
+generation; agents with intentional prompt-template variables keep their existing
+template behavior. Embedding settings do not need to be disabled for this fix.
 
 Code citations use clickable Markdown `[path:line-range](SourceUrl)` with the
 exact retrieved, commit-pinned HTTPS URL; prompts never synthesize links from
@@ -117,7 +156,7 @@ extracted-byte cap plus 50,000-entry/128-level bounds. If the branch advances du
 a build, the completed pinned snapshot is served as queued/stale while another
 background refresh is scheduled.
 
-Preparation version 5 upgrades older ready generations through this same bounded
+Preparation version 6 upgrades older ready generations through this same bounded
 background queue, even before their next hourly head check. Each job still checks
 current indexing access and the branch head. New-version incomplete preparations
 retain their normal retry/backoff interval instead of retrying every scheduler tick.
@@ -130,10 +169,16 @@ explicit and eligible for the normal bounded retry.
 Activating `CodeRAG:Semantic:Enabled` also schedules previously disabled or missing
 ready semantic artifacts before the next hourly check. Failed/partial attempts
 retain normal retry backoff; activation never starts indexing from a query.
-This checkout explicitly enables semantic retrieval in `PoolSense.Api/appsettings.json`
-with repo-adaptive total targets, a separate 64-new-embedding batch limit,
-2,000-character inputs and the unchanged 1,536-dimensional embedding profile.
-Routing and paid OKF explanation generation remain explicitly disabled.
+This checkout enables semantic search and adaptive coverage in
+`PoolSense.Api/appsettings.json`. Keyword/symbol/graph retrieval remains active;
+semantic matches supplement it rather than replace it. Repository routing and
+paid OKF explanations remain disabled. Check effective configuration (including
+environment overrides); `CodeRAG__Semantic__Enabled=false` disables semantic work.
+After deploying and restarting the API, the worker prepares missing vectors in
+bounded background batches. This sends redacted source excerpts and semantic
+queries to the configured embedding provider and can incur usage costs. Existing
+lexical indexes stay searchable while vector coverage grows; restarting does not
+mean all repositories have completed semantic preparation.
 
 Code retrieval searches at most three repositories concurrently by default.
 The search deadline is 20 seconds; a final access/configuration recheck has a
@@ -272,11 +317,13 @@ no network traversal or broad import/management UI.
 
 ### Optional semantic retrieval
 
-`Semantic.Enabled` defaults to **false**. Enabling it uses the existing configured
+The options-class fallback for `Semantic.Enabled` is **false**, but this checkout's
+base configuration explicitly sets it to **true**, with adaptive coverage enabled.
+It uses the existing configured
 NYRA embedding provider/model (`text-embedding-3-small` in the current setup),
 with the existing 1,536 dimensions; it does not switch models or add a new service.
 Fixed legacy deployments retain their configured total `MaxChunks` (64 by default).
-This checkout opts into `AdaptiveCoverageEnabled`, using a repository-size target
+Opting into `AdaptiveCoverageEnabled` uses a repository-size target
 bounded by an explicit total ceiling. Total coverage is separate from the budget:
 each background batch embeds at most **64 new chunks**, then publishes a usable
 partial generation. Matching existing vectors are reused, so later batches
@@ -450,7 +497,7 @@ repository refresh action to prepare artifacts incrementally.
       "LlmTimeoutSeconds": 30
     },
     "Semantic": {
-      "Enabled": false,
+      "Enabled": true,
       "AdaptiveCoverageEnabled": true,
       "MaxChunks": 768,
       "SmallRepositoryTarget": 128,
@@ -460,6 +507,7 @@ repository refresh action to prepare artifacts incrementally.
       "MediumRepositoryThreshold": 4096,
       "BatchCooldownSeconds": 300,
       "MaxNewEmbeddingsPerBuild": 64,
+      "EmbeddingBatchSize": 8,
       "MaxTextCharacters": 2000,
       "Dimensions": 1536,
       "MaxManifestBytes": 8388608
@@ -470,7 +518,7 @@ repository refresh action to prepare artifacts incrementally.
 
 Existing SQLite indexes remain searchable immediately; additive snapshot artifacts
 and preparation-profile markers are built in the background. No destructive
-SQLite schema migration, source-repository modification, new database schema or
+SQLite schema migration, source-repository modification, new SQL Server schema or
 cloud account is needed. The existing `ContextCharacters` (24,000 default),
 archive/extracted-size limits and refresh interval still apply.
 
@@ -494,8 +542,9 @@ not proof that overall code recall increased. Warm knowledge reads loaded
 source corroboration add work; timings do not establish a universal speedup.
 The separate same-fixture routing comparison retains all current access checks
 and broad fallback, but gives no production justification for enabling routing.
-Routing and paid enrichment remain disabled. Semantic retrieval defaults off for
-new deployments; this checkout explicitly enables it in its local configuration.
+Routing and paid enrichment remain disabled. Semantic retrieval and adaptive
+coverage are enabled in this checkout's base configuration; deployments can
+explicitly disable them through configuration overrides.
 
 `CodeRetrievalEvaluationTests` freezes the previous sequential/head-check/equal-budget
 algorithm before refactoring. `CodeRetrievalImprovementsTests` compares the same
@@ -542,15 +591,73 @@ to production databases.
 
 ## Index Lifecycle
 
+- Build prerequisites: install Node.js on the indexing host and run
+  `npm ci --prefix PoolSense.CodeRAG\Indexing\TypeScript --ignore-scripts` from the
+  repository root before building/publishing. The pinned TypeScript 5.9.3 compiler
+  and trusted parser are copied into build/publish output. Indexed repositories'
+  packages, plugins, configs and scripts are not executed. Missing Node/compiler
+  fails indexing explicitly and retains the previous usable snapshot.
+- Preparation version 6 adds content-hash parse caches, prepared SQLite writes,
+  foreign-key/declaration lookup indexes and TypeScript relationships. Unchanged
+  files reuse parsed declarations; changed/deleted files trigger global relinking
+  against the current declarations. Graph and FTS rows are still rewritten into
+  an immutable snapshot: this is incremental parsing, not an in-place row delta.
+  Older C# snapshots remain searchable while background upgrades run. TypeScript
+  cache files live alongside the database; direct library callers placing the
+  database inside the source tree get an explicit temporary-cache warning instead.
 - New/updated repository registrations are durable queued work in SQL. A single hosted worker checks for queued/due work every ten seconds; all actual branch checks are scheduled hourly by default.
 - The worker checks the configured branch SHA. An unchanged commit with a valid index is reused without downloading or parsing. A changed commit downloads the exact GitHub commit archive and rebuilds that repository's index. Missing/incompatible indexes are rebuilt as recovery even if the commit is unchanged.
 - GitHub archive APIs avoid ambient Git credentials, repository hooks and checkout scripts; Git is not required for this integration. Submodules and Git LFS objects are not expanded. Only github.com repositories are supported in this version.
-- Archives and extracted bytes are bounded; path traversal is rejected and symlinks are skipped. C# declarations and syntax-scoped graph relations are retained; Python, TypeScript/JavaScript, HTML/CSS/SCSS, Markdown and SQL are searchable source chunks. Files over 2 MB and build/dependency directories are skipped.
+- Archives and extracted bytes are bounded; path traversal is rejected and symlinks are skipped. C# and TypeScript/JavaScript declarations and syntax-scoped graph relations are retained; Python, HTML/CSS/SCSS, Markdown and SQL remain searchable source chunks. Files over 2 MB and build/dependency directories are skipped. TypeScript imports and resolvable calls carry `typescript-syntax` provenance; unresolved calls are not invented.
 - Each rebuild creates a separate SQLite snapshot. Publication uses a revision check; removed or reconfigured repositories cannot publish obsolete results. Queries read a coherent snapshot and cite immutable GitHub commit/file/line links.
 - Failed refreshes retain the last successful same-configuration index. Authorized users can still receive that evidence with a stale status. Rate-limit reset/Retry-After times postpone retries when later than the normal interval. Builds have a 15-minute deadline.
 - Queued/interrupted work is recovered after restart. The worker cleans abandoned generations and removed registrations' files. Storage must have enough capacity for current snapshots plus a staged build; set operating-system quotas and monitor disk usage.
 - The configured branch stays pinned by name; changing a repository's default branch does not silently change an existing registration. Edit its branch and click Update Application to switch branches. Updating an unchanged repository checks for new commits rather than unconditionally rebuilding.
 - Hourly checking is not an exact freshness guarantee: updates become searchable after the next successful check and build. Keep IIS/app hosting active (account for idle shutdown/recycling); the worker catches up on restart.
+
+## Query Planning and Performance
+
+- Short dependent follow-ups include the previous user question before a single
+  retrieval pass. Assistant hypotheses are not promoted into search evidence.
+- Queries are classified as `symbol`, `concept` or `workflow`. Exact identifiers
+  use indexed symbol-name lookup and skip query embeddings when an exact match is
+  found. Symbol queries cap candidates at 12 per repository, evidence at 6 spans
+  and context at 12,000 characters (or lower configured limits). Concept/workflow
+  queries retain the configured budgets and optional semantic fallback.
+- With `RepositoryRoutingEnabled` enabled, authorized repository/knowledge scores
+  determine a stable shortlist, independent of request completion order. Workflow
+  questions and insufficient term coverage broaden the search. Routing defaults
+  off; it never bypasses authorization or final snapshot/configuration checks.
+- Workflow/graph evidence includes bounded indexed call/import/inheritance
+  relationships with source/target paths, lines and resolution strength. These
+  count against the context budget. They are syntax-derived evidence, not proof
+  of runtime behavior. Safe Mermaid generation still validates source references.
+- Graph expansion looks up incoming/outgoing edges separately through the existing
+  source/target indexes, avoiding repository-wide edge scans for each hop. This
+  query-only fix also applies to existing snapshots; reindexing is not required.
+  Authorization coverage tracks completed access checks separately from source
+  search, so a later graph timeout does not imply access checks were unfinished.
+  Deadline warnings log the effective limit and stage timings without query/source
+  text; inspect these before increasing `SearchDeadlineSeconds` further.
+- Semantic indexing batches up to `Semantic.EmbeddingBatchSize` inputs per provider
+  request (default 8, range 1-16), within the existing total/new-vector/manifest
+  budgets. Completed batches checkpoint for reuse after failures; failed batches
+  remain explicit. Providers without batch support retain serial behavior.
+- Repository answers expose `timingsMs` for scope, retrieval, generation and
+  history persistence. `codeSearchCoverage` includes `queryKind` and retrieval
+  stage `timingsMs`; preparation manifests/logs include download/index/knowledge/
+  semantic durations and core parsed/reused file counts. The `PoolSense.CodeRAG`
+  meter emits `coderag.stage.duration` in milliseconds. Parallel stage durations
+  are summed work, not additive wall-clock latency; compare the `total` separately.
+
+The synthetic 150-file/3,000-method fixture measured full indexing at 1.99s before
+and 1.56s after, and a one-file refresh at 6.48s before and 1.93s after (149 files
+reused). Exact-symbol lexical median was 106ms before and 93ms after; cross-repo
+latency was essentially unchanged (98ms/100ms). Exact/cross-repository recall
+remained 1, irrelevant/out-of-scope results stayed empty, and mock semantic search
+recovered the business-paraphrase fixture. These are noisy local synthetic
+measurements with mocked network/embedding providers, not production guarantees;
+measure real stage latency and answer quality on representative repositories.
 
 ## Storage and Operations
 

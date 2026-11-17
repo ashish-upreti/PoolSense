@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
-import { richBlocks, validateChart, validateMermaid } from '../src/app/rich-response'
+import { prepareMermaid, richBlocks, validateChart, validateMermaid } from '../src/app/rich-response'
 
 const fence = (language: string, value: string) => '```' + language + '\n' + value + '\n```'
 const chart = (type: string) => JSON.stringify(type === 'histogram'
@@ -109,7 +109,20 @@ for (const source of [
   'flowchart LR\n A["<img src=x onerror=alert(1)>"]',
   'flowchart LR\n' + 'A-->B\n'.repeat(101),
   'architecture-beta\nservice evil',
-]) test(`rejects unsafe/oversized diagram ${source.slice(0, 20)}`, () => { expect(() => validateMermaid(source)).toThrow() })
+]) test(`rejects unsafe/oversized diagram ${source.slice(0, 20)}`, () => {
+  expect(() => validateMermaid(source)).toThrow()
+  expect(() => prepareMermaid(source)).toThrow()
+})
+test('route placeholders and parentheses are quoted only in plain flowchart rectangles', () => {
+  const source = 'flowchart TD\n A[Submit question] --> B[POST /pool/{poolId}/troubleshoot (stream)]\n B --> C[Read response (NDJSON)]'
+  expect(prepareMermaid(source)).toBe('flowchart TD\n A[Submit question] --> B["POST /pool/{poolId}/troubleshoot (stream)"]\n B --> C["Read response (NDJSON)"]')
+  const quoted = 'graph LR\n A["Literal B[POST /pool/{id}]"] --> B["POST /pool/{poolId}/troubleshoot"]'
+  expect(prepareMermaid(quoted)).toBe(quoted)
+  const shapes = 'flowchart TD\n A[(Database)] --> B[[Read response]]\n B --> C[/Input/]\n C --> D{Ready?}'
+  expect(prepareMermaid(shapes)).toBe(shapes)
+  const sequence = 'sequenceDiagram\n participant API\n API->>API: POST /pool/{poolId}/troubleshoot'
+  expect(prepareMermaid(sequence)).toBe(sequence)
+})
 test('GFM and verbatim code are split once without altering code', () => {
   const blocks = richBlocks(markdown)
   expect(blocks.filter(block => block.kind === 'chart')).toHaveLength(5)
@@ -232,6 +245,144 @@ test('repository live and restored chat use the same visual renderer', async ({ 
   await transcript.screenshot({ path: testInfo.outputPath('rich-repository.png') })
   expect(errors).toEqual([])
 })
+
+test('repository source-referenced graph renders without unsafe Mermaid warnings and survives history', async ({ page }) => {
+  test.setTimeout(90000)
+  const sourceUrl = 'https://github.com/org/repo/blob/abc123/src/Scheduler.cs#L1-L10'
+  const source = '## Process flow\n\n' + fence('mermaid',
+    'flowchart TD\n  p_run["Run scheduler"]\n  p_save["Save work"]\n  p_run --> p_save\n') +
+    `\n\nSource evidence: [src/Scheduler.cs:1-10](<${sourceUrl}>)\n\nThe scheduler saves work.`
+  const block = richBlocks(source).find(block => block.kind === 'mermaid')!
+  expect(() => validateMermaid(block.source)).not.toThrow()
+  const errors = await fixture(page, source)
+  await page.goto(process.env['POOLSENSE_UI_TEST_URL'] ?? 'http://localhost:4200')
+  await page.getByRole('button', { name: 'Open code repositories', exact: true }).click()
+  await page.locator('#code-chat-question').fill('Show the scheduler workflow')
+  await page.locator('.code-rag-composer').getByRole('button', { name: 'Send', exact: true }).click()
+  const transcript = page.locator('.code-rag-transcript')
+  await expect(transcript.locator('.rich-diagram svg')).toHaveCount(1, { timeout: 60000 })
+  await expect(transcript.locator('.rich-diagram svg')).toContainText('Run scheduler')
+  await expect(transcript.locator('.rich-error')).toHaveCount(0)
+  await expect(transcript.getByRole('link', { name: 'src/Scheduler.cs:1-10' })).toHaveAttribute('href', sourceUrl)
+  await page.getByRole('button', { name: 'Saved rich code', exact: false }).click()
+  await expect(transcript.locator('.rich-diagram svg')).toHaveCount(1)
+  await expect(transcript.locator('.rich-error')).toHaveCount(0)
+  await expect(transcript).toContainText('The scheduler saves work.')
+  expect(errors).toEqual([])
+})
+
+for (const width of [1440, 390]) {
+  test(`answer paragraphs and headings retain readable gaps at ${width}px, live and restored`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const source = '## Overview\n\nFirst explanation paragraph.\n\nSecond explanation paragraph.\n\n### Details\n\nFurther explanation.'
+    const errors = await fixture(page, source)
+    await page.goto(process.env['POOLSENSE_UI_TEST_URL'] ?? 'http://localhost:4200')
+    await page.getByRole('button', { name: 'Open code repositories', exact: true }).click()
+    await page.locator('#code-chat-question').fill('Explain the repository')
+    await page.locator('.code-rag-composer').getByRole('button', { name: 'Send', exact: true }).click()
+    const response = page.locator('.code-rag-transcript .rich-response')
+    for (const restored of [false, true]) {
+      if (restored) await page.getByRole('button', { name: 'Saved rich code', exact: false }).click()
+      await expect(response.locator('h3')).toHaveText('Details')
+      await response.scrollIntoViewIfNeeded()
+      const gaps = await response.evaluate(element => {
+        const paragraphs = element.querySelectorAll('p')
+        const heading = element.querySelector('h3')!.getBoundingClientRect()
+        return {
+          rem: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+          paragraphs: paragraphs[1].getBoundingClientRect().top - paragraphs[0].getBoundingClientRect().bottom,
+          beforeHeading: heading.top - paragraphs[1].getBoundingClientRect().bottom,
+          afterHeading: paragraphs[2].getBoundingClientRect().top - heading.bottom,
+        }
+      })
+      expect(gaps.paragraphs).toBeGreaterThanOrEqual(.75 * gaps.rem)
+      expect(gaps.beforeHeading).toBeGreaterThanOrEqual(1.25 * gaps.rem)
+      expect(gaps.afterHeading).toBeGreaterThanOrEqual(.5 * gaps.rem)
+    }
+    expect(errors).toEqual([])
+  })
+}
+
+for (const surface of ['main', 'repository']) {
+  test(`route placeholders render literally in ${surface} live and restored diagrams`, async ({ page }) => {
+    test.setTimeout(90000)
+    const diagram = 'flowchart TD\n A[Submit question] --> B[POST /pool/{poolId}/troubleshoot (stream)]\n B --> C[Read response (NDJSON)]'
+    const errors = await fixture(page, fence('mermaid', diagram))
+    await page.goto(process.env['POOLSENSE_UI_TEST_URL'] ?? 'http://localhost:4200')
+    if (surface === 'repository') {
+      await page.getByRole('button', { name: 'Open code repositories', exact: true }).click()
+      await page.locator('#code-chat-question').fill('Explain the troubleshoot endpoint')
+      await page.locator('.code-rag-composer').getByRole('button', { name: 'Send', exact: true }).click()
+    } else {
+      await page.locator('#incident-input').fill('Explain the troubleshoot endpoint')
+      await page.locator('.composer-poolsense-button').click()
+    }
+    const response = page.locator(surface === 'repository' ? '.code-rag-transcript' : '.detailed-analysis-content')
+    await expect(response.locator('.rich-diagram svg')).toHaveCount(1, { timeout: 60000 })
+    const endpointLabel = response.locator('.rich-diagram svg g.node').filter({ hasText: '/pool/{poolId}/troubleshoot' })
+    await expect(endpointLabel).toHaveText(/^POST\s*\/pool\/\{poolId\}\/troubleshoot\s+\(stream\)$/)
+    await expect(response.locator('.rich-error')).toHaveCount(0)
+    const block = response.locator('app-rich-block').first()
+    await block.getByRole('button', { name: 'Source', exact: true }).click()
+    await expect(block.locator('pre code')).toHaveText(diagram)
+    if (surface === 'repository') {
+      await page.getByRole('button', { name: 'Saved rich code', exact: false }).click()
+    } else {
+      await page.reload()
+      await page.getByRole('button', { name: 'Saved rich investigation', exact: false }).click()
+    }
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => { document.documentElement.dataset['theme'] = theme }, theme)
+      await expect(response.locator('.rich-diagram svg')).toHaveCount(1)
+      await expect(endpointLabel).toHaveText(/^POST\s*\/pool\/\{poolId\}\/troubleshoot\s+\(stream\)$/)
+    }
+    await expect(response.locator('.rich-error')).toHaveCount(0)
+    expect(errors).toEqual([])
+  })
+}
+
+for (const restored of [false, true]) {
+  for (const length of [8000, 8001, 16000]) {
+    test(`repository followup bounds ${length}-character ${restored ? 'restored' : 'live'} answer history`, async ({ page }) => {
+      const longAnswer = 'Previous explanation. ' + 'x'.repeat(length - 43) + ' End of saved answer.'
+      expect(longAnswer.length).toBe(length)
+      const errors = await fixture(page, longAnswer)
+      await page.goto(process.env['POOLSENSE_UI_TEST_URL'] ?? 'http://localhost:4200')
+      await page.getByRole('button', { name: 'Open code repositories', exact: true }).click()
+      if (restored) {
+        await page.getByRole('button', { name: 'Saved rich code', exact: false }).click()
+      } else {
+        await page.locator('#code-chat-question').fill('Explain the scheduler')
+        await page.locator('.code-rag-composer').getByRole('button', { name: 'Send', exact: true }).click()
+      }
+      const transcript = page.locator('.code-rag-transcript')
+      await expect(transcript).toContainText(longAnswer)
+
+      await page.route('**/api/code-chat/ask', async route => {
+        const request = route.request().postDataJSON()
+        if (request.history.some((turn: { content: string }) => turn.content.length > 8000)) {
+          await route.fulfill({ status: 400, json: { message: "The field Content must be a string or array type with a maximum length of '8000'." } })
+          return
+        }
+        await route.fulfill({ json: { projectId: 'test-project', sessionId: 'followup-code', question: request.question, answer: 'Follow-up accepted.', citations: [], generatedAt: now } })
+      })
+      const sent = page.waitForRequest(request => new URL(request.url()).pathname === '/api/code-chat/ask' && request.method() === 'POST')
+      await page.locator('#code-chat-question').fill('Why?')
+      await page.locator('.code-rag-composer').getByRole('button', { name: 'Send', exact: true }).click()
+      const payload = (await sent).postDataJSON()
+      const priorAnswer = payload.history.find((turn: { role: string }) => turn.role === 'assistant')
+      expect(payload.question).toBe('Why?')
+      expect(payload.sessionId).toBe(restored ? 'saved-code' : 'new-code')
+      expect(priorAnswer.content.length).toBeLessThanOrEqual(8000)
+      if (length <= 8000) expect(priorAnswer.content).toBe(longAnswer)
+      else expect(priorAnswer.content).toBe(longAnswer.slice(0, 8000 - '\n[Earlier message truncated]'.length) + '\n[Earlier message truncated]')
+      await expect(transcript).toContainText('Follow-up accepted.')
+      await expect(transcript).toContainText(longAnswer)
+      await expect(transcript.locator('.code-rag-message-error')).toHaveCount(0)
+      expect(errors).toEqual([])
+    })
+  }
+}
 
 test('saved report and pool followup render actual visuals', async ({ page }, testInfo) => {
   test.setTimeout(120000)

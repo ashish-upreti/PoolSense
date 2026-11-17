@@ -34,6 +34,15 @@ BEGIN
     CREATE INDEX IX_code_chat_sessions_user ON dbo.code_chat_sessions(username, project_id, updated_at DESC);
 END;
 
+-- Multi-application conversations: project_id stays populated for single-application sessions;
+-- scope_json holds the sorted project-id array for multi-application sessions ('[]' = every application).
+IF COL_LENGTH(N'dbo.code_chat_sessions', N'scope_json') IS NULL
+BEGIN
+    ALTER TABLE dbo.code_chat_sessions ALTER COLUMN project_id nvarchar(128) NULL;
+    ALTER TABLE dbo.code_chat_sessions ADD scope_json nvarchar(max) NULL
+        CONSTRAINT CK_code_chat_sessions_scope_json CHECK (scope_json IS NULL OR ISJSON(scope_json)=1);
+END;
+
 IF OBJECT_ID(N'dbo.code_chat_messages', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.code_chat_messages (

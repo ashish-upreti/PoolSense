@@ -33,10 +33,15 @@ public interface IEmbeddingService
     Task<float[]> GenerateEmbedding(string text);
 }
 
+public interface IEmbeddingBatchService
+{
+    Task<IReadOnlyList<float[]>> GenerateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken);
+}
+
 /// <summary>
 /// Uses the configured embedding generator to create vector representations of text.
 /// </summary>
-public class EmbeddingService : IEmbeddingService
+public class EmbeddingService : IEmbeddingService, IEmbeddingBatchService
 {
     public string Profile
     {
@@ -172,6 +177,31 @@ public class EmbeddingService : IEmbeddingService
     /// <param name="text">The text to embed.</param>
     /// <returns>The embedding vector.</returns>
     public Task<float[]> GenerateEmbedding(string text) => GenerateEmbedding(text, CancellationToken.None);
+
+    public async Task<IReadOnlyList<float[]>> GenerateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(texts);
+        if (texts.Count is < 1 or > 16) throw new ArgumentOutOfRangeException(nameof(texts), "Embedding batches contain 1-16 texts.");
+        cancellationToken.ThrowIfCancellationRequested();
+        var stopwatch = Stopwatch.StartNew();
+        var input = string.Join("\n", texts);
+        try
+        {
+            var generated = await SemanticKernelRetryHelper.ExecuteWithDeploymentRetryAsync(
+                () => _embeddingGenerator.GenerateAsync(texts, new EmbeddingGenerationOptions { Dimensions = 1536 }, cancellationToken), cancellationToken);
+            if (generated.Count != texts.Count) throw new InvalidDataException("Embedding batch response count does not match its inputs.");
+            var vectors = generated.Select(embedding => embedding.Vector.ToArray()).ToArray();
+            await TryLogUsageAsync(input, generated, 1536, stopwatch, true, "");
+            _logger.LogInformation("Generated embedding batch of {Count} in {DurationMs}ms.", vectors.Length, stopwatch.Elapsed.TotalMilliseconds);
+            return vectors;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            await TryLogUsageAsync(input, null, null, stopwatch, false, exception.Message);
+            throw;
+        }
+    }
 
     public async Task<float[]> GenerateEmbedding(string text, CancellationToken cancellationToken)
     {

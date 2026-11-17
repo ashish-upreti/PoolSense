@@ -9,4 +9,12 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Indexing\TypeScript\parser.cjs;Indexing\TypeScript\package.json;Indexing\TypeScript\package-lock.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="Indexing\TypeScript\node_modules\typescript\lib\typescript.js;Indexing\TypeScript\node_modules\typescript\package.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="CheckTypeScriptCompiler" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)\Indexing\TypeScript\node_modules\typescript\lib\typescript.js')"
+           Text="Install the trusted indexing compiler first: npm ci --prefix PoolSense.CodeRAG\Indexing\TypeScript --ignore-scripts" />
+  </Target>
 </Project>

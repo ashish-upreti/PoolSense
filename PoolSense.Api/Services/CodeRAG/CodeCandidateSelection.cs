@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 using CodeRAG.Core.Indexing;
 using CodeRAG.Core.Storage;
 
@@ -10,6 +11,7 @@ public sealed record CodeSearchCandidate(CodeRepository Repository, Symbol Symbo
     double SemanticSimilarity = 0, bool KnowledgeReference = false)
 {
     public double KnowledgeRelevance { get; init; }
+    public IReadOnlyList<CodeRelationship> Relationships { get; init; } = [];
 }
 
 public sealed class CodeCandidateBuffer(string query, int capacity) : IEnumerable<CodeSearchCandidate>
@@ -17,6 +19,7 @@ public sealed class CodeCandidateBuffer(string query, int capacity) : IEnumerabl
     private readonly object gate = new();
     private readonly List<CodeSearchCandidate> items = [];
     private readonly Dictionary<string, double> scores = new();
+    private readonly string[] terms = CodeCandidateSelection.Terms(query);
     private readonly int limit = capacity > 0 ? capacity : throw new ArgumentOutOfRangeException(nameof(capacity));
     private static string Key(CodeSearchCandidate item) => $"{item.Repository.Id}\0{item.Repository.Generation}\0{item.Symbol.Id}";
     public bool Limited { get; private set; }
@@ -34,7 +37,7 @@ public sealed class CodeCandidateBuffer(string query, int capacity) : IEnumerabl
                 EndLine = Math.Min(candidate.Symbol.EndLine, candidate.Symbol.StartLine + Math.Max(0, SourceText.Lines(source).Count() - 1))
             }
         };
-        var score = CodeCandidateSelection.Relevance(query, candidate);
+        var score = CodeCandidateSelection.Relevance(query, candidate, terms);
         lock (gate)
         {
             var existing = items.FindIndex(item => item.Repository.Id == candidate.Repository.Id
@@ -48,9 +51,10 @@ public sealed class CodeCandidateBuffer(string query, int capacity) : IEnumerabl
                     SemanticRank = PositiveMin(previous.SemanticRank, candidate.SemanticRank),
                     SemanticSimilarity = Math.Max(previous.SemanticSimilarity, candidate.SemanticSimilarity),
                     KnowledgeReference = previous.KnowledgeReference || candidate.KnowledgeReference,
-                    KnowledgeRelevance = Math.Max(previous.KnowledgeRelevance, candidate.KnowledgeRelevance)
+                    KnowledgeRelevance = Math.Max(previous.KnowledgeRelevance, candidate.KnowledgeRelevance),
+                    Relationships = previous.Relationships.Concat(candidate.Relationships).Distinct().Take(8).ToArray()
                 };
-                scores[Key(items[existing])] = CodeCandidateSelection.Relevance(query, items[existing]);
+                scores[Key(items[existing])] = CodeCandidateSelection.Relevance(query, items[existing], terms);
                 return;
             }
             if (items.Count < limit) { items.Add(candidate); scores[Key(candidate)] = score; return; }
@@ -80,14 +84,15 @@ public static class CodeCandidateSelection
     public static string[] Terms(string query) => Regex.Matches(query, @"[A-Za-z_][A-Za-z_0-9]{2,}")
         .Select(match => match.Value).Where(word => !StopWords.Contains(word.ToLowerInvariant())).Distinct(StringComparer.OrdinalIgnoreCase).Take(40).ToArray();
 
-    public static double Relevance(string query, CodeSearchCandidate candidate)
+    public static double Relevance(string query, CodeSearchCandidate candidate, string[]? terms = null)
     {
-        var terms = Terms(query);
+        terms ??= Terms(query);
         var symbol = candidate.Symbol;
-        var text = $"{symbol.QualifiedName} {symbol.FilePath} {symbol.Source}";
-        var matched = terms.Count(term => text.Contains(term, StringComparison.OrdinalIgnoreCase));
+        var matched = terms.Count(term => symbol.QualifiedName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            symbol.FilePath.Contains(term, StringComparison.OrdinalIgnoreCase) || symbol.Source.Contains(term, StringComparison.OrdinalIgnoreCase));
+        var parts = symbol.QualifiedName.Split('.');
         var exact = terms.Any(term => symbol.Name.Equals(term, StringComparison.OrdinalIgnoreCase)
-            || symbol.QualifiedName.Split('.').Contains(term, StringComparer.OrdinalIgnoreCase))
+            || parts.Contains(term, StringComparer.OrdinalIgnoreCase))
             || query.Contains(symbol.FilePath, StringComparison.OrdinalIgnoreCase);
         // Raw BM25 scores from independent databases are not compared. Fuse within-list ranks,
         // globally comparable query-term coverage and exact identifier/path matches.
@@ -99,10 +104,8 @@ public static class CodeCandidateSelection
 
     public static IReadOnlyList<CodeEvidence> Select(string query, IEnumerable<CodeSearchCandidate> input, int maxSpans, int maxCharacters)
     {
-        var all = input.ToArray();
-        var hasStrongSource = all.Any(candidate => Relevance(query, candidate) >= 1);
-        var candidates = all.Where(candidate => !hasStrongSource || candidate.LexicalRank > 0 || candidate.SemanticRank > 0
-                || !candidate.KnowledgeReference || Relevance(query, candidate) >= .1)
+        var terms = Terms(query);
+        var ranked = input
             .GroupBy(candidate => (candidate.Repository.Id, candidate.Repository.Generation, candidate.Symbol.Id))
             .Select(group => group.First() with
             {
@@ -110,9 +113,13 @@ public static class CodeCandidateSelection
                 SemanticRank = group.Where(item => item.SemanticRank > 0).Select(item => item.SemanticRank).DefaultIfEmpty().Min(),
                 SemanticSimilarity = group.Max(item => item.SemanticSimilarity),
                 KnowledgeReference = group.Any(item => item.KnowledgeReference),
-                KnowledgeRelevance = group.Max(item => item.KnowledgeRelevance)
+                KnowledgeRelevance = group.Max(item => item.KnowledgeRelevance),
+                Relationships = group.SelectMany(item => item.Relationships).Distinct().Take(8).ToArray()
             })
-            .Select(candidate => (Candidate: candidate, Score: Relevance(query, candidate))).ToList();
+            .Select(candidate => (Candidate: candidate, Score: Relevance(query, candidate, terms))).ToList();
+        var hasStrongSource = ranked.Any(item => item.Score >= 1);
+        var candidates = ranked.Where(item => !hasStrongSource || item.Candidate.LexicalRank > 0 || item.Candidate.SemanticRank > 0
+            || !item.Candidate.KnowledgeReference || item.Score >= .1).ToList();
         var selected = new List<CodeEvidence>();
         var seenContents = new HashSet<string>(StringComparer.Ordinal);
         var perRepository = new Dictionary<string, int>();
@@ -133,7 +140,9 @@ public static class CodeCandidateSelection
             var count = 0;
             var path = string.Join('/', symbol.FilePath.Replace('\\', '/').Split('/').Select(Uri.EscapeDataString));
             var baseUrl = $"https://github.com/{repository.FullName}/blob/{repository.IndexedCommit}/{path}";
-            var sourceBudget = Math.Min(6000, maxCharacters - used - baseUrl.Length - symbol.QualifiedName.Length - repository.FullName.Length - 150);
+            var relationships = next.Candidate.Relationships.Where(item => item.SiteLine >= symbol.StartLine && item.SiteLine <= symbol.EndLine).Take(4).ToArray();
+            var relationshipSize = relationships.Length == 0 ? 0 : JsonSerializer.Serialize(relationships).Length;
+            var sourceBudget = Math.Min(6000, maxCharacters - used - baseUrl.Length - symbol.QualifiedName.Length - repository.FullName.Length - relationshipSize - 150);
             if (sourceBudget < 128) continue;
             foreach (var line in lines)
             {
@@ -150,11 +159,14 @@ public static class CodeCandidateSelection
             if (seenContents.Contains(hash)) continue;
             var end = symbol.StartLine + count - 1;
             var url = $"{baseUrl}#L{symbol.StartLine}-L{end}";
-            var size = source.Length + url.Length + symbol.QualifiedName.Length + repository.FullName.Length + 100;
+            var size = source.Length + url.Length + symbol.QualifiedName.Length + repository.FullName.Length + relationshipSize + 100;
             if (used + size > maxCharacters) continue;
             seenContents.Add(hash);
             selected.Add(new(repository.Id, repository.ProjectId, repository.FullName, repository.Branch, repository.IndexedCommit,
-                symbol.FilePath, symbol.QualifiedName, symbol.StartLine, end, source, url));
+                symbol.FilePath, symbol.QualifiedName, symbol.StartLine, end, source, url)
+            {
+                Relationships = relationships.Where(item => item.SiteLine <= end).ToArray()
+            });
             used += size;
             perRepository[repository.Id] = perRepository.GetValueOrDefault(repository.Id) + 1;
         }

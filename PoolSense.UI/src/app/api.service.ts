@@ -13,9 +13,23 @@ export interface CodeEvidence {
   endLine: number
   content: string
   sourceUrl: string
+  relationships?: CodeRelationship[]
+}
+
+export interface CodeRelationship {
+  kind: string
+  fromSymbol: string
+  toSymbol: string
+  filePath: string
+  siteLine: number
+  targetFilePath: string
+  targetLine: number
+  resolution: string
 }
 
 export interface CodeSearchCoverage {
+  timingsMs?: Record<string, number>
+  queryKind?: 'symbol' | 'concept' | 'workflow'
   authorizedRepositories: number
   searchedRepositories: number
   failedRepositories: number
@@ -53,8 +67,10 @@ export interface CodeChatTurn {
 }
 
 export interface CodeAskResponse {
+  timingsMs?: Record<string, number>
   codeSearchCoverage?: CodeSearchCoverage
   projectId: string
+  projectIds?: string[]
   sessionId: string
   question: string
   answer: string
@@ -66,6 +82,7 @@ export interface CodeAskResponse {
 export interface CodeChatSessionSummary {
   id: string
   projectId: string
+  projectIds?: string[]
   title: string
   createdAt: string
   updatedAt: string
@@ -411,24 +428,39 @@ export class ApiService {
     return response.status === 204 ? undefined as T : await response.json() as T
   }
 
-  private codeChatPath(projectId: string, suffix: string) {
-    return '/projects/' + encodeURIComponent(projectId) + '/code-chat' + suffix
+  /** Scope query for the multi-application code-chat endpoints; an empty list means every application. */
+  private codeScopeQuery(projectIds: string[]) {
+    const params = new URLSearchParams()
+    for (const projectId of projectIds) params.append('projectIds', projectId)
+    const query = params.toString()
+    return query ? '?' + query : ''
   }
 
-  askCodeChat(projectId: string, question: string, history: CodeChatTurn[], sessionId: string | null): Promise<CodeAskResponse> {
-    return this.codeRequest<CodeAskResponse>(this.codeChatPath(projectId, '/ask'), 'POST', { question, history, sessionId })
+  askCodeChat(projectIds: string[], question: string, history: CodeChatTurn[], sessionId: string | null): Promise<CodeAskResponse> {
+    // Match CodeChatTurn.Content validation without shortening displayed or saved answers.
+    const maxContentLength = 8000
+    const truncated = '\n[Earlier message truncated]'
+    const boundedHistory = history.map(turn => turn.content.length <= maxContentLength ? turn : {
+      ...turn,
+      content: turn.content.slice(0, maxContentLength - truncated.length).replace(/[\uD800-\uDBFF]$/, '') + truncated,
+    })
+    return this.codeRequest<CodeAskResponse>('/code-chat/ask', 'POST', { projectIds, question, history: boundedHistory, sessionId })
   }
 
-  getCodeChatHistory(projectId: string): Promise<CodeChatSessionSummary[]> {
-    return this.codeRequest<CodeChatSessionSummary[]>(this.codeChatPath(projectId, '/history'))
+  getCodeChatHistory(projectIds: string[]): Promise<CodeChatSessionSummary[]> {
+    return this.codeRequest<CodeChatSessionSummary[]>('/code-chat/history' + this.codeScopeQuery(projectIds))
   }
 
-  getCodeChatSession(projectId: string, sessionId: string): Promise<CodeChatSession> {
-    return this.codeRequest<CodeChatSession>(this.codeChatPath(projectId, '/history/' + encodeURIComponent(sessionId)))
+  getCodeChatSession(sessionId: string): Promise<CodeChatSession> {
+    return this.codeRequest<CodeChatSession>('/code-chat/history/' + encodeURIComponent(sessionId))
   }
 
-  deleteCodeChatSession(projectId: string, sessionId: string): Promise<void> {
-    return this.codeRequest<void>(this.codeChatPath(projectId, '/history/' + encodeURIComponent(sessionId)), 'DELETE')
+  deleteCodeChatSession(sessionId: string): Promise<void> {
+    return this.codeRequest<void>('/code-chat/history/' + encodeURIComponent(sessionId), 'DELETE')
+  }
+
+  getCodeRepositories(projectIds: string[]): Promise<CodeRepository[]> {
+    return this.codeRequest<CodeRepository[]>('/code-chat/repositories' + this.codeScopeQuery(projectIds))
   }
 
   async getSession(): Promise<AuthenticatedUser | null> {

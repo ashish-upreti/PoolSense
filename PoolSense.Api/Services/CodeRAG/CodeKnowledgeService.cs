@@ -80,6 +80,9 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         token.ThrowIfCancellationRequested();
         var user = backgroundPolling ? SharedGitHubConnection.ServiceIdentity : CodeUser.Name(context.HttpContext?.User);
         var settings = options.Value;
+        var timings = new CodeTimings("retrieval");
+        var plan = CodeQueryPlan.Create(query);
+        var queryTerms = CodeCandidateSelection.Terms(query);
         if (!settings.Enabled) return new("disabled", []);
         if (user.Length == 0) return new("not-authenticated", []);
         if (projectIds.Count == 0) return new("not-scoped", []);
@@ -89,6 +92,7 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         deadline.CancelAfter(TimeSpan.FromSeconds(settings.SearchDeadlineSeconds));
         var candidates = new CodeCandidateBuffer(query, settings.GlobalCandidateLimit);
         var authorized = new ConcurrentDictionary<string, CodeRepository>();
+        var authorizationChecks = new ConcurrentDictionary<string, byte>();
         var searched = new ConcurrentDictionary<string, byte>();
         var deferred = new ConcurrentBag<CodeRepository>();
         var semanticStates = new ConcurrentDictionary<string, byte>();
@@ -97,22 +101,28 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         var warnings = new ConcurrentDictionary<string, byte>();
         var failed = 0;
         var notReady = 0;
-        var shortlisted = 0;
+        var routingScores = new ConcurrentDictionary<string, double>();
+        var prepared = new ConcurrentDictionary<string, (OkfSearchResult? Knowledge, int VectorCount)>();
+        var semanticEligible = new ConcurrentDictionary<string, byte>();
         var stale = 0;
-        var authorizationComplete = false;
         var expanded = false;
         var timedOut = false;
         ManagedGitHubIdentity? connection;
         CodeRepository[] repositories;
         try
         {
+            using var catalogTiming = timings.Measure("catalog");
             connection = await access.GetIdentityAsync(deadline.Token);
             repositories = (await store.RepositoriesAsync(deadline.Token))
                 .Where(repository => repository.Enabled && projectIds.Contains(repository.ProjectId, StringComparer.OrdinalIgnoreCase)).ToArray();
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
-            return new("timed-out", []) { Coverage = new() { DeadlineExceeded = true, AuthorizationComplete = false } };
+            logger?.LogWarning("Code search deadline reached while loading the repository catalog (limit {DeadlineSeconds}s).", settings.SearchDeadlineSeconds);
+            return new("timed-out", [])
+            {
+                Coverage = new() { DeadlineExceeded = true, AuthorizationComplete = false, TimingsMs = timings.Snapshot(), QueryKind = plan.Kind }
+            };
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (CodeAccessException exception)
@@ -128,8 +138,12 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         if (connection is null) return new("not-connected", []);
         var parallel = new ParallelOptions { MaxDegreeOfParallelism = settings.SearchConcurrency, CancellationToken = deadline.Token };
         var semanticQuery = new Lazy<Task<CodeSemanticQueryResult>>(
-            () => CreateSemanticQueryAsync(query, reusable,
-                QueryCacheScope(backgroundPolling ? null : context.HttpContext?.User, user), deadline.Token),
+            async () =>
+            {
+                using var embeddingTiming = timings.Measure("queryEmbedding");
+                return await CreateSemanticQueryAsync(query, reusable,
+                    QueryCacheScope(backgroundPolling ? null : context.HttpContext?.User, user), deadline.Token);
+            },
             LazyThreadSafetyMode.ExecutionAndPublication);
 
         async ValueTask SearchRepository(CodeRepository repository, bool authorize, bool allowDeferral, CancellationToken ct)
@@ -140,9 +154,11 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                 ct.ThrowIfCancellationRequested();
                 if (authorize)
                 {
+                    using var authorizationTiming = timings.Measure("authorization");
                     // This is a CURRENT permission check, not a head/freshness lookup.
                     // No OKF, embeddings, files, names or routing metadata are consumed before it.
                     var repositoryAccess = await github.RepositoryAsync(repository.FullName, ct);
+                    authorizationChecks.TryAdd(repository.Id, 0);
                     if (repositoryAccess.Id != repository.GitHubId) throw new CodeAccessException();
                     accessible = true;
                     authorized[repository.Id] = repository;
@@ -158,8 +174,14 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                     Interlocked.Exchange(ref stale, 1);
                 OkfSearchResult? okf = null;
                 var knownVectorCount = -1;
-                try
+                if (!authorize && prepared.TryGetValue(repository.Id, out var preparationCache))
                 {
+                    okf = preparationCache.Knowledge;
+                    knownVectorCount = preparationCache.VectorCount;
+                }
+                else try
+                {
+                    using var knowledgeTiming = timings.Measure("knowledge");
                     var statePath = Path.Combine(files.Folder(repository), CodeSnapshotPreparation.FileName);
                     if (File.Exists(statePath) && new FileInfo(statePath).Length <= 16384 &&
                         System.Text.Json.JsonSerializer.Deserialize<CodeSnapshotPreparation>(File.ReadAllText(statePath)) is { } preparation)
@@ -189,11 +211,11 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                     if (okf.Errors.Count > 0)
                         warnings.TryAdd("Some project knowledge is incomplete, stale or invalid; current indexed source remains authoritative.", 0);
                 }
-                var routeMatch = CodeCandidateSelection.Terms(query).Any(term => repository.FullName.Contains(term, StringComparison.OrdinalIgnoreCase))
-                    || okf?.References.Count > 0;
-                if (allowDeferral && settings.RepositoryRoutingEnabled &&
-                    (!routeMatch || Interlocked.Increment(ref shortlisted) > settings.RepositoryShortlistSize))
+                if (allowDeferral && settings.RepositoryRoutingEnabled)
                 {
+                    prepared[repository.Id] = (okf, knownVectorCount);
+                    routingScores[repository.Id] = 2d * queryTerms.Count(term => repository.FullName.Contains(term, StringComparison.OrdinalIgnoreCase))
+                        + (okf?.References.Select(reference => reference.Relevance).DefaultIfEmpty(0).Max() ?? 0);
                     deferred.Add(repository);
                     return;
                 }
@@ -203,25 +225,38 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                 using var database = GraphStore.Open(files.Database(repository), true);
                 // SQLite supports this cross-thread interrupt; dispose registration BEFORE the connection.
                 using var interrupt = ct.Register(() => { if (database.Handle is { } handle) SQLitePCL.raw.sqlite3_interrupt(handle); });
-                var spans = new Retriever().Retrieve(query, database, files.Source(repository), settings.CandidatesPerRepository,
-                    Retriever.MaxContextChars, token: ct);
-                for (var index = 0; index < spans.Count; index++) candidates.Add(new(repository, spans[index], LexicalRank: index + 1));
+                IReadOnlyList<Symbol> spans;
+                using (timings.Measure("lexicalGraph"))
+                    spans = new Retriever().Retrieve(query, database, files.Source(repository), plan.Candidates(settings.CandidatesPerRepository),
+                        Retriever.MaxContextChars, token: ct);
+                var relations = plan.IsWorkflow ? ReadRelationships(database, files.Source(repository), spans, ct) : [];
+                for (var index = 0; index < spans.Count; index++) candidates.Add(new(repository, spans[index], LexicalRank: index + 1)
+                {
+                    Relationships = relations.Where(relation => relation.FilePath == spans[index].FilePath &&
+                        relation.SiteLine >= spans[index].StartLine && relation.SiteLine <= spans[index].EndLine).Take(8).ToArray()
+                });
                 searched.TryAdd(repository.Id, 0);
                 if (semantic?.Enabled == true)
                 {
-                    if (knownVectorCount != 0 && File.Exists(Path.Combine(files.Folder(repository), CodeSemanticIndex.ArtifactName))) _ = semanticQuery.Value;
+                    if (knownVectorCount != 0 && File.Exists(Path.Combine(files.Folder(repository), CodeSemanticIndex.ArtifactName)))
+                    {
+                        semanticEligible.TryAdd(repository.Id, 0);
+                        if (!plan.IsSymbol) _ = semanticQuery.Value;
+                    }
                     else semanticStates.TryAdd(knownVectorCount == 0 ? "empty-index" : "missing-index", 0);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (CodeAccessException)
             {
+                if (authorize) authorizationChecks.TryAdd(repository.Id, 0);
                 warnings.TryAdd("The server-managed PAT could not access one or more configured repositories. Verify its validity, repository permissions and organization SSO authorization.", 0);
                 logger?.LogWarning("GitHub repository access denied for record {RepositoryId}.", repository.Id);
             }
             catch (Exception exception)
             {
                 if (ct.IsCancellationRequested) throw new OperationCanceledException(ct);
+                if (authorize) authorizationChecks.TryAdd(repository.Id, 0);
                 if (accessible) Interlocked.Increment(ref failed);
                 logger?.LogWarning("Code repository search unavailable for record {RepositoryId} ({FailureType}).", repository.Id, exception.GetType().Name);
             }
@@ -230,19 +265,28 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         try
         {
             await Parallel.ForEachAsync(repositories, parallel, (repository, ct) => SearchRepository(repository, true, true, ct));
-            authorizationComplete = true;
-            var crossRepository = System.Text.RegularExpressions.Regex.IsMatch(query, @"\b(workflow|across|integration)\b|end.to.end",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            var terms = CodeCandidateSelection.Terms(query);
+            if (settings.RepositoryRoutingEnabled)
+            {
+                var shortlist = deferred.Where(repository => routingScores.GetValueOrDefault(repository.Id) > 0)
+                    .OrderByDescending(repository => routingScores[repository.Id])
+                    .ThenBy(repository => repository.FullName, StringComparer.Ordinal).ThenBy(repository => repository.Id, StringComparer.Ordinal)
+                    .Take(settings.RepositoryShortlistSize).ToArray();
+                await Parallel.ForEachAsync(shortlist, parallel, (repository, ct) => SearchRepository(repository, false, false, ct));
+            }
+            var terms = queryTerms;
             var coveredTerms = terms.Count(term => candidates.Any(candidate =>
-                $"{candidate.Symbol.QualifiedName} {candidate.Symbol.FilePath} {candidate.Symbol.Source}".Contains(term, StringComparison.OrdinalIgnoreCase)));
-            if (!deferred.IsEmpty && (crossRepository || !candidates.Any(candidate => CodeCandidateSelection.Relevance(query, candidate) >= 1)
+                candidate.Symbol.QualifiedName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                candidate.Symbol.FilePath.Contains(term, StringComparison.OrdinalIgnoreCase) || candidate.Symbol.Source.Contains(term, StringComparison.OrdinalIgnoreCase)));
+            var remaining = deferred.Where(repository => !searched.ContainsKey(repository.Id)).DistinctBy(repository => repository.Id).ToArray();
+            if (remaining.Length > 0 && (plan.IsWorkflow || !candidates.Any(candidate => CodeCandidateSelection.Relevance(query, candidate, terms) >= 1)
                 || terms.Length > 1 && (double)coveredTerms / terms.Length < .8))
             {
                 expanded = true;
-                await Parallel.ForEachAsync(deferred.DistinctBy(repository => repository.Id), parallel,
+                await Parallel.ForEachAsync(remaining, parallel,
                     (repository, ct) => SearchRepository(repository, false, false, ct));
             }
+            if (plan.IsSymbol && !semanticEligible.IsEmpty && !candidates.Any(plan.MatchesIdentifier))
+                _ = semanticQuery.Value;
             if (semanticQuery.IsValueCreated)
             {
                 var queryResult = await semanticQuery.Value;
@@ -253,20 +297,30 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                     {
                         try
                         {
+                            using var semanticTiming = timings.Measure("semanticSearch");
                             using var lease = files.Lease(repository);
                             if (lease is null) { semanticStates.TryAdd("snapshot-changed", 0); return ValueTask.CompletedTask; }
                             var result = semantic!.Search(files.Folder(repository), embedding, ct, repository.IndexedCommit);
                             semanticStates.TryAdd(result.Status, 0);
                             if (result.Coverage is { } coverage) semanticCoverage[repository.Id] = coverage;
                             using var database = GraphStore.Open(files.Database(repository), true);
-                            for (var index = 0; index < result.Matches.Count; index++)
+                            var matches = result.Matches.Select((match, index) => (Match: match, Rank: index + 1))
+                                .Where(item => item.Match.Score >= .45).ToArray();
+                            var placeholders = string.Join(',', matches.Select((_, index) => $"@p{index + 1}"));
+                            var symbols = matches.Length == 0 ? [] : GraphStore.Query(database,
+                                $"SELECT * FROM symbols WHERE repo_root=@p0 AND id IN ({placeholders})",
+                                GraphStore.ReadSymbol, [GraphStore.RootKey(files.Source(repository)), .. matches.Select(item => (object?)item.Match.SymbolId)]);
+                            var byId = symbols.ToDictionary(symbol => symbol.Id);
+                            var relations = plan.IsWorkflow ? ReadRelationships(database, files.Source(repository), symbols, ct) : [];
+                            foreach (var item in matches)
                             {
                                 ct.ThrowIfCancellationRequested();
-                                var match = result.Matches[index];
-                                if (match.Score < .45) continue;
-                                var symbol = GraphStore.Query(database, "SELECT * FROM symbols WHERE id=@p0 AND repo_root=@p1",
-                                    GraphStore.ReadSymbol, match.SymbolId, GraphStore.RootKey(files.Source(repository))).SingleOrDefault();
-                                if (symbol is not null) candidates.Add(new(repository, symbol, SemanticRank: index + 1, SemanticSimilarity: match.Score));
+                                if (byId.TryGetValue(item.Match.SymbolId, out var symbol))
+                                    candidates.Add(new(repository, symbol, SemanticRank: item.Rank, SemanticSimilarity: item.Match.Score)
+                                    {
+                                        Relationships = relations.Where(relation => relation.FilePath == symbol.FilePath &&
+                                            relation.SiteLine >= symbol.StartLine && relation.SiteLine <= symbol.EndLine).Take(8).ToArray()
+                                    });
                             }
                         }
                         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -296,12 +350,14 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
             }
         }
         token.ThrowIfCancellationRequested();
+        var authorizationComplete = repositories.All(repository => authorizationChecks.ContainsKey(repository.Id));
         // Disconnect/configuration changes during the search cannot release cached private evidence.
         Dictionary<string, CodeRepository> current;
         using var verification = CancellationTokenSource.CreateLinkedTokenSource(token);
         verification.CancelAfter(TimeSpan.FromSeconds(2));
         try
         {
+            using var verificationTiming = timings.Measure("verification");
             if (await access.GetIdentityAsync(verification.Token) != connection) return new("not-connected", []);
             current = (await store.RepositoriesAsync(verification.Token)).ToDictionary(repository => repository.Id);
         }
@@ -327,7 +383,9 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         var valid = candidates.Where(candidate => StillScoped(candidate.Repository)
             && current[candidate.Repository.Id].Generation == candidate.Repository.Generation).ToArray();
         if (valid.Length < candidates.Count) warnings.TryAdd("Repository snapshots changed during search; obsolete candidates were excluded.", 0);
-        var documents = CodeCandidateSelection.Select(query, valid, settings.MaxEvidenceSpans, settings.ContextCharacters);
+        IReadOnlyList<CodeEvidence> documents;
+        using (timings.Measure("selection"))
+            documents = CodeCandidateSelection.Select(query, valid, plan.Spans(settings.MaxEvidenceSpans), plan.Characters(settings.ContextCharacters));
         var available = authorized.Values.Where(StillScoped).ToArray();
         var incomplete = timedOut || failed > 0 || notReady > 0 || available.Any(repository => !searched.ContainsKey(repository.Id))
             || valid.Length < candidates.Count;
@@ -342,10 +400,17 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         token.ThrowIfCancellationRequested();
         var vectorCoverage = available.Where(repository => searched.ContainsKey(repository.Id) && semanticCoverage.ContainsKey(repository.Id))
             .Select(repository => semanticCoverage[repository.Id]).ToArray();
+        if (timedOut)
+            logger?.LogWarning(
+                "Code search deadline reached (limit {DeadlineSeconds}s, searched {SearchedRepositories}/{AuthorizedRepositories}, access complete {AuthorizationComplete}). Stage timings ms: {StageTimingsMs}",
+                settings.SearchDeadlineSeconds, available.Count(repository => searched.ContainsKey(repository.Id)), available.Length,
+                authorizationComplete, System.Text.Json.JsonSerializer.Serialize(timings.Snapshot()));
         return new(status, documents)
         {
             Coverage = new()
             {
+                TimingsMs = timings.Snapshot(),
+                QueryKind = plan.Kind,
                 AuthorizedRepositories = available.Length,
                 SearchedRepositories = available.Count(repository => searched.ContainsKey(repository.Id)),
                 FailedRepositories = failed, AuthorizationComplete = authorizationComplete,
@@ -368,4 +433,23 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
             principal?.FindFirst("tid")?.Value
                 ?? principal?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value ?? "",
             principal?.FindFirst("iss")?.Value ?? "");
+
+    private static IReadOnlyList<CodeRelationship> ReadRelationships(Microsoft.Data.Sqlite.SqliteConnection database,
+        string root, IReadOnlyList<Symbol> spans, CancellationToken token)
+    {
+        var paths = spans.Select(span => span.FilePath).Distinct(StringComparer.Ordinal).ToArray();
+        if (paths.Length == 0) return [];
+        token.ThrowIfCancellationRequested();
+        var parameters = string.Join(',', paths.Select((_, index) => $"@p{index + 1}"));
+        return GraphStore.Query(database, $"""
+            SELECT e.kind,a.qualified_name,b.qualified_name,a.file_path,coalesce(e.site_line,a.start_line),
+                   b.file_path,b.start_line,e.resolution
+            FROM edges e JOIN symbols a ON a.id=e.from_id JOIN symbols b ON b.id=e.to_id
+            WHERE e.repo_root=@p0 AND a.file_path IN ({parameters})
+                AND e.kind IN ('CALLS','IMPLEMENTS','INHERITS','IMPORTS')
+            ORDER BY a.file_path,coalesce(e.site_line,a.start_line),b.qualified_name LIMIT 128
+            """, reader => new CodeRelationship(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                reader.GetString(3), reader.GetInt32(4), reader.GetString(5), reader.GetInt32(6), reader.GetString(7)),
+            [GraphStore.RootKey(root), .. paths.Cast<object?>()]);
+    }
 }

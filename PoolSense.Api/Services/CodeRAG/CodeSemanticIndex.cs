@@ -16,6 +16,7 @@ public sealed class CodeSemanticOptions
     public bool AdaptiveCoverageEnabled { get; set; }
     public int MaxChunks { get; set; } = 64;
     public int MaxNewEmbeddingsPerBuild { get; set; } = 64;
+    public int EmbeddingBatchSize { get; set; } = 8;
     public int MaxTextCharacters { get; set; } = 2000;
     public int Dimensions { get; set; } = 1536;
     public int MaxManifestBytes { get; set; } = 8 * 1024 * 1024;
@@ -120,6 +121,7 @@ public sealed class CodeSemanticIndex
             AdaptiveCoverageEnabled = value.AdaptiveCoverageEnabled,
             MaxChunks = Math.Clamp(value.MaxChunks, 1, value.AdaptiveCoverageEnabled ? 768 : 64),
             MaxNewEmbeddingsPerBuild = Math.Clamp(value.MaxNewEmbeddingsPerBuild, 0, 64),
+            EmbeddingBatchSize = Math.Clamp(value.EmbeddingBatchSize, 1, 16),
             MaxTextCharacters = Math.Clamp(value.MaxTextCharacters, 1, 8000),
             Dimensions = Math.Clamp(value.Dimensions, 1, 1536),
             MaxManifestBytes = Math.Clamp(value.MaxManifestBytes, 1024, 8 * 1024 * 1024),
@@ -367,17 +369,22 @@ public sealed class CodeSemanticIndex
             };
             await SaveAsync(snapshotFolder, manifest, token, checkpointSnapshotFolder);
             string? error = null;
-            foreach (var chunk in chunks.Where(chunk => !cached.ContainsKey(chunk.Hash)).ToArray())
+            var missing = chunks.Where(chunk => !cached.ContainsKey(chunk.Hash)).ToArray();
+            var position = 0;
+            var batchProvider = embeddings as IEmbeddingBatchService;
+            while (position < missing.Length)
             {
                 token.ThrowIfCancellationRequested();
                 try
                 {
+                    var chunk = missing[position];
                     if (cached.TryGetValue(chunk.Hash, out var sameTextVector))
                     {
                         entries.Add(EntryFor(chunk, sameTextVector));
                         try { await SaveAsync(snapshotFolder, manifest, token, checkpointSnapshotFolder); }
                         catch { entries.RemoveAt(entries.Count - 1); throw; }
                         reused++;
+                        position++;
                         continue;
                     }
                     if (generated >= Options.MaxNewEmbeddingsPerBuild) break;
@@ -387,13 +394,29 @@ public sealed class CodeSemanticIndex
                         Warn("Build", error);
                         break;
                     }
-                    // Fixed-width float32 encoding makes this exact regardless of returned values.
-                    var placeholder = EntryFor(chunk, new float[Options.Dimensions]);
-                    entries.Add(placeholder);
-                    var fits = Serialized(manifest).Length + 256 <= Options.MaxManifestBytes;
-                    entries.RemoveAt(entries.Count - 1);
-                    if (!fits) { error = "ManifestSizeLimit"; break; }
-                    var vector = await embeddings.GenerateEmbedding(chunk.Text, token);
+                    var batch = new List<CodeSemanticSelection.Candidate>();
+                    var capacity = Math.Min(batchProvider is null ? 1 : Options.EmbeddingBatchSize, Options.MaxNewEmbeddingsPerBuild - generated);
+                    var checkpointCount = entries.Count;
+                    while (position < missing.Length && batch.Count < capacity)
+                    {
+                        var next = missing[position];
+                        if (cached.ContainsKey(next.Hash) || batch.Any(item => item.Hash == next.Hash)) break;
+                        // Reserve exact fixed-width float32 space before paying for the batch.
+                        entries.Add(EntryFor(next, new float[Options.Dimensions]));
+                        if (Serialized(manifest).Length + 256 > Options.MaxManifestBytes)
+                        {
+                            entries.RemoveAt(entries.Count - 1);
+                            error = "ManifestSizeLimit";
+                            break;
+                        }
+                        batch.Add(next);
+                        position++;
+                    }
+                    entries.RemoveRange(checkpointCount, entries.Count - checkpointCount);
+                    if (batch.Count == 0) break;
+                    IReadOnlyList<float[]> vectors = batchProvider is null
+                        ? [await embeddings.GenerateEmbedding(batch[0].Text, token)]
+                        : await batchProvider.GenerateEmbeddingsAsync(batch.Select(item => item.Text).ToArray(), token);
                     token.ThrowIfCancellationRequested();
                     if (Profile != profile)
                     {
@@ -401,12 +424,14 @@ public sealed class CodeSemanticIndex
                         Warn("Build", error);
                         break;
                     }
-                    if (!ValidVector(vector)) throw new InvalidDataException("Invalid embedding.");
-                    entries.Add(EntryFor(chunk, vector));
+                    if (vectors.Count != batch.Count || vectors.Any(vector => !ValidVector(vector)))
+                        throw new InvalidDataException("Invalid embedding batch.");
+                    for (var index = 0; index < batch.Count; index++) entries.Add(EntryFor(batch[index], vectors[index]));
                     try { await SaveAsync(snapshotFolder, manifest, token, checkpointSnapshotFolder); }
-                    catch { entries.RemoveAt(entries.Count - 1); throw; }
-                    cached.TryAdd(chunk.Hash, vector);
-                    generated++;
+                    catch { entries.RemoveRange(checkpointCount, entries.Count - checkpointCount); throw; }
+                    for (var index = 0; index < batch.Count; index++) cached.TryAdd(batch[index].Hash, vectors[index]);
+                    generated += batch.Count;
+                    if (error is not null) break;
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                 catch (Exception ex) { error = ex.GetType().Name; Warn("Build", ex); break; }

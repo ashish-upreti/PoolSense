@@ -50,7 +50,7 @@ public sealed class Retriever
         var key = RootKey(root);
         var terms = Words(question).Where(w => !w.Equals(Path.GetFileName(root), StringComparison.OrdinalIgnoreCase)).ToArray();
         if (Fts(string.Join(' ', terms)).Length == 0) return [];
-        var flow = terms.Any(w => new[] { "flow", "workflow", "journey", "architecture" }.Contains(w.ToLowerInvariant())) ||
+        var flow = terms.Any(w => new[] { "flow", "workflow", "journey", "architecture", "diagram", "graph", "connection", "connections", "dependencies", "relationships", "integration" }.Contains(w.ToLowerInvariant())) ||
             Regex.IsMatch(question, @"\bend[\s-]+to[\s-]+end\b", RegexOptions.IgnoreCase);
         var candidates = new Dictionary<string, Symbol>();
         var scores = new Dictionary<string, double>();
@@ -82,6 +82,24 @@ public sealed class Retriever
         }
         progress?.Invoke("Searching indexed source, identifiers and documentation.");
         var seeds = Search(string.Join(' ', terms), 3, flow);
+        if (!flow)
+        {
+            var identifiers = terms.Where(term => !StopWords.Contains(term.ToLowerInvariant())).Distinct(StringComparer.Ordinal).Take(40).ToArray();
+            if (identifiers.Length > 0)
+            {
+                var placeholders = string.Join(',', identifiers.Select((_, index) => $"@p{index + 1}"));
+                var exact = Query(db, $"""
+                    SELECT * FROM symbols WHERE repo_root=@p0 AND source<>'' AND name IN ({placeholders})
+                    ORDER BY file_path,start_line,id LIMIT 20
+                    """, ReadSymbol, [key, .. identifiers.Cast<object?>()]);
+                foreach (var symbol in exact)
+                {
+                    candidates.TryAdd(symbol.Id, symbol);
+                    scores[symbol.Id] = scores.GetValueOrDefault(symbol.Id) + .5;
+                }
+                seeds = exact.Concat(seeds).DistinctBy(symbol => symbol.Id).ToList();
+            }
+        }
         if (seeds.Count == 0 && !flow) return [];
         var anchors = new List<Symbol>();
         if (flow)
@@ -135,10 +153,14 @@ public sealed class Retriever
             token.ThrowIfCancellationRequested();
             var ids = string.Join(',', frontier.Select((_, i) => $"@p{i + 1}"));
             var rows = Query(db, $"""
-                SELECT DISTINCT s.*,e.kind AS relation,e.resolution FROM edges e JOIN symbols s
-                ON s.id=CASE WHEN e.from_id IN ({ids}) THEN e.to_id ELSE e.from_id END
-                WHERE e.repo_root=@p0 AND (e.from_id IN ({ids}) OR e.to_id IN ({ids}))
-                AND s.source<>'' AND s.kind<>'SourceChunk'
+                SELECT DISTINCT s.*,e.kind AS relation,e.resolution FROM (
+                    SELECT to_id AS symbol_id,kind,resolution FROM edges
+                    WHERE repo_root=@p0 AND from_id IN ({ids})
+                    UNION ALL
+                    SELECT from_id AS symbol_id,kind,resolution FROM edges
+                    WHERE repo_root=@p0 AND to_id IN ({ids}) AND from_id NOT IN ({ids})
+                ) e JOIN symbols s ON s.id=e.symbol_id
+                WHERE s.source<>'' AND s.kind<>'SourceChunk'
                 ORDER BY CASE e.kind WHEN 'CALLS' THEN 0 ELSE 1 END,s.file_path,s.start_line LIMIT 32
                 """, r => ReadSymbol(r) with
             {

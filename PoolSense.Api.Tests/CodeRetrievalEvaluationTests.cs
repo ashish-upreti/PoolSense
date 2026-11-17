@@ -161,12 +161,14 @@ internal sealed class RetrievalFixture : IDisposable
         public string HeadOverride { get; set; } = "";
         public int HeadCalls, AccessCalls;
         public Action? OnAccess { get; set; }
+        public Func<CancellationToken, Task>? AfterAccessAsync { get; set; }
         public int Active, MaxActive;
         public async Task<GitHubRepository> RepositoryAsync(string fullName, CancellationToken token)
         {
             Interlocked.Increment(ref AccessCalls);
             await Delay(fullName, token);
             OnAccess?.Invoke();
+            if (AfterAccessAsync is not null) await AfterAccessAsync(token);
             return new(fullName.Split('/')[^1].GetHashCode(StringComparison.Ordinal), fullName, "main");
         }
         public async Task<string> CommitAsync(CodeRepository repository, CancellationToken token)

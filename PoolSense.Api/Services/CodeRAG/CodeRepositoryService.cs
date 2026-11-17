@@ -7,6 +7,8 @@ namespace PoolSense.Api.Services.CodeRAG;
 public interface ICodeRepositoryService
 {
     Task<IReadOnlyList<CodeRepositoryResponse>> ListAsync(string projectId, CancellationToken token);
+    /// <summary>Lists repositories across applications; an empty scope returns every application's repositories.</summary>
+    Task<IReadOnlyList<CodeRepositoryResponse>> ListAsync(CodeChatScope scope, CancellationToken token);
     Task<GitHubBranches> BranchesAsync(string url, CancellationToken token);
     Task<CodeRepositoryResponse> SaveAsync(string projectId, string? id, SaveCodeRepositoryRequest request, CancellationToken token);
     Task<CodeRepositoryResponse> RefreshAsync(string projectId, string id, CancellationToken token);
@@ -16,11 +18,14 @@ public interface ICodeRepositoryService
 public sealed class CodeRepositoryService(ICodeRepositoryStore store, IProjectRepository projects, IGitHubCodeClient github,
     CodeIndexFiles files, IOptions<CodeRAGOptions> options, IUserActivityAuditLogger audit, IManagedGitHubAccess access) : ICodeRepositoryService
 {
-    public async Task<IReadOnlyList<CodeRepositoryResponse>> ListAsync(string projectId, CancellationToken token)
+    public Task<IReadOnlyList<CodeRepositoryResponse>> ListAsync(string projectId, CancellationToken token) =>
+        ListAsync(CodeChatScope.From([projectId]), token);
+
+    public async Task<IReadOnlyList<CodeRepositoryResponse>> ListAsync(CodeChatScope scope, CancellationToken token)
     {
         if (!access.IsConfigured)
             throw new CodeAccessException("Server-managed GitHub access is not configured. Configure CodeRAG:GitHubToken.");
-        var candidates = (await store.RepositoriesAsync(token)).Where(entry => entry.ProjectId == projectId);
+        var candidates = (await store.RepositoriesAsync(token)).Where(entry => scope.IsAll || scope.Contains(entry.ProjectId));
         var visible = new List<CodeRepositoryResponse>();
         var denied = false;
         foreach (var repository in candidates)

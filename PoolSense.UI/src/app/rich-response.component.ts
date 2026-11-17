@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common'
 import { AfterViewInit, Component, ElementRef, Input, OnChanges, OnDestroy, ViewChild, inject } from '@angular/core'
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
 import type { Chart, ChartConfiguration } from 'chart.js'
-import { type ChartSpec, type RichBlock, richBlocks, sanitizeDiagram, sanitizeMarkdown, validateChart, validateMermaid } from './rich-response'
+import { type ChartSpec, type RichBlock, prepareMermaid, richBlocks, sanitizeDiagram, sanitizeMarkdown, validateChart } from './rich-response'
 
 let diagramId = 0
 let diagramQueue: Promise<void> = Promise.resolve()
@@ -89,6 +89,7 @@ export class RichBlockComponent implements AfterViewInit, OnChanges, OnDestroy {
     this.svgHtml = null
     this.svgSource = ''
     this.error = ''
+    this.status = ''
     const block = this.block
     if (block.kind === 'code') return
     this.loading = true
@@ -126,7 +127,8 @@ export class RichBlockComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
         this.chart = new Chart(this.canvas.nativeElement, configuration)
       } else {
-        validateMermaid(block.source)
+        const source = prepareMermaid(block.source)
+        if (source !== block.source) this.status = 'Label quoting adjusted for rendering; original source is unchanged.'
         // Mermaid has global configuration/state. Serialize renders across components and themes.
         const work = diagramQueue.then(async () => {
           if (!current()) return
@@ -150,7 +152,7 @@ export class RichBlockComponent implements AfterViewInit, OnChanges, OnDestroy {
             htmlLabels: false, flowchart: { htmlLabels: false }, maxTextSize: 8000, maxEdges: 150,
             suppressErrorRendering: true,
           })
-          const { svg } = await mermaid.render(`pool-diagram-${++diagramId}`, block.source)
+          const { svg } = await mermaid.render(`pool-diagram-${++diagramId}`, source)
           if (!current()) return
           this.svgSource = sanitizeDiagram(svg)
           this.svgHtml = this.sanitizer.bypassSecurityTrustHtml(this.svgSource)

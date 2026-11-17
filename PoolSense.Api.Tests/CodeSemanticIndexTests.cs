@@ -23,6 +23,57 @@ public sealed class CodeSemanticIndexTests : IDisposable
     public CodeSemanticIndexTests(ITestOutputHelper output) => this.output = output;
 
     [Fact]
+    public async Task BatchedEmbeddings_SaveCompletedBatchesAndResumeWithoutRepaying()
+    {
+        Seed("A", "B", "C", "D", "E", "F");
+        var provider = new BatchEmbeddings { FailOnCall = 2 };
+        var index = new CodeSemanticIndex(provider, Microsoft.Extensions.Options.Options.Create(new CodeSemanticOptions
+        {
+            Enabled = true, Dimensions = 2, EmbeddingBatchSize = 3
+        }), NullLogger<CodeSemanticIndex>.Instance);
+        var first = await index.BuildAsync(Database, directory, Snapshot("batch-first"), "commit-a");
+        Assert.Equal("partial", first.Status);
+        Assert.Equal(3, first.NewEmbeddings);
+        Assert.Equal(3, first.IndexedChunks);
+        Assert.Equal([3, 3], provider.BatchSizes);
+        provider.FailOnCall = 0;
+        var second = await index.BuildAsync(Database, directory, Snapshot("batch-second"), "commit-b", Snapshot("batch-first"));
+        Assert.Equal("ready", second.Status);
+        Assert.Equal(3, second.ReusedEmbeddings);
+        Assert.Equal(3, second.NewEmbeddings);
+        Assert.Equal([3, 3, 3], provider.BatchSizes);
+    }
+
+    [Fact]
+    public async Task BatchedEmbeddings_RejectMismatchedResponseBeforeCheckpointing()
+    {
+        Seed("A", "B", "C");
+        var index = new CodeSemanticIndex(new BatchEmbeddings { WrongCount = true },
+            Microsoft.Extensions.Options.Options.Create(new CodeSemanticOptions { Enabled = true, Dimensions = 2, EmbeddingBatchSize = 3 }),
+            NullLogger<CodeSemanticIndex>.Instance);
+        var result = await index.BuildAsync(Database, directory, Snapshot("bad-batch"), "commit-a");
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("InvalidDataException", result.ErrorType);
+        Assert.Equal(0, result.IndexedChunks);
+    }
+
+    private sealed class BatchEmbeddings : IEmbeddingService, IEmbeddingBatchService
+    {
+        public string Profile => "batch-fixture";
+        public List<int> BatchSizes { get; } = [];
+        public int FailOnCall { get; set; }
+        public bool WrongCount { get; init; }
+        public Task<float[]> GenerateEmbedding(string text) => throw new InvalidOperationException("Batch-capable provider must not be called per chunk.");
+        public Task<IReadOnlyList<float[]>> GenerateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken token)
+        {
+            BatchSizes.Add(texts.Count);
+            if (BatchSizes.Count == FailOnCall) throw new IOException("Synthetic batch failure.");
+            return Task.FromResult<IReadOnlyList<float[]>>(texts.Take(WrongCount ? texts.Count - 1 : texts.Count)
+                .Select(_ => new float[] { 1, 0 }).ToArray());
+        }
+    }
+
+    [Fact]
     public async Task OfflineBuild_ReusesUnchangedContentAcrossCommits_AndInvalidatesChangedProfile()
     {
         Seed("FillPool", "StopMotor");

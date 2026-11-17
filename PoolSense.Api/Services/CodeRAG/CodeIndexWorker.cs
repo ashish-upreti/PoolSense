@@ -126,15 +126,20 @@ public sealed class CodeSnapshotBuilder(IGitHubCodeClient github, CodeIndexFiles
 {
     public async Task<IndexSummary> BuildAsync(CodeRepository repository, string commit, CancellationToken token, string? previousSnapshotFolder = null)
     {
+        var stage = System.Diagnostics.Stopwatch.StartNew();
         var previousSource = previousSnapshotFolder is null ? null : Path.Combine(previousSnapshotFolder, "source");
         var reuseSource = repository.IndexedCommit == commit && previousSource is not null && Directory.Exists(previousSource);
         if (reuseSource)
             await CopySourceAsync(previousSource!, files.Source(repository), settings?.Value.MaxExtractedMegabytes ?? 500, token);
         else
             await github.DownloadAsync(repository, commit, files.Source(repository), token);
+        var downloadMs = stage.Elapsed.TotalMilliseconds;
+        stage.Restart();
         var previousDatabase = previousSnapshotFolder is null ? null : Path.Combine(previousSnapshotFolder, "index.sqlite3");
         IndexSummary summary;
-        if (reuseSource && previousDatabase is not null && GraphStore.IsReady(previousDatabase, [previousSource!]))
+        var parsedFiles = 0;
+        var reusedFiles = 0;
+        if (reuseSource && previousDatabase is not null && RepositoryIndexer.IsCurrent(previousDatabase, previousSource!))
         {
             token.ThrowIfCancellationRequested();
             using var previous = GraphStore.Open(previousDatabase, readOnly: true);
@@ -144,15 +149,33 @@ public sealed class CodeSnapshotBuilder(IGitHubCodeClient github, CodeIndexFiles
             GraphStore.Execute(next, "PRAGMA defer_foreign_keys=ON");
             var oldRoot = GraphStore.RootKey(previousSource!);
             var newRoot = GraphStore.RootKey(files.Source(repository));
-            foreach (var table in new[] { "repositories", "symbols", "edges" })
+            foreach (var table in new[] { "repositories", "symbols", "edges", "source_files" })
                 GraphStore.Execute(next, $"UPDATE {table} SET {(table == "repositories" ? "root" : "repo_root")}=@p0 WHERE {(table == "repositories" ? "root" : "repo_root")}=@p1", newRoot, oldRoot);
             transaction.Commit();
+            var scriptCache = RepositoryIndexer.TypeScriptCachePath(previousDatabase);
+            if (File.Exists(scriptCache))
+            {
+                var targetCache = RepositoryIndexer.TypeScriptCachePath(files.Database(repository));
+                Directory.CreateDirectory(Path.GetDirectoryName(targetCache)!);
+                File.Copy(scriptCache, targetCache);
+            }
             token.ThrowIfCancellationRequested();
             summary = GraphStore.Summaries(next).Single(entry => entry.Root == newRoot);
+            reusedFiles = summary.FileCount;
             logger?.LogInformation("Reused unchanged code graph for repository {RepositoryId}; only optional snapshot preparation is upgraded.", repository.Id);
         }
         else
-            summary = (await new RepositoryIndexer().IndexAsync(files.Source(repository), files.Database(repository), true, cancellationToken: token)).Summary;
+        {
+            var indexed = await new RepositoryIndexer().IndexAsync(files.Source(repository), files.Database(repository), true,
+                cancellationToken: token, previousDatabase: previousDatabase);
+            summary = indexed.Summary;
+            parsedFiles = indexed.ParsedFiles;
+            reusedFiles = indexed.ReusedFiles;
+            foreach (var warning in indexed.Warnings.Take(10))
+                logger?.LogWarning("Repository {RepositoryId} indexing limitation: {Warning}", repository.Id, warning);
+        }
+        var indexMs = stage.Elapsed.TotalMilliseconds;
+        stage.Restart();
         var metadata = repository with { IndexedCommit = commit, FileCount = summary.FileCount, SymbolCount = summary.SymbolCount };
         var okfOptions = knowledge?.Value ?? new OkfOptions { Enabled = false };
         var reusedKnowledge = false;
@@ -196,6 +219,8 @@ public sealed class CodeSnapshotBuilder(IGitHubCodeClient github, CodeIndexFiles
         if (reusedKnowledge) okf = okf with { Limitations = reusedLimitations };
         if (okfOptions.Enabled && okfOptions.EnableLlmEnrichment && llm is null && !reusedKnowledge)
             okf = okf with { Status = "prepared-with-errors", Errors = [.. okf.Errors, "Knowledge generation provider unavailable."] };
+        var knowledgeMs = stage.Elapsed.TotalMilliseconds;
+        stage.Restart();
         CodeSemanticBuildResult? vectors = null;
         if (semantic is not null)
         {
@@ -219,6 +244,12 @@ public sealed class CodeSnapshotBuilder(IGitHubCodeClient github, CodeIndexFiles
             okf.Status, vectors?.Status ?? "disabled")
         {
             PreparationVersion = CodeSnapshotPreparation.Version,
+            DownloadMs = downloadMs,
+            IndexMs = indexMs,
+            KnowledgeMs = knowledgeMs,
+            SemanticMs = stage.Elapsed.TotalMilliseconds,
+            ParsedFiles = parsedFiles,
+            ReusedFiles = reusedFiles,
             KnowledgeProfile = CodeSnapshotPreparation.KnowledgeSettingsProfile(okfOptions),
             KnowledgeErrors = okf.Errors.Take(4).Select(error => SourceText.Redact(error)).Select(error => error[..Math.Min(error.Length, 256)]).ToArray(),
             KnowledgeLimitations = okf.Limitations.Take(4).Select(limit => SourceText.Redact(limit)).Select(limit => limit[..Math.Min(limit.Length, 256)]).ToArray(),
@@ -233,6 +264,8 @@ public sealed class CodeSnapshotBuilder(IGitHubCodeClient github, CodeIndexFiles
                 ? DateTimeOffset.UtcNow.AddSeconds(semantic.Options.BatchCooldownSeconds) : null
         };
         await File.WriteAllTextAsync(Path.Combine(files.Folder(repository), CodeSnapshotPreparation.FileName), JsonSerializer.Serialize(preparation), token);
+        logger?.LogInformation("Code indexing {RepositoryId}: download={DownloadMs}ms index={IndexMs}ms knowledge={KnowledgeMs}ms semantic={SemanticMs}ms parsed={ParsedFiles} reused={ReusedFiles}",
+            repository.Id, downloadMs, indexMs, knowledgeMs, preparation.SemanticMs, parsedFiles, reusedFiles);
         return summary;
     }
 
@@ -310,8 +343,14 @@ public sealed class CodeSnapshotBuilder(IGitHubCodeClient github, CodeIndexFiles
 
 public sealed record CodeSnapshotPreparation(string SettingsProfile, bool Complete, string KnowledgeStatus, string SemanticStatus)
 {
-    public const int Version = 5;
+    public const int Version = 6;
     public int PreparationVersion { get; init; }
+    public double DownloadMs { get; init; }
+    public double IndexMs { get; init; }
+    public double KnowledgeMs { get; init; }
+    public double SemanticMs { get; init; }
+    public int ParsedFiles { get; init; }
+    public int ReusedFiles { get; init; }
     public string KnowledgeProfile { get; init; } = "";
     public IReadOnlyList<string> KnowledgeErrors { get; init; } = [];
     public IReadOnlyList<string> KnowledgeLimitations { get; init; } = [];

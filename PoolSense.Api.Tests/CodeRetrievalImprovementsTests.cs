@@ -13,6 +13,57 @@ namespace PoolSense.Api.Tests;
 
 public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData("workflow")]
+    [InlineData("graph")]
+    public async Task ExactSymbol_AvoidsEmbeddingCallWhileWorkflowReturnsIndexedRelationships(string kind)
+    {
+        using var fixture = await RetrievalFixture.CreateAsync();
+        var provider = new FixtureEmbeddings();
+        var semantic = Semantic(provider);
+        foreach (var repository in fixture.Store.Entries)
+            await semantic.BuildAsync(fixture.Files.Database(repository), fixture.Files.Source(repository), fixture.Files.Folder(repository), repository.IndexedCommit);
+        provider.Calls = 0;
+        provider.Fail = true;
+        var exact = await Service(fixture, semantic).RetrieveAsync("CaptureCharge", ["project"], default);
+        Assert.Contains(exact.Documents, document => document.FilePath == "Orders.cs");
+        Assert.Equal(0, provider.Calls);
+        Assert.Equal("symbol", exact.Coverage.QueryKind);
+        Assert.DoesNotContain(exact.Coverage.Warnings, warning => warning.Contains("Semantic retrieval unavailable"));
+        var flow = await Service(fixture).RetrieveAsync($"CaptureCharge {kind}", ["project"], default);
+        Assert.Equal("workflow", flow.Coverage.QueryKind);
+        Assert.Contains(flow.Documents.SelectMany(document => document.Relationships),
+            relation => relation.Kind == "CALLS" && relation.FromSymbol.EndsWith("CaptureCharge", StringComparison.Ordinal)
+                && relation.ToSymbol.EndsWith("WriteLedger", StringComparison.Ordinal) && relation.SiteLine == 1);
+        Assert.Contains("lexicalGraph", flow.Coverage.TimingsMs.Keys);
+        Assert.Contains("authorization", flow.Coverage.TimingsMs.Keys);
+    }
+
+    [Fact]
+    public async Task RoutingShortlist_IsDeterministicRegardlessOfAuthorizationCompletionOrder()
+    {
+        using var fixture = await RetrievalFixture.CreateAsync();
+        fixture.Settings.RepositoryRoutingEnabled = true;
+        fixture.Settings.RepositoryShortlistSize = 1;
+        foreach (var repository in fixture.Store.Entries.Where(item => item.FullName.EndsWith("orders") || item.FullName.EndsWith("refunds")))
+        {
+            var file = repository.FullName.EndsWith("orders") ? "Orders.cs" : "Refunds.cs";
+            await File.WriteAllTextAsync(Path.Combine(fixture.Files.Source(repository), file),
+                "class Payment { /* orders refunds */ void CaptureCharge() {} }");
+            await new RepositoryIndexer().IndexAsync(fixture.Files.Source(repository), fixture.Files.Database(repository), true);
+        }
+        fixture.GitHub.SlowRepository = "orders";
+        var first = await Service(fixture).RetrieveAsync("orders refunds CaptureCharge", ["project"], default);
+        fixture.Store.Entries.Reverse();
+        fixture.GitHub.SlowRepository = "refunds";
+        var second = await Service(fixture).RetrieveAsync("orders refunds CaptureCharge", ["project"], default);
+        Assert.Equal(1, first.Coverage.SearchedRepositories);
+        Assert.Equal(1, second.Coverage.SearchedRepositories);
+        Assert.All(first.Documents.Concat(second.Documents), document => Assert.Equal("Orders.cs", document.FilePath));
+        Assert.NotEmpty(first.Documents);
+        Assert.NotEmpty(second.Documents);
+    }
+
     private static CodeKnowledgeService Service(RetrievalFixture fixture, CodeSemanticIndex? semantic = null, OkfOptions? knowledge = null) =>
         new(fixture.Store, null!, fixture.GitHub, fixture.Access, fixture.Files, fixture.Context,
             Microsoft.Extensions.Options.Options.Create(fixture.Settings), NullLogger<CodeKnowledgeService>.Instance, semantic,
@@ -49,6 +100,28 @@ public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
         Assert.False(result.Coverage.AuthorizationComplete);
         using var caller = new CancellationTokenSource(10);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Service(fixture).RetrieveAsync("CaptureCharge", ["project"], caller.Token));
+    }
+
+    [Fact]
+    public async Task DeadlineAfterSuccessfulAccess_DoesNotReportIncompleteAuthorization()
+    {
+        using var fixture = await RetrievalFixture.CreateAsync();
+        fixture.Store.Entries.RemoveAll(repository => !repository.FullName.EndsWith("/orders", StringComparison.Ordinal));
+        fixture.Settings.SearchDeadlineSeconds = .2;
+        fixture.GitHub.AfterAccessAsync = async token =>
+        {
+            // Return a successful permission response as the search deadline expires.
+            try { await Task.Delay(Timeout.Infinite, token); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        };
+        var result = await Service(fixture).RetrieveAsync("CaptureCharge", ["project"], default);
+        Assert.Equal("timed-out", result.Status);
+        Assert.Empty(result.Documents);
+        Assert.True(result.Coverage.DeadlineExceeded);
+        Assert.True(result.Coverage.AuthorizationComplete);
+        Assert.Equal(1, result.Coverage.AuthorizedRepositories);
+        Assert.Equal(0, result.Coverage.SearchedRepositories);
+        Assert.DoesNotContain("Access verification is incomplete", CodeRetrievalMessages.Notice(result));
     }
 
     [Fact]
@@ -278,7 +351,7 @@ public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task RequestScopedLexicalRetry_DoesNotGenerateASecondQueryEmbedding()
+    public async Task RequestScopedSecondConceptQuery_DoesNotGenerateASecondQueryEmbedding()
     {
         using var fixture = await RetrievalFixture.CreateAsync();
         var provider = new FixtureEmbeddings();
@@ -288,7 +361,7 @@ public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
         provider.Calls = 0;
         var service = Service(fixture, semantic);
         await service.RetrieveAsync("customer reimbursement", ["project"], default);
-        var second = await service.RetrieveAsync("CaptureCharge", ["project"], default);
+        var second = await service.RetrieveAsync("CaptureCharge OrderSettlement", ["project"], default);
         Assert.Equal(1, provider.Calls);
         Assert.Contains(second.Documents, document => document.FilePath == "Orders.cs");
         Assert.Contains(second.Coverage.Warnings, warning => warning.Contains("Semantic retrieval unavailable"));
@@ -467,7 +540,7 @@ public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
         foreach (var repository in fixture.Store.Entries)
             await semantic.BuildAsync(fixture.Files.Database(repository), fixture.Files.Source(repository), fixture.Files.Folder(repository), repository.IndexedCommit);
         provider.Fail = true;
-        var result = await Service(fixture, semantic).RetrieveAsync("CaptureCharge", ["project"], default);
+        var result = await Service(fixture, semantic).RetrieveAsync("CaptureCharge OrderSettlement", ["project"], default);
         Assert.Contains(result.Documents, document => document.FilePath == "Orders.cs");
         Assert.Contains(result.Coverage.Warnings, warning => warning.Contains("Semantic retrieval unavailable"));
         Assert.Contains("Semantic retrieval is limited", CodeRetrievalMessages.Notice(result));

@@ -13,7 +13,8 @@ public static class GraphStore
 {
     public const int Version = 1;
     public const int ApplicationId = 0x43524743;
-    public const string Parser = "roslyn-5-csharp";
+    public const string Parser = "roslyn-5-typescript-incremental-v2";
+    private const string LegacyParser = "roslyn-5-csharp";
     public static string RootKey(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)).ToLowerInvariant();
     public static SqliteConnection Open(string path, bool readOnly = false)
     {
@@ -51,6 +52,11 @@ public static class GraphStore
                     CREATE INDEX IF NOT EXISTS symbols_repo_kind ON symbols(repo_root,kind);
                     CREATE INDEX IF NOT EXISTS symbols_repo_name ON symbols(repo_root,name);
                     CREATE INDEX IF NOT EXISTS symbols_repo_file ON symbols(repo_root,file_path,start_line);
+                    CREATE INDEX IF NOT EXISTS symbols_parent ON symbols(parent_id);
+                    CREATE TABLE IF NOT EXISTS source_files(
+                      repo_root TEXT NOT NULL REFERENCES repositories(root) ON DELETE CASCADE,
+                      file_path TEXT NOT NULL, content_hash TEXT NOT NULL, parse_data TEXT NOT NULL,
+                      PRIMARY KEY(repo_root,file_path));
                     CREATE TABLE IF NOT EXISTS edges(
                       id INTEGER PRIMARY KEY, repo_root TEXT NOT NULL REFERENCES repositories(root) ON DELETE CASCADE,
                       from_id TEXT NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
@@ -58,6 +64,8 @@ public static class GraphStore
                       kind TEXT NOT NULL, site_line INTEGER, site_col INTEGER, resolution TEXT NOT NULL);
                     CREATE INDEX IF NOT EXISTS edges_from ON edges(repo_root,from_id);
                     CREATE INDEX IF NOT EXISTS edges_to ON edges(repo_root,to_id);
+                    CREATE INDEX IF NOT EXISTS edges_from_fk ON edges(from_id);
+                    CREATE INDEX IF NOT EXISTS edges_to_fk ON edges(to_id);
                     CREATE VIRTUAL TABLE IF NOT EXISTS symbol_search USING fts5(
                       symbol_id UNINDEXED,name,qualified_name,kind,source,docstring,tokenize='unicode61');
                     """);
@@ -77,6 +85,21 @@ public static class GraphStore
     {
         using var command = Command(db, sql, args);
         return command.ExecuteNonQuery();
+    }
+    public static SqliteCommand Prepare(SqliteConnection db, string sql, int parameterCount)
+    {
+        var command = db.CreateCommand();
+        command.CommandText = sql;
+        for (var index = 0; index < parameterCount; index++)
+            command.Parameters.Add(new SqliteParameter($"@p{index}", DBNull.Value));
+        command.Prepare();
+        return command;
+    }
+    public static void ExecutePrepared(SqliteCommand command, params object?[] args)
+    {
+        for (var index = 0; index < args.Length; index++)
+            command.Parameters[index].Value = args[index] ?? DBNull.Value;
+        command.ExecuteNonQuery();
     }
     public static object? Scalar(SqliteConnection db, string sql, params object?[] args)
     {
@@ -108,8 +131,8 @@ public static class GraphStore
         {
             using var db = Open(path, readOnly: true);
             return roots.All(root => Convert.ToInt32(Scalar(db,
-                "SELECT count(*) FROM repositories WHERE root=@p0 AND index_version=@p1 AND parser=@p2 AND (@p3=0 OR file_count>0)",
-                RootKey(root), Version, Parser, requireFiles ? 1 : 0)) == 1);
+                "SELECT count(*) FROM repositories WHERE root=@p0 AND index_version=@p1 AND parser IN (@p2,@p4) AND (@p3=0 OR file_count>0)",
+                RootKey(root), Version, Parser, requireFiles ? 1 : 0, LegacyParser)) == 1);
         }
         catch (SqliteException) { return false; }
         catch (InvalidDataException) { return false; }

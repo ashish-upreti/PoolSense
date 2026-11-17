@@ -1,5 +1,17 @@
 :host { display: block; min-width: 0; }
 .rich-response { overflow-wrap: anywhere; min-width: 0; }
+:host ::ng-deep .rich-response > div > p,
+:host ::ng-deep .rich-response > div > ul,
+:host ::ng-deep .rich-response > div > ol,
+:host ::ng-deep .rich-response > div > blockquote { margin-block: 0 .9rem; }
+:host ::ng-deep .rich-response > div > h1,
+:host ::ng-deep .rich-response > div > h2,
+:host ::ng-deep .rich-response > div > h3,
+:host ::ng-deep .rich-response > div > h4,
+:host ::ng-deep .rich-response > div > h5,
+:host ::ng-deep .rich-response > div > h6 { margin-block: 1.5rem .65rem; }
+:host ::ng-deep .rich-response > div > :first-child { margin-top: 0; }
+:host ::ng-deep .rich-response > div > :last-child { margin-bottom: 0; }
 /* Rich blocks are child components; shared styles are scoped below via the host ancestry. */
 :host ::ng-deep .rich-block {
   display: block; position: relative; inset: auto; width: 100%; max-width: 100%; margin: 1rem 0;

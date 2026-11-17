@@ -67,6 +67,18 @@ export function validateMermaid(source: string): void {
   if ((source.match(/-->|---|==>|-.->|->>|-->>/g) || []).length > 150) throw new Error('Diagram exceeds the 150 edge limit.')
 }
 
+export function prepareMermaid(source: string): string {
+  validateMermaid(source)
+  if (!/^\s*(flowchart|graph)\b/.test(source)) return source
+  const prepared = source.replace(/"[^"\r\n]*"|(\b[A-Za-z_][A-Za-z0-9_-]*)\[([^[\]"\r\n]*)\]/g,
+    (node: string, id: string | undefined, label: string | undefined) => {
+      if (!id || label === undefined || !/[{}()]/.test(label) || /^[(/\\]/.test(label)) return node
+      return `${id}["${label}"]`
+    })
+  validateMermaid(prepared)
+  return prepared
+}
+
 export function sanitizeDiagram(svg: string): string {
   return DOMPurify.sanitize(svg, {
     USE_PROFILES: { svg: true, svgFilters: true },

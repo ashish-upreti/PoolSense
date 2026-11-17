@@ -637,12 +637,43 @@
     padding-left: 2.1rem;
   }
 
+  .scope-add-control {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    color: var(--accent);
+  }
+
+  .scope-add-icon {
+    position: absolute;
+    left: 0.7rem;
+    width: 1rem;
+    height: 1rem;
+    pointer-events: none;
+  }
+
   .scope-add-select {
-    border: none;
-    background: transparent;
+    max-width: 100%;
+    border: 1px solid var(--accent-outline);
+    background: var(--accent-soft);
     color: var(--accent);
     font-weight: 800;
-    padding: 0.5rem 0.35rem;
+    padding: 0.5rem 0.65rem 0.5rem 2rem;
+  }
+
+  .scope-add-select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .scope-add-select:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .scope-add-control:has(.scope-add-select:disabled) .scope-add-icon {
+    opacity: 0.6;
   }
 
   .scope-chip {
@@ -4606,6 +4637,50 @@
 /* CodeRAG: Code Repositories screen */
 .code-rag-screen {
   grid-column: 2 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.code-rag-screen > .project-config-screen-header {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding-bottom: 0.5rem;
+}
+
+.code-rag-screen > .project-config-screen-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.code-rag-screen .panel-kicker {
+  margin: 0 0 0.2rem;
+}
+
+.code-rag-screen .workspace-copy {
+  margin: 0.25rem 0 0;
+  max-width: none;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.code-rag-screen > .project-studio {
+  flex: 1;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+/* Keep adjacent panels stationary so their hover hit areas never overlap. */
+.code-rag-screen .project-form-card:hover,
+.code-rag-screen .project-list-card:hover {
+  transform: none;
+}
+
+.code-rag-screen .project-form-card,
+.code-rag-screen .project-list-card {
+  transition: border-color 160ms ease, background-color 160ms ease;
 }
 
 .code-rag-screen .project-feedback-banner code {
@@ -4619,8 +4694,8 @@
 }
 
 .code-rag-controls {
-  gap: 1rem;
-  padding: 1rem;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--bubble-bg);
@@ -4628,7 +4703,22 @@
 
 .code-rag-control-grid {
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.code-rag-controls .field-group {
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.code-rag-controls .field-note {
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.code-rag-scope-row {
+  margin-top: 0;
 }
 
 .code-rag-actions {
@@ -4782,22 +4872,23 @@
 .code-rag-chat-card {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  min-height: 32rem;
-  padding: 1rem;
+  gap: 0.75rem;
+  min-height: 26rem;
+  padding: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--bubble-bg);
 }
 
 .code-rag-chat-heading {
-  padding-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border);
 }
 
 .code-rag-chat-heading h3 {
   margin: 0;
   font-size: 1rem;
+  overflow-wrap: anywhere;
 }
 
 .code-rag-chat-layout {

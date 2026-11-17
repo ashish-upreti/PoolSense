@@ -4,18 +4,34 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Text;
+using System.Text.Json;
 using static CodeRAG.Core.Storage.GraphStore;
 
 namespace CodeRAG.Core.Indexing;
 
-public sealed record IndexResult(IndexSummary Summary, IReadOnlyList<string> Warnings, bool Reused = false);
+public sealed record IndexResult(IndexSummary Summary, IReadOnlyList<string> Warnings, bool Reused = false)
+{
+    public int ParsedFiles { get; init; }
+    public int ReusedFiles { get; init; }
+}
 
 public sealed class RepositoryIndexer(IProcessRunner? processRunner = null)
 {
     private readonly IProcessRunner processes = processRunner ?? new ProcessRunner();
     private static readonly HashSet<string> Excluded = new(StringComparer.OrdinalIgnoreCase)
     { "bin", "obj", "node_modules", "packages", "testresults", "artifacts", "dist", "build", "coverage", "wwwroot" };
-    private sealed record Declaration(Symbol Symbol, SyntaxNode Node, string Namespace, string TypeName);
+    private sealed record Call(string Name, int Arguments, int? GenericArguments, string? Receiver, int Line, int Column);
+    private sealed record Declaration(Symbol Symbol, string Namespace, string TypeName, bool Callable,
+        int MinimumArguments, int MaximumArguments, int GenericArguments, string[] BaseTypes, Call[] Calls);
+    private sealed record CachedFile(string Hash, Symbol[] Symbols, Declaration[] Declarations, string[] Warnings);
+    public static bool IsCurrent(string database, string root)
+    {
+        if (!IsReady(database, [root])) return false;
+        using var db = Open(database, readOnly: true);
+        return Convert.ToInt32(Scalar(db, "SELECT count(*) FROM repositories WHERE root=@p0 AND parser=@p1", RootKey(root), Parser)) == 1;
+    }
+    public static string TypeScriptCachePath(string database) =>
+        Path.Combine(Path.GetDirectoryName(Path.GetFullPath(database))!, ".coderag-typescript", Path.GetFileName(database) + ".json");
     public async Task<IReadOnlyList<IndexResult>> IndexProjectAsync(Project project, string database, bool refresh = false,
         Action<string>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -27,7 +43,7 @@ public sealed class RepositoryIndexer(IProcessRunner? processRunner = null)
         return results;
     }
     public async Task<IndexResult> IndexAsync(string root, string database, bool refresh = false,
-        Action<string>? progress = null, CancellationToken cancellationToken = default)
+        Action<string>? progress = null, CancellationToken cancellationToken = default, string? previousDatabase = null)
     {
         root = Path.GetFullPath(root);
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException($"Repository folder does not exist: {root}");
@@ -43,6 +59,15 @@ public sealed class RepositoryIndexer(IProcessRunner? processRunner = null)
         var symbols = new List<Symbol>();
         var declarations = new List<Declaration>();
         var warnings = new List<string>();
+        using var previous = previousDatabase is not null && File.Exists(previousDatabase)
+            ? Open(previousDatabase, readOnly: true) : null;
+        var cacheDb = previous ?? db;
+        var canReuse = Convert.ToInt32(Scalar(cacheDb,
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='source_files'")) > 0 &&
+            Convert.ToInt32(Scalar(cacheDb, "SELECT count(*) FROM repositories WHERE parser=@p0", Parser)) > 0;
+        var cachedFiles = new List<(string Path, CachedFile Data)>();
+        var parsedFiles = 0;
+        var reusedFiles = 0;
         var fileCount = 0;
         foreach (var file in files)
         {
@@ -59,12 +84,39 @@ public sealed class RepositoryIndexer(IProcessRunner? processRunner = null)
                 text = new UTF8Encoding(false, true).GetString(bytes).TrimStart('\uFEFF');
             }
             catch (DecoderFallbackException) { warnings.Add($"{relative}: binary or unsupported text encoding"); continue; }
+            var hash = SourceText.Hash(text);
+            CachedFile? cached = null;
+            if (canReuse)
+            {
+                var raw = Query(cacheDb, """
+                    SELECT parse_data FROM source_files WHERE file_path=@p0 AND content_hash=@p1
+                    AND length(parse_data)<=16777216 LIMIT 1
+                    """, reader => reader.GetString(0), relative, hash).FirstOrDefault();
+                if (raw is not null)
+                {
+                    try { cached = JsonSerializer.Deserialize<CachedFile>(raw); }
+                    catch (JsonException) { warnings.Add($"{relative}: invalid parse cache; reparsing source"); }
+                }
+            }
+            if (cached is not null)
+            {
+                cached = Rebase(cached, key, relative);
+                symbols.AddRange(cached.Symbols);
+                declarations.AddRange(cached.Declarations);
+                warnings.AddRange(cached.Warnings);
+                cachedFiles.Add((relative, cached));
+                reusedFiles++;
+                continue;
+            }
+            var fileSymbols = new List<Symbol>();
+            var fileDeclarations = new List<Declaration>();
+            var fileWarnings = new List<string>();
             var lines = SourceText.Lines(text);
             var fileSymbol = new Symbol(SourceText.Hash($"{key}\0{relative}\0File"), key, relative, "File",
                 Path.GetFileName(file), relative, 1, Math.Max(1, lines.Length), null, "", "");
-            symbols.Add(fileSymbol);
+            fileSymbols.Add(fileSymbol);
             if (Path.GetExtension(file).Equals(".cs", StringComparison.OrdinalIgnoreCase))
-                Parse(text, fileSymbol, lines, symbols, declarations, warnings, cancellationToken);
+                Parse(text, fileSymbol, lines, fileSymbols, fileDeclarations, fileWarnings, cancellationToken);
             for (var start = 0; start < lines.Length;)
             {
                 var end = start;
@@ -76,14 +128,48 @@ public sealed class RepositoryIndexer(IProcessRunner? processRunner = null)
                     length += next;
                     end++;
                 }
-                symbols.Add(new(SourceText.Hash($"{fileSymbol.Id}\0chunk\0{start}"), key, relative,
+                fileSymbols.Add(new(SourceText.Hash($"{fileSymbol.Id}\0chunk\0{start}"), key, relative,
                     "SourceChunk", Path.GetFileName(file), $"{relative}:{start + 1}-{end}",
                     start + 1, end, fileSymbol.Id, string.Concat(lines[start..end]), ""));
                 if (end == lines.Length) break;
                 start = Math.Max(start + 1, end - 10);
             }
+            var parsed = Rebase(new(hash, fileSymbols.ToArray(), fileDeclarations.ToArray(), fileWarnings.ToArray()), key, relative);
+            symbols.AddRange(parsed.Symbols);
+            declarations.AddRange(parsed.Declarations);
+            warnings.AddRange(parsed.Warnings);
+            cachedFiles.Add((relative, parsed));
+            parsedFiles++;
         }
         var edges = BuildEdges(symbols, declarations, cancellationToken);
+        var scriptFiles = symbols.Where(symbol => symbol.Kind == "File" &&
+            Path.GetExtension(symbol.FilePath).ToLowerInvariant() is ".ts" or ".tsx" or ".js" or ".jsx")
+            .Select(symbol => symbol.FilePath).ToArray();
+        if (scriptFiles.Length > 0)
+        {
+            var cachePath = TypeScriptCachePath(database);
+            string? temporaryCache = null;
+            if (Path.GetRelativePath(root, cachePath) is var relativeCache && !relativeCache.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+                !Path.IsPathRooted(relativeCache))
+            {
+                temporaryCache = Path.Combine(Path.GetTempPath(), "poolsense-typescript", Guid.NewGuid().ToString("N"));
+                cachePath = Path.Combine(temporaryCache, "cache.json");
+                warnings.Add("TypeScript parse caching requires an index database outside the source root; using a temporary parse cache.");
+            }
+            try
+            {
+                var previousCache = previousDatabase is null ? cachePath : TypeScriptCachePath(previousDatabase);
+                var scriptIndex = await new TypeScriptIndexer(processes).IndexAsync(root, scriptFiles, cachePath,
+                    temporaryCache is null ? previousCache : null, cancellationToken);
+                symbols.AddRange(scriptIndex.Symbols);
+                edges.AddRange(scriptIndex.Edges);
+                warnings.AddRange(scriptIndex.Warnings);
+            }
+            finally
+            {
+                if (temporaryCache is not null && Directory.Exists(temporaryCache)) Directory.Delete(temporaryCache, true);
+            }
+        }
         cancellationToken.ThrowIfCancellationRequested();
         var summary = new IndexSummary(key, DateTimeOffset.UtcNow.ToString("O"),
             symbols.Count(s => s.Kind == "File"), symbols.Count, edges.Count, GraphStore.Version);
@@ -94,26 +180,50 @@ public sealed class RepositoryIndexer(IProcessRunner? processRunner = null)
             Execute(db, "DELETE FROM repositories WHERE root=@p0", key);
             Execute(db, "INSERT INTO repositories VALUES(@p0,@p1,@p2,@p3,@p4,@p5,@p6)",
                 key, summary.IndexedAt, summary.FileCount, summary.SymbolCount, summary.EdgeCount, GraphStore.Version, Parser);
+            using var insertSymbol = Prepare(db, "INSERT INTO symbols VALUES(@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10)", 11);
+            using var insertSearch = Prepare(db, "INSERT INTO symbol_search VALUES(@p0,@p1,@p2,@p3,@p4,@p5)", 6);
+            using var insertEdge = Prepare(db, "INSERT INTO edges(repo_root,from_id,to_id,kind,site_line,site_col,resolution) VALUES(@p0,@p1,@p2,@p3,@p4,@p5,@p6)", 7);
+            using var insertFile = Prepare(db, "INSERT INTO source_files VALUES(@p0,@p1,@p2,@p3)", 4);
             foreach (var s in symbols)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                Execute(db, "INSERT INTO symbols VALUES(@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10)",
+                ExecutePrepared(insertSymbol,
                     s.Id, key, s.FilePath, s.Kind, s.Name, s.QualifiedName, s.StartLine, s.EndLine, s.ParentId, s.Source, s.Docstring);
-                Execute(db, "INSERT INTO symbol_search VALUES(@p0,@p1,@p2,@p3,@p4,@p5)", s.Id,
+                ExecutePrepared(insertSearch, s.Id,
                     SourceText.Searchable(s.Name), SourceText.Searchable(s.QualifiedName), s.Kind,
                     SourceText.Searchable(s.Source), SourceText.Searchable(s.Docstring));
             }
             foreach (var edge in edges)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                Execute(db, "INSERT INTO edges(repo_root,from_id,to_id,kind,site_line,site_col,resolution) VALUES(@p0,@p1,@p2,@p3,@p4,@p5,@p6)",
+                ExecutePrepared(insertEdge,
                     key, edge.FromId, edge.ToId, edge.Kind, edge.SiteLine, edge.SiteColumn, edge.Resolution);
+            }
+            foreach (var file in cachedFiles)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var data = JsonSerializer.Serialize(file.Data);
+                if (data.Length <= 16_777_216) ExecutePrepared(insertFile, key, file.Path, file.Data.Hash, data);
+                else warnings.Add($"{file.Path}: parsed source exceeds cache limit; next refresh will reparse it");
             }
             cancellationToken.ThrowIfCancellationRequested();
             Execute(db, "COMMIT");
         }
         catch { Execute(db, "ROLLBACK"); throw; }
-        return new(summary, warnings);
+        return new(summary, warnings) { ParsedFiles = parsedFiles, ReusedFiles = reusedFiles };
+    }
+
+    private static CachedFile Rebase(CachedFile file, string key, string path)
+    {
+        var fileId = SourceText.Hash($"{key}\0{path}\0File");
+        var ids = file.Symbols.Select((symbol, index) => (symbol.Id, Next: index == 0 ? fileId : SourceText.Hash($"{fileId}\0symbol\0{index}")))
+            .ToDictionary(item => item.Id, item => item.Next, StringComparer.Ordinal);
+        Symbol Map(Symbol symbol) => symbol with { Id = ids[symbol.Id], RepoRoot = key, ParentId = symbol.ParentId is null ? null : ids[symbol.ParentId] };
+        return file with
+        {
+            Symbols = file.Symbols.Select(Map).ToArray(),
+            Declarations = file.Declarations.Select(item => item with { Symbol = Map(item.Symbol) }).ToArray()
+        };
     }
 
     public async Task<IReadOnlyList<string>> DiscoverAsync(string root, CancellationToken token = default)
@@ -186,8 +296,47 @@ public sealed class RepositoryIndexer(IProcessRunner? processRunner = null)
                 string.Concat(lines[(start - 1)..end]), SourceText.Take(docs, 2000));
             nodes[node] = s;
             symbols.Add(s);
-            declarations.Add(new(s, node, ns, type is null ? "" :
-                string.Join(".", type.AncestorsAndSelf().OfType<BaseTypeDeclarationSyntax>().Reverse().Select(t => t.Identifier.ValueText))));
+            var parameters = node switch
+            {
+                MethodDeclarationSyntax method => method.ParameterList.Parameters,
+                ConstructorDeclarationSyntax constructor => constructor.ParameterList.Parameters,
+                LocalFunctionStatementSyntax local => local.ParameterList.Parameters,
+                _ => default
+            };
+            var genericCount = node switch
+            {
+                MethodDeclarationSyntax method => method.TypeParameterList?.Parameters.Count ?? 0,
+                LocalFunctionStatementSyntax local => local.TypeParameterList?.Parameters.Count ?? 0,
+                _ => 0
+            };
+            var calls = new List<Call>();
+            if (kind == "Member")
+                foreach (var invocation in node.DescendantNodes(n => n == node || n is not LocalFunctionStatementSyntax)
+                    .OfType<InvocationExpressionSyntax>())
+                {
+                    var simple = invocation.Expression switch
+                    {
+                        SimpleNameSyntax simpleName => simpleName,
+                        MemberAccessExpressionSyntax member => member.Name,
+                        MemberBindingExpressionSyntax binding => binding.Name,
+                        _ => null
+                    };
+                    if (simple is null) continue;
+                    var site = invocation.GetLocation().GetLineSpan().StartLinePosition;
+                    calls.Add(new(simple.Identifier.ValueText, invocation.ArgumentList.Arguments.Count,
+                        simple is GenericNameSyntax generic ? generic.TypeArgumentList.Arguments.Count : null,
+                        invocation.Expression is MemberAccessExpressionSyntax access ? access.Expression.ToString() : null,
+                        site.Line + 1, site.Character));
+                }
+            declarations.Add(new(s, ns, type is null ? "" :
+                string.Join(".", type.AncestorsAndSelf().OfType<BaseTypeDeclarationSyntax>().Reverse().Select(t => t.Identifier.ValueText)),
+                node is MethodDeclarationSyntax or ConstructorDeclarationSyntax or LocalFunctionStatementSyntax,
+                parameters.Count(parameter => parameter.Default is null && !parameter.Modifiers.Any(SyntaxKind.ParamsKeyword)),
+                parameters.Any(parameter => parameter.Modifiers.Any(SyntaxKind.ParamsKeyword)) ? int.MaxValue : parameters.Count,
+                genericCount,
+                node is BaseTypeDeclarationSyntax { BaseList: { } bases } ? bases.Types
+                    .Select(baseType => baseType.Type.ToString().Replace("global::", "", StringComparison.Ordinal).Split('<')[0]).ToArray() : [],
+                calls.ToArray()));
         }
     }
     private static string Join(string a, string b) => a.Length == 0 ? b : a + "." + b;
@@ -204,36 +353,26 @@ public sealed class RepositoryIndexer(IProcessRunner? processRunner = null)
     private static List<Edge> BuildEdges(List<Symbol> symbols, List<Declaration> declarations, CancellationToken token)
     {
         var edges = symbols.Where(s => s.ParentId is not null).Select(s => new Edge(s.ParentId!, s.Id, "DEFINES")).ToList();
-        var types = declarations.Where(d => d.Node is BaseTypeDeclarationSyntax).ToArray();
-        var methods = declarations.Where(d => d.Node is MethodDeclarationSyntax or ConstructorDeclarationSyntax or LocalFunctionStatementSyntax).ToArray();
+        var types = declarations.Where(d => d.Symbol.Kind is "Class" or "Struct" or "Interface" or "Enum" or "Record")
+            .ToLookup(d => d.Symbol.QualifiedName, StringComparer.Ordinal);
+        var methods = declarations.Where(d => d.Callable).ToLookup(d => d.Symbol.Name, StringComparer.Ordinal);
         foreach (var d in declarations)
         {
             token.ThrowIfCancellationRequested();
-            if (d.Node is BaseTypeDeclarationSyntax type && type.BaseList is not null)
-                foreach (var baseType in type.BaseList.Types)
+            foreach (var fullName in d.BaseTypes)
                 {
-                    var fullName = baseType.Type.ToString().Replace("global::", "", StringComparison.Ordinal).Split('<')[0];
-                    var possible = types.Where(t => t.Symbol.QualifiedName == fullName ||
-                        t.Symbol.QualifiedName == Join(d.Namespace, fullName)).ToArray();
+                    var possible = types[fullName].Concat(types[Join(d.Namespace, fullName)]).DistinctBy(t => t.Symbol.Id).ToArray();
                     if (possible.Length == 1)
                         edges.Add(new(d.Symbol.Id, possible[0].Symbol.Id, possible[0].Symbol.Kind == "Interface" &&
                             d.Symbol.Kind != "Interface" ? "IMPLEMENTS" : "INHERITS", Resolution: "scoped-syntax"));
                 }
             if (d.Symbol.Kind != "Member") continue;
-            foreach (var call in d.Node.DescendantNodes(n => n == d.Node || n is not LocalFunctionStatementSyntax)
-                .OfType<InvocationExpressionSyntax>())
+            foreach (var call in d.Calls)
             {
-                var simple = call.Expression switch
-                {
-                    SimpleNameSyntax s => s,
-                    MemberAccessExpressionSyntax m => m.Name,
-                    MemberBindingExpressionSyntax b => b.Name,
-                    _ => null
-                };
-                if (simple is null) continue;
-                var candidates = methods.Where(m => m.Symbol.Name == simple.Identifier.ValueText &&
-                    MatchesArity(m.Node, call.ArgumentList.Arguments.Count, simple is GenericNameSyntax g ? g.TypeArgumentList.Arguments.Count : null)).ToArray();
-                var receiver = call.Expression is MemberAccessExpressionSyntax access ? access.Expression.ToString() : null;
+                var candidates = methods[call.Name].Where(m =>
+                    (!call.GenericArguments.HasValue || call.GenericArguments == m.GenericArguments) &&
+                    call.Arguments >= m.MinimumArguments && call.Arguments <= m.MaximumArguments).ToArray();
+                var receiver = call.Receiver;
                 var scoped = candidates.Where(m => m.Namespace == d.Namespace && m.TypeName == d.TypeName).ToArray();
                 if (receiver is null or "this")
                 {
@@ -247,30 +386,10 @@ public sealed class RepositoryIndexer(IProcessRunner? processRunner = null)
                 }
                 if (candidates.Length == 1)
                 {
-                    var site = call.GetLocation().GetLineSpan().StartLinePosition;
-                    edges.Add(new(d.Symbol.Id, candidates[0].Symbol.Id, "CALLS", site.Line + 1, site.Character, "scoped-syntax"));
+                    edges.Add(new(d.Symbol.Id, candidates[0].Symbol.Id, "CALLS", call.Line, call.Column, "scoped-syntax"));
                 }
             }
         }
         return edges.Distinct().ToList();
-    }
-    private static bool MatchesArity(SyntaxNode node, int arguments, int? genericArguments)
-    {
-        var parameters = node switch
-        {
-            MethodDeclarationSyntax m => m.ParameterList.Parameters,
-            ConstructorDeclarationSyntax c => c.ParameterList.Parameters,
-            LocalFunctionStatementSyntax l => l.ParameterList.Parameters,
-            _ => default
-        };
-        var genericCount = node switch
-        {
-            MethodDeclarationSyntax m => m.TypeParameterList?.Parameters.Count ?? 0,
-            LocalFunctionStatementSyntax l => l.TypeParameterList?.Parameters.Count ?? 0,
-            _ => 0
-        };
-        return (!genericArguments.HasValue || genericArguments == genericCount) &&
-            arguments >= parameters.Count(p => p.Default is null && !p.Modifiers.Any(SyntaxKind.ParamsKeyword)) &&
-            (arguments <= parameters.Count || parameters.Any(p => p.Modifiers.Any(SyntaxKind.ParamsKeyword)));
     }
 }

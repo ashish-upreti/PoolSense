@@ -30,6 +30,9 @@ public static class RichResponseGuidance
           In plain-text-only response fields, retain plain metadata; do not insert Markdown there.
         - Top-level ```mermaid fences support flowchart/graph, sequenceDiagram, pie, timeline and mindmap.
           Organization charts use flowchart trees. Label conceptual diagrams as conceptual.
+          Always double-quote flowchart node labels, especially routes, placeholders and parentheses:
+          A["Submit question"] --> B["POST /pool/{poolId}/troubleshoot"].
+          Use #quot; for a literal double quote inside a label. Do not emit B[POST /pool/{poolId}/troubleshoot].
           No HTML, click/link directives, init/config directives, custom styling, images or external resources.
           Keep diagrams within 100 lines, 8000 characters and 150 edges.
         - Top-level ```chart fences contain ONLY JSON using this exact constrained schema:

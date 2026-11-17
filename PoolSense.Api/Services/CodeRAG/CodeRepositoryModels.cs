@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using System.Text.Json;
 
 namespace PoolSense.Api.Services.CodeRAG;
 
@@ -66,7 +67,13 @@ public sealed record CodeRepositoryResponse(string Id, string ProjectId, string 
 
 /// <summary>Commit-pinned source evidence returned only after current managed-PAT access checks.</summary>
 public sealed record CodeEvidence(string RepositoryId, string ProjectId, string Repository, string Branch,
-    string Commit, string FilePath, string Symbol, int StartLine, int EndLine, string Content, string SourceUrl);
+    string Commit, string FilePath, string Symbol, int StartLine, int EndLine, string Content, string SourceUrl)
+{
+    public IReadOnlyList<CodeRelationship> Relationships { get; init; } = [];
+}
+
+public sealed record CodeRelationship(string Kind, string FromSymbol, string ToSymbol, string FilePath,
+    int SiteLine, string TargetFilePath, int TargetLine, string Resolution);
 
 public sealed record CodeRetrievalResult(string Status, IReadOnlyList<CodeEvidence> Documents)
 {
@@ -76,6 +83,8 @@ public sealed record CodeRetrievalResult(string Status, IReadOnlyList<CodeEviden
 
 public sealed record CodeSearchCoverage
 {
+    public IReadOnlyDictionary<string, double> TimingsMs { get; init; } = new Dictionary<string, double>();
+    public string QueryKind { get; init; } = "concept";
     public int AuthorizedRepositories { get; init; }
     public int SearchedRepositories { get; init; }
     public int FailedRepositories { get; init; }
@@ -140,13 +149,70 @@ public sealed record CodeAskRequest
     [MaxLength(32)] public string? SessionId { get; init; }
 }
 
+/// <summary>Asks a question against the indexed repositories of several applications (empty <see cref="ProjectIds"/> = every application).</summary>
+public sealed record CodeScopedAskRequest
+{
+    [MaxLength(500)] public IReadOnlyList<string> ProjectIds { get; init; } = [];
+    [Required, MaxLength(4000)] public string Question { get; init; } = "";
+    [MaxLength(20)] public IReadOnlyList<CodeChatTurn> History { get; init; } = [];
+    [MaxLength(32)] public string? SessionId { get; init; }
+
+    public CodeAskRequest ToAskRequest() => new() { Question = Question, History = History, SessionId = SessionId };
+}
+
+/// <summary>
+/// The set of applications a code conversation runs against. Empty <see cref="ProjectIds"/> means every application;
+/// a single id maps onto the legacy per-application session shape so existing history stays visible.
+/// </summary>
+public sealed record CodeChatScope
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private CodeChatScope(IReadOnlyList<string> projectIds) => ProjectIds = projectIds;
+
+    public static CodeChatScope All { get; } = new([]);
+
+    public IReadOnlyList<string> ProjectIds { get; }
+    public bool IsAll => ProjectIds.Count == 0;
+    public string? ProjectId => ProjectIds.Count == 1 ? ProjectIds[0] : null;
+    /// <summary>Persisted scope for multi-application and all-application sessions; null for single-application sessions.</summary>
+    public string? ScopeJson => ProjectIds.Count == 1 ? null : JsonSerializer.Serialize(ProjectIds, JsonOptions);
+
+    public static CodeChatScope From(IEnumerable<string>? projectIds)
+    {
+        var normalized = (projectIds ?? [])
+            .Select(id => id?.Trim() ?? "")
+            .Where(id => id.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return normalized.Length == 0 ? All : new(normalized);
+    }
+
+    public static CodeChatScope FromStored(string? projectId, string? scopeJson)
+    {
+        if (string.IsNullOrWhiteSpace(scopeJson)) return From(projectId is null ? [] : [projectId]);
+        try { return From(JsonSerializer.Deserialize<List<string>>(scopeJson, JsonOptions)); }
+        catch (JsonException) { return All; }
+    }
+
+    public bool Contains(string projectId) => ProjectIds.Contains(projectId, StringComparer.OrdinalIgnoreCase);
+}
+
 public sealed record CodeAskResponse(string ProjectId, string SessionId, string Question, string Answer, DateTimeOffset GeneratedAt,
     string CodeKnowledgeStatus, IReadOnlyList<CodeEvidence> Citations)
 {
+    public IReadOnlyDictionary<string, double> TimingsMs { get; init; } = new Dictionary<string, double>();
     public CodeSearchCoverage? CodeSearchCoverage { get; init; }
+    /// <summary>Applications the answer was scoped to; empty means every application.</summary>
+    public IReadOnlyList<string> ProjectIds { get; init; } = ProjectId.Length == 0 ? [] : [ProjectId];
 }
 
-public sealed record CodeChatSessionSummary(string Id, string ProjectId, string Title, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int MessageCount);
+/// <summary><paramref name="ProjectId"/> is empty for multi-application sessions; <see cref="ProjectIds"/> is empty for all-application sessions.</summary>
+public sealed record CodeChatSessionSummary(string Id, string ProjectId, string Title, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int MessageCount)
+{
+    public IReadOnlyList<string> ProjectIds { get; init; } = ProjectId.Length == 0 ? [] : [ProjectId];
+}
 
 public sealed record CodeChatStoredMessage(string Role, string Content, IReadOnlyList<CodeEvidence> Citations, DateTimeOffset CreatedAt);
 

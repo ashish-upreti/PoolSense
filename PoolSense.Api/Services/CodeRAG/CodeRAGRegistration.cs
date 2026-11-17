@@ -28,6 +28,7 @@ public static class CodeRAGRegistration
             if (settings.Semantic.Enabled && settings.Semantic.Dimensions != 1536)
                 throw new InvalidOperationException("CodeRAG semantic dimensions must match the configured NYRA embedding dimensions (1536).");
             if (settings.Semantic.MaxChunks is < 1 or > 768 || settings.Semantic.MaxNewEmbeddingsPerBuild is < 0 or > 64
+                || settings.Semantic.EmbeddingBatchSize is < 1 or > 16
                 || settings.Semantic.BatchCooldownSeconds is < 60 or > 3600
                 || settings.Semantic.SmallRepositoryTarget is < 1 or > 768
                 || settings.Semantic.MediumRepositoryTarget is < 1 or > 768
