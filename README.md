@@ -6,6 +6,14 @@ PoolSense combines pool ticket history, project-scoped NYRA Wiki documents, and 
 
 See [GitHub Code Knowledge setup](CodeKnowledge.md) for PAT configuration, database setup, hourly refresh, security boundaries, and verification steps.
 
+## Watch the walkthrough
+
+[![PoolSense walkthrough video poster](docs/media/poolsense-walkthrough-poster.jpg)](docs/media/poolsense-walkthrough.mp4)
+
+**A 116-second product tour**: choosing an application scope, asking an incident question, reviewing the suggested fix, expanding the detailed analysis and evidence, asking follow-ups, reopening saved conversations, and managing code repositories and recommendations. Narration and captions are included — captions: [poolsense-walkthrough-captions.vtt](docs/media/poolsense-walkthrough-captions.vtt). Narration is locally generated synthetic speech. All on-screen data is illustrative demo data, not production records.
+
+GitHub plays the MP4 on its file page when you click the poster above; the relative links work wherever this repository is hosted or self-hosted next to the checkout.
+
 At a high level, PoolSense does four things:
 
 1. Accepts an incident or ticket description from a user or integrated client.
