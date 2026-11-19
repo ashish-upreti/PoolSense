@@ -1,0 +1,42 @@
+WEBVTT
+
+NOTE Locally generated synthetic narration (Microsoft Zira Desktop). All on-screen content is illustrative demo data.
+
+00:00:03.760 --> 00:00:17.358
+Welcome to PoolSense, an incident assistant for operations teams. PoolSense combines ticket history, Wiki documents, and indexed source code to suggest a root cause and a fix. Everything in this walkthrough is illustrative demo data.
+
+00:00:19.958 --> 00:00:27.977
+First, choose an application scope. PoolSense limits every search to the applications you select, keeping results relevant.
+
+00:00:30.777 --> 00:00:39.981
+Describe the issue in plain language, and send it. PoolSense plans its sources, then searches similar incidents, Wiki pages, and indexed code.
+
+00:00:42.781 --> 00:00:49.425
+Each answer shows a confidence score, the sources used, a suggested root cause, and a clear resolution.
+
+00:00:52.225 --> 00:00:57.489
+Expand the detailed analysis for diagrams, charts, and the full reasoning behind the answer.
+
+00:01:00.189 --> 00:01:06.713
+The evidence panel groups similar incidents, Wiki documents, and code excerpts, each linked back to its source.
+
+00:01:09.513 --> 00:01:17.097
+You can ask follow-up questions. PoolSense keeps the conversation context, and retrieves fresh evidence for every answer.
+
+00:01:19.897 --> 00:01:27.306
+Conversation history is saved automatically. Reopen a saved investigation at any time, and continue where you left off.
+
+00:01:30.006 --> 00:01:48.109
+Application Configuration brings global and per-application controls together. Review polling cadence, the master email switch, project-specific recipients, and ingestion status. Open a project to inspect its knowledge scope and repository settings. This demo only views sample values.
+
+00:02:09.009 --> 00:02:25.737
+Code Repositories provides scoped chat over indexed source. Select Atlas Platform to review its sample repositories and readiness, then ask a question about scheduler retry behavior. GitHub connectivity and indexed content here are mocked demo data; no real service is contacted.
+
+00:02:45.637 --> 00:02:58.236
+Pool Recommendations lists saved reports from background processing. Filter by application and date range, including All time, then review each sample summary, delivery status, confidence, and report link.
+
+00:03:18.136 --> 00:03:29.550
+Application Feedback is a separate place to submit product feedback. The page also summarizes usage and feedback metrics, so operators can review these signals without mixing them into incident triage.
+
+00:03:43.450 --> 00:03:50.584
+That completes our tour of PoolSense, from incident triage through administration and feedback. Thank you for watching.

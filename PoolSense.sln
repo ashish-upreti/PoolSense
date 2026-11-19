@@ -1,3 +1,4 @@
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -20,6 +21,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoolSense.Api.Tests", "PoolSense.Api.Tests\PoolSense.Api.Tests.csproj", "{6C603B3C-837B-5159-804D-7F8253D1EC13}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoolSense.CodeRAG", "PoolSense.CodeRAG\PoolSense.CodeRAG.csproj", "{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -103,6 +106,18 @@ Global
 		{6C603B3C-837B-5159-804D-7F8253D1EC13}.Release|x64.Build.0 = Release|Any CPU
 		{6C603B3C-837B-5159-804D-7F8253D1EC13}.Release|x86.ActiveCfg = Release|Any CPU
 		{6C603B3C-837B-5159-804D-7F8253D1EC13}.Release|x86.Build.0 = Release|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Debug|x64.Build.0 = Debug|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Debug|x86.Build.0 = Debug|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Release|x64.ActiveCfg = Release|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Release|x64.Build.0 = Release|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Release|x86.ActiveCfg = Release|Any CPU
+		{1A18CDBB-C856-43D6-A9B1-C2FD6222DA5C}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

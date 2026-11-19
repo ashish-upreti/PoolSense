@@ -137,7 +137,7 @@ Any team member can open the Angular UI, describe an issue, and receive AI-gener
 **A:** The UI is a single-page two-panel layout:
 
 - **Left panel (Chat):** Conversational interface where users describe their problem and receive root cause + resolution suggestions.
-- **Right panel (Insights):** Confidence gauge, telemetry chart, similar historical incidents with similarity scores, failure pattern details, and AI reasoning.
+- **Right panel (Insights):** Confidence gauge, similar historical incidents with similarity scores, failure pattern details, AI reasoning, and source evidence.
 - **Group selector:** Allows scoping the query to specific project groups (e.g., ATCR, FSCO-FAB).
 
 ### Q: How does the system learn from new tickets?
@@ -176,7 +176,7 @@ Teams see only their own knowledge base while sharing the same platform infrastr
 | **Knowledge Store** | SQL Server | Structured knowledge, embeddings as JSON arrays, feedback, logs, project configs, and ingestion tracking |
 | **Ticket Source** | SQL Server | Source of historical/new ticket data plus `tbl_Application.PoolSense` application enablement flag |
 | **Frontend** | Angular 18 + TypeScript 5 | Interactive operator workspace |
-| **Visualization** | Angular templates and CSS | Telemetry, confidence, and insight presentation |
+| **Visualization** | Angular templates and CSS | Confidence, evidence, and rich-response visualization |
 | **Email** | System.Net.Mail / SMTP or SQL Server Database Mail | Automated recommendation delivery |
 
 ### Q: What does the architecture look like?
@@ -265,7 +265,7 @@ Teams see only their own knowledge base while sharing the same platform infrastr
 
 | Model | Purpose | Dimensions |
 |-------|---------|------------|
-| **GPT chat model** (configurable, currently gpt-5.4 in dev) | Ticket analysis, resolution generation, failure pattern extraction, query variant generation | N/A |
+| **GPT chat model** (configurable, currently gpt-6-luna in dev) | Ticket analysis, resolution generation, failure pattern extraction, query variant generation | N/A |
 | **text-embedding-3-large** | Converts ticket text into 1536-dimensional vectors for similarity search | 1536 |
 
 ### Q: How does the AI analyze a ticket?

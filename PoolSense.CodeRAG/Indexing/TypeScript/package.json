@@ -1,0 +1,9 @@
+{
+  "name": "poolsense-typescript-indexer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Trusted, syntax-only TypeScript compiler host for CodeRAG",
+  "dependencies": {
+    "typescript": "5.9.3"
+  }
+}

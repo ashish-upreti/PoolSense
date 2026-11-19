@@ -3,6 +3,7 @@ using Microsoft.SemanticKernel;
 using PoolSense.Api.Agents;
 using PoolSense.Api.Configuration;
 using PoolSense.Api.Logging;
+using Microsoft.SemanticKernel.Connectors.OpenAI;
 
 namespace PoolSense.Api.Services;
 
@@ -17,6 +18,10 @@ public interface ILLMService
     /// <param name="prompt">The prompt text to submit.</param>
     /// <returns>The model response.</returns>
     Task<string> GetResponseAsync(string prompt);
+    /// <summary>Same request as <see cref="GetResponseAsync(string)"/>, but the caller can abandon it, e.g. on a request time limit.</summary>
+    Task<string> GetResponseAsync(string prompt, CancellationToken token) => GetResponseAsync(prompt).WaitAsync(token);
+    Task<string> GetBoundedResponseAsync(string prompt, int maxOutputTokens, CancellationToken token) =>
+        throw new NotSupportedException("This provider does not support bounded generation.");
 }
 
 /// <summary>
@@ -24,6 +29,8 @@ public interface ILLMService
 /// </summary>
 public class LLMService : ILLMService
 {
+    // Bind assembled evidence as data; only this trusted message wrapper is a template.
+    private const string LiteralPromptTemplate = """<message role="user">{{$prompt}}</message>""";
     private readonly Kernel _kernel;
     private readonly ILlmTokenUsageRepository _tokenUsageRepository;
     private readonly IOptionsMonitor<NyraSettings> _nyraSettings;
@@ -47,14 +54,30 @@ public class LLMService : ILLMService
     /// </summary>
     /// <param name="prompt">The prompt text to submit.</param>
     /// <returns>The model response.</returns>
-    public async Task<string> GetResponseAsync(string prompt)
+    public Task<string> GetResponseAsync(string prompt) => GetResponseAsync(prompt, CancellationToken.None);
+
+    public async Task<string> GetResponseAsync(string prompt, CancellationToken token)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         return await SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(
             _kernel,
-            prompt,
-            new KernelArguments(),
+            LiteralPromptTemplate,
+            new KernelArguments { ["prompt"] = prompt },
             _tokenUsageRepository,
             "GenericPrompt",
-            _nyraSettings.CurrentValue.Model);
+            _nyraSettings.CurrentValue.Model,
+            token);
+    }
+
+    public Task<string> GetBoundedResponseAsync(string prompt, int maxOutputTokens, CancellationToken token)
+    {
+        if (maxOutputTokens is < 1 or > 4096) throw new ArgumentOutOfRangeException(nameof(maxOutputTokens));
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        return SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(_kernel, LiteralPromptTemplate,
+            new KernelArguments(new OpenAIPromptExecutionSettings { MaxTokens = maxOutputTokens, Temperature = 0 })
+            {
+                ["prompt"] = prompt
+            },
+            _tokenUsageRepository, "CodeKnowledgePreparation", _nyraSettings.CurrentValue.Model, token);
     }
 }

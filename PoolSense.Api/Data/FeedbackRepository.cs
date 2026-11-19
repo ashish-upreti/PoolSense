@@ -1,5 +1,6 @@
 using Microsoft.Data.SqlClient;
 using PoolSense.Api.Feedback;
+using System.Data;
 
 namespace PoolSense.Api.Data;
 
@@ -134,44 +135,42 @@ public sealed class FeedbackRepository : IFeedbackRepository
         await EnsureTableAsync(connection, cancellationToken);
 
         var now = DateTime.UtcNow;
-        var rangeStart = isAllTime ? DateTime.MinValue : now.AddDays(-rangeDays);
-        var previousRangeStart = isAllTime ? DateTime.MinValue : now.AddDays(-(rangeDays * 2));
-        var chartDays = isAllTime ? 90 : rangeDays;
-        var chartStart = now.Date.AddDays(-(chartDays - 1));
+        var insightsRange = ApplicationFeedbackInsightsRange.Create(rangeDays, now);
+        var chartStart = insightsRange.ChartStart;
 
         const string sql = """
             SELECT
                 COUNT(*) AS total_feedback,
-                ISNULL(SUM(CASE WHEN @isAllTime = 1 OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS feedback_last_30_days,
-                ISNULL(SUM(CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart THEN 1 ELSE 0 END), 0) AS previous_feedback_30_days
+                ISNULL(SUM(CASE WHEN @rangeStart IS NULL OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS feedback_last_30_days,
+                ISNULL(SUM(CASE WHEN @previousRangeStart IS NOT NULL AND created_at >= @previousRangeStart AND created_at < @rangeStart THEN 1 ELSE 0 END), 0) AS previous_feedback_30_days
             FROM dbo.application_feedback_logs;
 
             SELECT
-                ISNULL(SUM(CASE WHEN (@isAllTime = 1 OR created_at >= @rangeStart) AND feedback_type = 1 THEN 1 ELSE 0 END), 0) AS helpful_ai_feedback_last_30_days,
-                ISNULL(SUM(CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart AND feedback_type = 1 THEN 1 ELSE 0 END), 0) AS previous_helpful_ai_feedback_30_days,
-                ISNULL(SUM(CASE WHEN @isAllTime = 1 OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS total_ai_feedback_last_30_days,
-                ISNULL(SUM(CASE WHEN (@isAllTime = 1 OR created_at >= @rangeStart) AND feedback_type = -1 THEN 1 ELSE 0 END), 0) AS not_helpful_ai_feedback_last_30_days
+                ISNULL(SUM(CASE WHEN (@rangeStart IS NULL OR created_at >= @rangeStart) AND feedback_type = 1 THEN 1 ELSE 0 END), 0) AS helpful_ai_feedback_last_30_days,
+                ISNULL(SUM(CASE WHEN @previousRangeStart IS NOT NULL AND created_at >= @previousRangeStart AND created_at < @rangeStart AND feedback_type = 1 THEN 1 ELSE 0 END), 0) AS previous_helpful_ai_feedback_30_days,
+                ISNULL(SUM(CASE WHEN @rangeStart IS NULL OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS total_ai_feedback_last_30_days,
+                ISNULL(SUM(CASE WHEN (@rangeStart IS NULL OR created_at >= @rangeStart) AND feedback_type = -1 THEN 1 ELSE 0 END), 0) AS not_helpful_ai_feedback_last_30_days
             FROM dbo.feedback_logs;
 
             SELECT
-                COUNT(DISTINCT CASE WHEN (@isAllTime = 1 OR created_at >= @rangeStart) AND success = 1 THEN NULLIF(LOWER(LTRIM(RTRIM(username))), '') END) AS unique_active_users_last_30_days,
-                COUNT(DISTINCT CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart AND success = 1 THEN NULLIF(LOWER(LTRIM(RTRIM(username))), '') END) AS previous_unique_active_users_30_days,
+                COUNT(DISTINCT CASE WHEN (@rangeStart IS NULL OR created_at >= @rangeStart) AND success = 1 THEN NULLIF(LOWER(LTRIM(RTRIM(username))), '') END) AS unique_active_users_last_30_days,
+                COUNT(DISTINCT CASE WHEN @previousRangeStart IS NOT NULL AND created_at >= @previousRangeStart AND created_at < @rangeStart AND success = 1 THEN NULLIF(LOWER(LTRIM(RTRIM(username))), '') END) AS previous_unique_active_users_30_days,
                 COUNT(DISTINCT CASE WHEN created_at >= CAST(@now AS date) AND success = 1 THEN NULLIF(LOWER(LTRIM(RTRIM(username))), '') END) AS users_today,
                 COUNT(DISTINCT CASE WHEN created_at >= DATEADD(day, -1, CAST(@now AS date)) AND created_at < CAST(@now AS date) AND success = 1 THEN NULLIF(LOWER(LTRIM(RTRIM(username))), '') END) AS users_yesterday,
-                ISNULL(SUM(CASE WHEN (@isAllTime = 1 OR created_at >= @rangeStart) AND success = 1 THEN 1 ELSE 0 END), 0) AS total_logins_last_30_days,
-                ISNULL(SUM(CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart AND success = 1 THEN 1 ELSE 0 END), 0) AS previous_total_logins_30_days
+                ISNULL(SUM(CASE WHEN (@rangeStart IS NULL OR created_at >= @rangeStart) AND success = 1 THEN 1 ELSE 0 END), 0) AS total_logins_last_30_days,
+                ISNULL(SUM(CASE WHEN @previousRangeStart IS NOT NULL AND created_at >= @previousRangeStart AND created_at < @rangeStart AND success = 1 THEN 1 ELSE 0 END), 0) AS previous_total_logins_30_days
             FROM dbo.auth_login_audit;
 
             SELECT
-                ISNULL(SUM(CASE WHEN @isAllTime = 1 OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS recommendations_processed_last_30_days,
-                ISNULL(SUM(CASE WHEN @isAllTime = 0 AND created_at >= @previousRangeStart AND created_at < @rangeStart THEN 1 ELSE 0 END), 0) AS previous_recommendations_processed_30_days
+                ISNULL(SUM(CASE WHEN @rangeStart IS NULL OR created_at >= @rangeStart THEN 1 ELSE 0 END), 0) AS recommendations_processed_last_30_days,
+                ISNULL(SUM(CASE WHEN @previousRangeStart IS NOT NULL AND created_at >= @previousRangeStart AND created_at < @rangeStart THEN 1 ELSE 0 END), 0) AS previous_recommendations_processed_30_days
             FROM dbo.interaction_logs;
 
             SELECT TOP (4)
                 COALESCE(NULLIF(LTRIM(RTRIM(feedback_type)), ''), 'Unclassified') AS feedback_type,
                 COUNT(*) AS feedback_count
             FROM dbo.application_feedback_logs
-            WHERE @isAllTime = 1 OR created_at >= @rangeStart
+            WHERE @rangeStart IS NULL OR created_at >= @rangeStart
             GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(feedback_type)), ''), 'Unclassified')
             ORDER BY feedback_count DESC, feedback_type ASC;
 
@@ -213,11 +212,7 @@ public sealed class FeedbackRepository : IFeedbackRepository
             """;
 
         await using var command = new SqlCommand(sql, connection);
-        command.Parameters.AddWithValue("@now", now);
-        command.Parameters.AddWithValue("@rangeStart", rangeStart);
-        command.Parameters.AddWithValue("@previousRangeStart", previousRangeStart);
-        command.Parameters.AddWithValue("@chartStart", chartStart);
-        command.Parameters.AddWithValue("@isAllTime", isAllTime);
+        insightsRange.AddSqlParameters(command);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -542,4 +537,46 @@ public sealed class FeedbackRepository : IFeedbackRepository
         await using var command = new SqlCommand(sql, connection);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+}
+
+internal sealed record ApplicationFeedbackInsightsRange(
+    int RangeDays,
+    DateTime NowUtc,
+    DateTime? RangeStart,
+    DateTime? PreviousRangeStart,
+    DateTime ChartStart)
+{
+    public static ApplicationFeedbackInsightsRange Create(int rangeDays, DateTime nowUtc)
+    {
+        rangeDays = rangeDays switch
+        {
+            0 or 7 or 30 or 90 => rangeDays,
+            _ => 30
+        };
+
+        var isAllTime = rangeDays == 0;
+        var chartDays = isAllTime ? 90 : rangeDays;
+        return new ApplicationFeedbackInsightsRange(
+            rangeDays,
+            nowUtc,
+            isAllTime ? null : nowUtc.AddDays(-rangeDays),
+            isAllTime ? null : nowUtc.AddDays(-(rangeDays * 2)),
+            nowUtc.Date.AddDays(-(chartDays - 1)));
+    }
+
+    public void AddSqlParameters(SqlCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        command.Parameters.Add(DateTime2Parameter("@now", NowUtc));
+        command.Parameters.Add(DateTime2Parameter("@rangeStart", RangeStart));
+        command.Parameters.Add(DateTime2Parameter("@previousRangeStart", PreviousRangeStart));
+        command.Parameters.Add(DateTime2Parameter("@chartStart", ChartStart));
+    }
+
+    private static SqlParameter DateTime2Parameter(string name, DateTime? value) =>
+        new(name, SqlDbType.DateTime2)
+        {
+            Value = value.HasValue ? value.Value : DBNull.Value
+        };
 }

@@ -3,6 +3,10 @@ $ErrorActionPreference = "Stop"
 
 $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
+# Keep local and Intel SSO/IMI traffic off the corporate proxy.
+$env:NO_PROXY = "localhost,127.0.0.1,sso.cdcprod.mfg.intel.com,imi.cdcprod.mfg.intel.com"
+$env:no_proxy = $env:NO_PROXY
+
 function Resolve-RepoPath {
     param(
         [Parameter(Mandatory = $true)]

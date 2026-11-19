@@ -95,6 +95,17 @@ PoolSense.Api/appsettings*.json
 PoolSense.Api/artifacts/
 PoolSense.Api/artifacts/auth-state/
 .playwright-mcp/
+PoolSense.UI/test-results/
+PoolSense.UI/playwright-report/
+PoolSense.UI/blob-report/
+# Generated code-knowledge snapshots, local preparation checks and evaluation output.
+/artifacts/code-knowledge/
+/artifacts/okf-producer-bin/
+/artifacts/producer-offline-probe/
+/artifacts/okf-upgrade-check/
+/artifacts/retrieval-evaluation/
+/PoolSense.Api.Tests/artifacts/okf-tests/
+/PoolSense.Api.Tests/artifacts/okf-evaluation/
 **/appsettings.Local.json
 **/appsettings.*.local.json
 secrets.json

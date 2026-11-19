@@ -1,6 +1,136 @@
 import { Injectable } from '@angular/core'
 import { environment } from '../environments/environment'
 
+export interface CodeEvidence {
+  repositoryId: string
+  projectId: string
+  repository: string
+  branch: string
+  commit: string
+  filePath: string
+  symbol: string
+  startLine: number
+  endLine: number
+  content: string
+  sourceUrl: string
+  relationships?: CodeRelationship[]
+}
+
+export interface CodeRelationship {
+  kind: string
+  fromSymbol: string
+  toSymbol: string
+  filePath: string
+  siteLine: number
+  targetFilePath: string
+  targetLine: number
+  resolution: string
+}
+
+export interface CodeSearchCoverage {
+  timingsMs?: Record<string, number>
+  queryKind?: 'symbol' | 'concept' | 'workflow'
+  authorizedRepositories: number
+  searchedRepositories: number
+  failedRepositories: number
+  authorizationComplete: boolean
+  deadlineExceeded: boolean
+  expandedFallback: boolean
+  semanticStatus: string
+  semanticIndexedChunks?: number
+  semanticEligibleChunks?: number
+  semanticTargetChunks?: number
+  semanticTargetReached?: boolean
+  knowledgeStatus: string
+  oldestIndexedAt?: string | null
+  warnings: string[]
+}
+
+export interface CodeRepository {
+  id: string
+  projectId: string
+  url: string
+  branch: string
+  enabled: boolean
+  status: string
+  message: string
+  indexedCommit: string
+  fileCount: number
+  symbolCount: number
+  lastCheckedAt: string | null
+  lastIndexedAt: string | null
+}
+
+export interface CodeChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export type CodeSearchMode = 'quick' | 'deep'
+
+export interface CodeAskResponse {
+  timingsMs?: Record<string, number>
+  codeSearchCoverage?: CodeSearchCoverage
+  searchMode?: CodeSearchMode
+  projectId: string
+  projectIds?: string[]
+  sessionId: string
+  question: string
+  answer: string
+  generatedAt: string
+  codeKnowledgeStatus: string
+  citations: CodeEvidence[]
+}
+
+export interface CodeChatSessionSummary {
+  id: string
+  projectId: string
+  projectIds?: string[]
+  title: string
+  createdAt: string
+  updatedAt: string
+  messageCount: number
+}
+
+export interface CodeChatStoredMessage {
+  role: 'user' | 'assistant'
+  content: string
+  citations: CodeEvidence[]
+  createdAt: string
+}
+
+export interface CodeChatSession {
+  session: CodeChatSessionSummary
+  messages: CodeChatStoredMessage[]
+}
+
+export interface PoolChatSessionSummary {
+  id: string
+  title: string
+  selectedGroupIds: string[]
+  isPinned: boolean
+  createdAt: string
+  updatedAt: string
+  messageCount: number
+}
+
+export interface PoolChatStoredMessage {
+  role: 'user' | 'assistant'
+  content: string
+  result: TicketWorkflowResult | null
+  createdAt: string
+}
+
+export interface PoolChatSession {
+  session: PoolChatSessionSummary
+  messages: PoolChatStoredMessage[]
+}
+
+export interface PoolChatSessionPatch {
+  title?: string
+  isPinned?: boolean
+}
+
 export interface SimilarIncident {
   ticketId: string
   problem: string
@@ -20,8 +150,19 @@ export interface FailurePattern {
 }
 
 export interface TicketWorkflowResult {
+  codeSearchCoverage?: CodeSearchCoverage
+  codeDocuments?: CodeEvidence[]
+  codeKnowledgeStatus?: string
+  feedbackAuthorization?: string
   suggestedRootCause: string
   suggestedResolution: string
+  detailedAnalysisMarkdown?: string
+  processDiagramStatus?: 'provided' | 'unavailable' | ''
+  processDiagramMessage?: string
+  visualizationPlan?: { needed: boolean; kind: 'none' | 'relationship' | 'process' | 'table' | 'bar'; explicitRequest: boolean; purpose: string }
+  visualizationStatus?: 'not-needed' | 'provided' | 'partial' | 'unavailable'
+  visualizationMessage?: string
+  sourcePlan?: { pool: boolean; wiki: boolean; code: boolean; label: string; origin: string; clarificationMessage?: string | null }
   confidence: number
   similarIncidents: SimilarIncident[]
   nyraDocuments?: NyraDocumentResult[]
@@ -36,6 +177,9 @@ export interface TicketWorkflowResult {
   failurePattern: FailurePattern
   reasoning: string
   failurePatternFrequency: number
+  chatSessionId?: string
+  historyPersistenceError?: string
+  processingDurationMs?: number
 }
 
 export interface TicketWorkflowProgress {
@@ -118,6 +262,9 @@ export interface PoolRecommendationReportFilters {
 }
 
 export interface PoolTroubleshootResponse {
+  codeSearchCoverage?: CodeSearchCoverage
+  codeDocuments?: CodeEvidence[]
+  codeKnowledgeStatus?: string
   sourceEventId: string
   question: string
   answer: string
@@ -203,6 +350,7 @@ export interface IngestionStatus {
 }
 
 export interface FeedbackRequest {
+  feedbackAuthorization?: string
   query: string
   suggestedResolution: string
   feedbackType: number
@@ -273,6 +421,51 @@ export interface LoginResponse {
 export class ApiService {
   private readonly apiBaseUrl = environment.apiBaseUrl.replace(/\/$/, '')
 
+  async codeRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+    const response = await fetch(this.apiUrl(path), {
+      method, credentials: 'include', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'X-PoolSense-CSRF': '1' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(await this.readErrorMessage(response, 'Code knowledge is unavailable.'))
+    return response.status === 204 ? undefined as T : await response.json() as T
+  }
+
+  /** Scope query for the multi-application code-chat endpoints; an empty list means every application. */
+  private codeScopeQuery(projectIds: string[]) {
+    const params = new URLSearchParams()
+    for (const projectId of projectIds) params.append('projectIds', projectId)
+    const query = params.toString()
+    return query ? '?' + query : ''
+  }
+
+  askCodeChat(projectIds: string[], question: string, history: CodeChatTurn[], sessionId: string | null, mode: CodeSearchMode = 'quick'): Promise<CodeAskResponse> {
+    // Match CodeChatTurn.Content validation without shortening displayed or saved answers.
+    const maxContentLength = 8000
+    const truncated = '\n[Earlier message truncated]'
+    const boundedHistory = history.map(turn => turn.content.length <= maxContentLength ? turn : {
+      ...turn,
+      content: turn.content.slice(0, maxContentLength - truncated.length).replace(/[\uD800-\uDBFF]$/, '') + truncated,
+    })
+    return this.codeRequest<CodeAskResponse>('/code-chat/ask', 'POST', { projectIds, question, history: boundedHistory, sessionId, mode })
+  }
+
+  getCodeChatHistory(projectIds: string[]): Promise<CodeChatSessionSummary[]> {
+    return this.codeRequest<CodeChatSessionSummary[]>('/code-chat/history' + this.codeScopeQuery(projectIds))
+  }
+
+  getCodeChatSession(sessionId: string): Promise<CodeChatSession> {
+    return this.codeRequest<CodeChatSession>('/code-chat/history/' + encodeURIComponent(sessionId))
+  }
+
+  deleteCodeChatSession(sessionId: string): Promise<void> {
+    return this.codeRequest<void>('/code-chat/history/' + encodeURIComponent(sessionId), 'DELETE')
+  }
+
+  getCodeRepositories(projectIds: string[]): Promise<CodeRepository[]> {
+    return this.codeRequest<CodeRepository[]>('/code-chat/repositories' + this.codeScopeQuery(projectIds))
+  }
+
   async getSession(): Promise<AuthenticatedUser | null> {
     const response = await fetch(this.apiUrl('/auth/session'), {
       credentials: 'include',
@@ -318,10 +511,11 @@ export class ApiService {
   }
 
   async logout(): Promise<void> {
-    await fetch(this.apiUrl('/auth/logout'), {
+    const response = await fetch(this.apiUrl('/auth/logout'), {
       method: 'POST',
       credentials: 'include',
     })
+    if (!response.ok) throw new Error(await this.readErrorMessage(response, 'Unable to sign out.'))
   }
 
   async getProjectGroups(): Promise<ProjectGroup[]> {
@@ -480,8 +674,9 @@ export class ApiService {
     return (await response.json()) as ApplicationFeedbackInsights
   }
 
-  async askPoolSense(message: string, selectedGroupIds?: string[]): Promise<TicketWorkflowResult> {
+  async askPoolSense(message: string, selectedGroupIds?: string[], chatSessionId?: string | null, signal?: AbortSignal): Promise<TicketWorkflowResult> {
     const response = await fetch(this.apiUrl('/ticket/process'), {
+      signal,
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -491,6 +686,7 @@ export class ApiService {
         title: message,
         description: message,
         selectedGroupIds: selectedGroupIds ?? null,
+        ...(chatSessionId ? { chatSessionId } : {}),
       }),
     })
 
@@ -506,8 +702,11 @@ export class ApiService {
     message: string,
     selectedGroupIds: string[] | undefined,
     onProgress: (progress: TicketWorkflowProgress) => void,
+    chatSessionId?: string | null,
+    signal?: AbortSignal,
   ): Promise<TicketWorkflowResult> {
     const response = await fetch(this.apiUrl('/ticket/process-progress'), {
+      signal,
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -517,6 +716,7 @@ export class ApiService {
         title: message,
         description: message,
         selectedGroupIds: selectedGroupIds ?? null,
+        ...(chatSessionId ? { chatSessionId } : {}),
       }),
     })
 
@@ -526,7 +726,7 @@ export class ApiService {
     }
 
     if (!response.body) {
-      return await this.askPoolSense(message, selectedGroupIds)
+      return await this.askPoolSense(message, selectedGroupIds, chatSessionId, signal)
     }
 
     const reader = response.body.getReader()
@@ -578,6 +778,33 @@ export class ApiService {
     }
 
     return result
+  }
+
+  private async poolHistoryRequest<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
+    const response = await fetch(this.apiUrl('/ticket/history' + path), {
+      method, credentials: 'include', cache: 'no-store',
+      signal,
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(await this.readErrorMessage(response, 'Unable to load your chat history.'))
+    return response.status === 204 ? undefined as T : await response.json() as T
+  }
+
+  listPoolChatSessions(): Promise<PoolChatSessionSummary[]> {
+    return this.poolHistoryRequest<PoolChatSessionSummary[]>('')
+  }
+
+  getPoolChatSession(sessionId: string, signal?: AbortSignal): Promise<PoolChatSession> {
+    return this.poolHistoryRequest<PoolChatSession>('/' + encodeURIComponent(sessionId), 'GET', undefined, signal)
+  }
+
+  patchPoolChatSession(sessionId: string, patch: PoolChatSessionPatch): Promise<void> {
+    return this.poolHistoryRequest<void>('/' + encodeURIComponent(sessionId), 'PATCH', patch)
+  }
+
+  deletePoolChatSession(sessionId: string): Promise<void> {
+    return this.poolHistoryRequest<void>('/' + encodeURIComponent(sessionId), 'DELETE')
   }
 
   async getPoolReport(poolId: string): Promise<PoolReport> {
@@ -775,7 +1002,7 @@ export class ApiService {
   private async readErrorMessage(response: Response, fallbackMessage: string): Promise<string> {
     const contentType = response.headers.get('content-type') ?? ''
 
-    if (contentType.includes('application/json')) {
+    if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
       const payload = (await response.json()) as {
         title?: string
         errors?: Record<string, string[]>
@@ -806,6 +1033,7 @@ export class ApiService {
       if (payload.error) {
         return payload.error
       }
+      return fallbackMessage
     }
 
     const errorText = await response.text()

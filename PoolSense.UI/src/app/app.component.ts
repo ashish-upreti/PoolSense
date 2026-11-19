@@ -1,18 +1,27 @@
 import { CommonModule } from '@angular/common'
-import { Component, HostListener, OnInit, inject } from '@angular/core'
+import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
+import { RichResponseComponent } from './rich-response.component'
+import { CodeSearchStatusComponent } from './code-search-status.component'
 import {
   ApplicationFeedbackDailyCount,
   ApplicationFeedbackInsights,
   ApplicationFeedbackRequest,
   AuthenticatedUser,
   ApiService,
+  CodeChatSessionSummary,
+  CodeChatTurn,
+  CodeEvidence,
+  CodeSearchCoverage,
+  CodeSearchMode,
+  CodeRepository,
   DeploymentInfo,
   IngestionStatus,
   NyraDocumentResult,
   PoolReport,
   PoolRecommendationReportListItem,
   PoolRecommendationReportListResponse,
+  PoolChatSessionSummary,
   PoolTroubleshootResponse,
   ProjectConfig,
   ProjectConfigInput,
@@ -24,6 +33,9 @@ import {
   TicketWorkflowResult,
 } from './api.service'
 import { environment } from '../environments/environment'
+import { CodeEvidenceComponent } from './code-evidence.component'
+import { CodeRepositoriesComponent } from './code-repositories.component'
+import { formatAnswerDuration } from './answer-duration'
 
 type UserMessage = {
   id: number
@@ -38,13 +50,35 @@ type AssistantMessage = {
   query: string
   result: TicketWorkflowResult
   workflowProgress: TicketWorkflowProgress[]
+  completedInMs?: number
 }
 
 type ChatMessage = UserMessage | AssistantMessage
 
+type MainChatWorkspace = {
+  key: string
+  sessionId: string | null
+  title: string
+  scopeIds: string[]
+  messages: ChatMessage[]
+  insights: TicketWorkflowResult | null
+  input: string
+  error: string
+  historyNotice: string
+  contextNotice: string
+  feedback: Record<number, FeedbackState>
+  detailExpanded: Record<number, boolean>
+  workflowExpanded: number | null
+  evidenceTab: 'incidents' | 'nyra' | 'code'
+  hydrated: boolean
+  unlisted: boolean
+  createdAt: string
+  updatedAt: string
+  pending?: { id: string; controller: AbortController; query: string; scopeIds: string[]; progress: TicketWorkflowProgress[] }
+}
+
 type PoolTroubleshootEntry = PoolTroubleshootResponse & {
   id: number
-  renderedAnswer: string
   workflowProgress: TicketWorkflowProgress[]
 }
 
@@ -58,13 +92,22 @@ type FeedbackState = {
   selectedTicketId: string
 }
 
-type TelemetryDatum = {
-  name: string
-  value: number
-  color: string
-}
+type AppSection = 'main' | 'poolRecommendations' | 'projectConfig' | 'codeRepositories' | 'applicationFeedback'
 
-type AppSection = 'main' | 'poolRecommendations' | 'projectConfig' | 'applicationFeedback'
+type GitHubAccessStatus = { configured: boolean; available: boolean; login: string | null; message: string }
+
+type CodeChatMessage = {
+  id: number
+  role: 'user' | 'assistant'
+  text: string
+  citations: CodeEvidence[]
+  generatedAt: string
+  isError?: boolean
+  codeKnowledgeStatus?: string
+  codeSearchCoverage?: CodeSearchCoverage
+  completedInMs?: number
+  searchMode?: CodeSearchMode
+}
 
 type ApplicationFeedbackForm = ApplicationFeedbackRequest
 type TicketAutomationSettingsForm = TicketAutomationSettingsInput
@@ -72,6 +115,7 @@ type PoolRecommendationEmailFilter = 'all' | 'sent' | 'notSent'
 type PoolRecommendationDateRange = '7' | '30' | '90' | 'all'
 
 const quickPrompts = ['VG item missing', 'Data load job failed', 'UI error']
+
 const poolTroubleshootPrompts = [
   'First checks',
   'Validation checklist',
@@ -213,152 +257,10 @@ function formatDateInput(date: Date) {
   return date.toISOString().slice(0, 10)
 }
 
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function renderStrongText(value: string) {
-  return escapeHtml(value)
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/__([^_]+)__/g, '<strong>$1</strong>')
-}
-
-function renderAutoLinkedText(value: string) {
-  const urlPattern = /https?:\/\/[^\s<)]+/g
-  let rendered = ''
-  let lastIndex = 0
-
-  for (const match of value.matchAll(urlPattern)) {
-    const url = match[0]
-    const index = match.index ?? 0
-    rendered += renderStrongText(value.slice(lastIndex, index))
-    rendered += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`
-    lastIndex = index + url.length
-  }
-
-  return rendered + renderStrongText(value.slice(lastIndex))
-}
-
-function renderInlineText(value: string) {
-  const codePattern = /`([^`]+)`/g
-  let rendered = ''
-  let lastIndex = 0
-
-  for (const match of value.matchAll(codePattern)) {
-    const code = match[1]
-    const index = match.index ?? 0
-    rendered += renderAutoLinkedText(value.slice(lastIndex, index))
-    rendered += `<code>${escapeHtml(code)}</code>`
-    lastIndex = index + match[0].length
-  }
-
-  return rendered + renderAutoLinkedText(value.slice(lastIndex))
-}
-
-function renderInlineMarkdown(value: string) {
-  const markdownLinkPattern = /\[([^\]]+)]\((https?:\/\/[^)\s]+)\)/g
-  let rendered = ''
-  let lastIndex = 0
-
-  for (const match of value.matchAll(markdownLinkPattern)) {
-    const linkText = match[1]
-    const url = match[2]
-    const index = match.index ?? 0
-    rendered += renderInlineText(value.slice(lastIndex, index))
-    rendered += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${renderInlineText(linkText)}</a>`
-    lastIndex = index + match[0].length
-  }
-
-  return rendered + renderInlineText(value.slice(lastIndex))
-}
-
-function renderMarkdown(value: string) {
-  const blocks: string[] = []
-  const paragraphLines: string[] = []
-  const listItems: string[] = []
-  let activeListTag: 'ol' | 'ul' | null = null
-
-  const flushParagraph = () => {
-    if (paragraphLines.length === 0) {
-      return
-    }
-
-    blocks.push(`<p>${paragraphLines.map(renderInlineMarkdown).join('<br>')}</p>`)
-    paragraphLines.length = 0
-  }
-
-  const flushList = () => {
-    if (!activeListTag || listItems.length === 0) {
-      return
-    }
-
-    blocks.push(`<${activeListTag}>${listItems.map((item) => `<li>${item}</li>`).join('')}</${activeListTag}>`)
-    listItems.length = 0
-    activeListTag = null
-  }
-
-  for (const line of value.replace(/\r\n/g, '\n').split('\n')) {
-    const trimmedLine = line.trim()
-
-    if (!trimmedLine) {
-      flushParagraph()
-      flushList()
-      continue
-    }
-
-    const headingMatch = trimmedLine.match(/^(#{1,6})\s+(.+)$/)
-    if (headingMatch) {
-      flushParagraph()
-      flushList()
-      const headingLevel = Math.min(6, Math.max(3, headingMatch[1].length + 1))
-      blocks.push(`<h${headingLevel}>${renderInlineMarkdown(headingMatch[2])}</h${headingLevel}>`)
-      continue
-    }
-
-    const unorderedMatch = trimmedLine.match(/^[-*]\s+(.+)$/)
-    if (unorderedMatch) {
-      flushParagraph()
-      if (activeListTag && activeListTag !== 'ul') {
-        flushList()
-      }
-
-      activeListTag = 'ul'
-      listItems.push(renderInlineMarkdown(unorderedMatch[1]))
-      continue
-    }
-
-    const orderedMatch = trimmedLine.match(/^\d+[.)]\s+(.+)$/)
-    if (orderedMatch) {
-      flushParagraph()
-      if (activeListTag && activeListTag !== 'ol') {
-        flushList()
-      }
-
-      activeListTag = 'ol'
-      listItems.push(renderInlineMarkdown(orderedMatch[1]))
-      continue
-    }
-
-    flushList()
-    paragraphLines.push(trimmedLine)
-  }
-
-  flushParagraph()
-  flushList()
-
-  return blocks.join('')
-}
-
 function createPoolTroubleshootEntry(response: PoolTroubleshootResponse, workflowProgress: TicketWorkflowProgress[] = []): PoolTroubleshootEntry {
   return {
     ...response,
     id: Date.now(),
-    renderedAnswer: renderMarkdown(response.answer),
     workflowProgress,
   }
 }
@@ -376,10 +278,10 @@ function findLastStepIndex(steps: TicketWorkflowProgress[], predicate: (step: Ti
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CodeEvidenceComponent, CodeRepositoriesComponent, RichResponseComponent, CodeSearchStatusComponent],
   templateUrl: './app.component.html',
 })
-export class AppComponent implements OnInit {
+export class AppComponent implements OnInit, OnDestroy {
   private readonly api = inject(ApiService)
 
   readonly quickPrompts = quickPrompts
@@ -399,8 +301,10 @@ export class AppComponent implements OnInit {
   loginError = ''
   messages: ChatMessage[] = []
   insights: TicketWorkflowResult | null = null
-  activeEvidenceTab: 'incidents' | 'nyra' = 'incidents'
+  detailedAnalysisExpandedByMessageId: Record<number, boolean> = {}
+  activeEvidenceTab: 'incidents' | 'nyra' | 'code' = 'incidents'
   isEvidencePanelCollapsed = false
+  isOperationalContextCollapsed = false
   isTroubleshootPanelCollapsed = false
   expandedWorkflowActivityMessageId: number | null = null
   isLoading = false
@@ -418,12 +322,38 @@ export class AppComponent implements OnInit {
   projects: ProjectConfig[] = []
   ingestionStatuses: IngestionStatus[] = []
   projectForm = createDefaultProjectForm()
-  projectRepositoryRows = [{ url: '' }]
+  @ViewChild(CodeRepositoriesComponent) codeRepositories?: CodeRepositoriesComponent
   editingProjectId: string | null = null
   isProjectLoading = true
   isProjectSaving = false
   projectError = ''
   projectNotice = ''
+  /** Applications the Code Repositories screen is scoped to; empty = all applications (mirrors the main search scope). */
+  codeRepoScopeIds: string[] = []
+  codeRepoScopeAddValue = ''
+  codeRepoList: CodeRepository[] = []
+  codeRepoConnection: GitHubAccessStatus | null = null
+  codeRepoError = ''
+  codeRepoNotice = ''
+  isCodeRepoLoading = false
+  private codeRepoTimer: number | null = null
+  private codeRepoLoadVersion = 0
+  @ViewChild('codeChatTranscript') codeChatTranscript?: ElementRef<HTMLElement>
+  codeChatMessages: CodeChatMessage[] = []
+  codeChatSessionId: string | null = null
+  codeChatHistory: CodeChatSessionSummary[] = []
+  codeChatQuestion = ''
+  codeChatError = ''
+  isCodeChatAsking = false
+  isCodeChatTyping = false
+  readonly codeSearchModes: { value: CodeSearchMode; label: string; description: string }[] = [
+    { value: 'quick', label: 'Quick Search', description: 'Fast answer from the best-matching source.' },
+    { value: 'deep', label: 'Deep Search', description: 'Searches every repository in scope and returns a detailed answer with a diagram. Usually takes about a minute.' },
+  ]
+  codeSearchMode: CodeSearchMode = 'quick'
+  codeChatPendingMode: CodeSearchMode = 'quick'
+  isCodeChatHistoryLoading = false
+  private codeChatRevealTimer: number | null = null
   applicationFeedbackForm = createDefaultApplicationFeedbackForm()
   applicationFeedbackError = ''
   applicationFeedbackNotice = ''
@@ -457,10 +387,47 @@ export class AppComponent implements OnInit {
   poolRecommendationError = ''
   feedbackStateByMessageId: Record<number, FeedbackState> = {}
   openFeedbackTargetMessageId: number | null = null
+  chatHistorySummaries: PoolChatSessionSummary[] = []
+  activeChatSessionId: string | null = null
+  isChatHistoryLoading = false
+  chatHistoryError = ''
+  isChatHistoryCollapsed = false
+  isChatHistoryDrawerOpen = false
+  isNarrowViewport = false
+  historyPersistenceNotice = ''
+  chatContextNotice = ''
+  isChatSessionOpening = false
+  private readonly chatWorkspaces = new Map<string, MainChatWorkspace>()
+  private activeChatKey = ''
+  private chatAuthEpoch = 0
+  private historySelectionVersion = 0
+  private historyListVersion = 0
+  private historyReadController?: AbortController
+  private poolReportReadVersion = 0
+  private nextChatMessageId = Date.now()
+  private readonly removedChatSessionIds = new Set<string>()
+  isSigningOut = false
+  renamingChatSessionId: string | null = null
+  renamingChatSessionTitle = ''
+  private readonly narrowViewportQuery = window.matchMedia('(max-width: 1056px)')
+  private readonly handleNarrowViewportChange = (event: MediaQueryListEvent) => {
+    this.isNarrowViewport = event.matches
+    if (!event.matches) {
+      this.isChatHistoryDrawerOpen = false
+    }
+  }
 
   ngOnInit() {
     this.applyTheme()
+    this.isNarrowViewport = this.narrowViewportQuery.matches
+    this.narrowViewportQuery.addEventListener('change', this.handleNarrowViewportChange)
     void this.initializeSession()
+  }
+
+  ngOnDestroy() {
+    this.invalidateChatRequests()
+    this.stopCodeChatReveal()
+    this.narrowViewportQuery.removeEventListener('change', this.handleNarrowViewportChange)
   }
 
   get currentUserDisplayName() {
@@ -560,27 +527,6 @@ export class AppComponent implements OnInit {
         ].filter((pattern) => pattern && pattern.trim().length > 0),
       ),
     )
-  }
-
-  get telemetry(): TelemetryDatum[] {
-    if (!this.insights) {
-      return []
-    }
-
-    const avgSimilarity =
-      this.insights.similarIncidents.length > 0
-        ? Math.round(
-            (this.insights.similarIncidents.reduce((sum, incident) => sum + incident.similarity, 0) /
-              this.insights.similarIncidents.length) *
-              100,
-          )
-        : 0
-
-    return [
-      { name: 'Confidence', value: this.confidence, color: '#6366f1' },
-      { name: 'Incidents', value: avgSimilarity, color: '#818cf8' },
-      { name: 'Pattern fit', value: Math.min(this.insights.failurePatternFrequency * 10, 100), color: '#a5b4fc' },
-    ]
   }
 
   get poolRecommendationTotalPages() {
@@ -684,73 +630,182 @@ export class AppComponent implements OnInit {
     return this.poolReportSourceEventId.trim().length > 0 || this.poolReport !== null || this.isPoolReportLoading
   }
 
-  async handleSend(rawMessage = this.input) {
-    const message = rawMessage.trim()
-
-    if (!message || this.isLoading) {
-      return
+  private createChatWorkspace(sessionId: string | null = null, title = 'New chat', scopeIds = this.selectedGroupIds): MainChatWorkspace {
+    const now = new Date().toISOString()
+    const workspace: MainChatWorkspace = {
+      key: 'local-' + crypto.randomUUID(), sessionId, title, scopeIds: [...scopeIds],
+      messages: [], insights: null, input: '', error: '', historyNotice: '', contextNotice: '',
+      feedback: {}, detailExpanded: {}, workflowExpanded: null, evidenceTab: 'incidents',
+      hydrated: sessionId === null, unlisted: false, createdAt: now, updatedAt: now,
     }
+    this.chatWorkspaces.set(workspace.key, workspace)
+    return workspace
+  }
 
-    const userMessage: UserMessage = { id: Date.now(), role: 'user', text: message }
-    const requestGroupIds = [...this.selectedGroupIds]
-    this.messages = [...this.messages, userMessage]
-    this.error = ''
-    this.isLoading = true
-    this.loadingQuery = message
-    this.loadingScopeGroupIds = requestGroupIds
-    this.loadingProgressEvents = [
-      {
-        stage: 'request',
-        title: 'Submitting request',
-        detail: `Sending query for ${this.loadingScopeLabel}.`,
-        state: 'completed',
-        order: 0,
-        timestampUtc: new Date().toISOString(),
-      },
-    ]
+  private findChatWorkspace(id: string) {
+    return this.chatWorkspaces.get(id) ?? [...this.chatWorkspaces.values()].find(workspace => workspace.sessionId === id)
+  }
 
-    try {
-      const result = await this.api.askPoolSenseWithProgress(message, requestGroupIds, (progress) => {
-        this.upsertLoadingProgress(progress)
+  private captureChatWorkspace(): MainChatWorkspace {
+    let workspace = this.chatWorkspaces.get(this.activeChatKey)
+    if (!workspace) {
+      workspace = this.createChatWorkspace(this.activeChatSessionId)
+      this.activeChatKey = workspace.key
+    }
+    if (!this.isPoolReportWorkspace) {
+      Object.assign(workspace, {
+        messages: this.messages, insights: this.insights, input: this.input, error: this.error,
+        scopeIds: [...this.selectedGroupIds], historyNotice: this.historyPersistenceNotice,
+        contextNotice: this.chatContextNotice, feedback: this.feedbackStateByMessageId,
+        detailExpanded: this.detailedAnalysisExpandedByMessageId, workflowExpanded: this.expandedWorkflowActivityMessageId,
+        evidenceTab: this.activeEvidenceTab,
       })
-      const assistantMessage: AssistantMessage = {
-        id: userMessage.id + 1,
-        role: 'assistant',
-        text: result.suggestedResolution,
-        query: message,
-        result,
-        workflowProgress: this.getSortedLoadingProgressEvents(),
-      }
+    }
+    return workspace
+  }
 
-      this.feedbackStateByMessageId[assistantMessage.id] = createFeedbackState(
-        getDefaultFeedbackTicketId(result.similarIncidents),
-      )
+  private projectChatWorkspace(workspace: MainChatWorkspace) {
+    this.activeChatKey = workspace.key
+    this.activeChatSessionId = workspace.sessionId || (workspace.messages.length > 0 ? workspace.key : null)
+    this.messages = workspace.messages
+    this.insights = workspace.insights
+    this.input = workspace.input
+    this.error = workspace.error
+    this.setSelectedGroupIds(workspace.scopeIds)
+    this.historyPersistenceNotice = workspace.historyNotice
+    this.chatContextNotice = workspace.contextNotice
+    this.feedbackStateByMessageId = workspace.feedback
+    this.detailedAnalysisExpandedByMessageId = workspace.detailExpanded
+    this.expandedWorkflowActivityMessageId = workspace.workflowExpanded
+    this.activeEvidenceTab = workspace.evidenceTab
+    this.openFeedbackTargetMessageId = null
+    this.isLoading = !!workspace.pending
+    this.loadingQuery = workspace.pending?.query || ''
+    this.loadingScopeGroupIds = workspace.pending?.scopeIds || []
+    this.loadingProgressEvents = workspace.pending?.progress || []
+  }
 
-      this.messages = [...this.messages, assistantMessage]
-      this.insights = result
-      this.input = ''
-    } catch (requestError) {
-      this.error = requestError instanceof Error ? requestError.message : 'Unable to reach PoolSense.'
-    } finally {
-      this.isLoading = false
-      this.loadingProgressEvents = []
-      this.loadingQuery = ''
-      this.loadingScopeGroupIds = []
+  private cancelHistoryRead() {
+    this.historySelectionVersion++
+    this.historyReadController?.abort()
+    this.historyReadController = undefined
+    this.isChatSessionOpening = false
+  }
+
+  private invalidateChatRequests() {
+    this.chatAuthEpoch++
+    this.poolReportReadVersion++
+    this.historyListVersion++
+    this.cancelHistoryRead()
+    for (const workspace of this.chatWorkspaces.values()) workspace.pending?.controller.abort()
+    this.chatWorkspaces.clear()
+    this.removedChatSessionIds.clear()
+    this.activeChatKey = ''
+    this.activeChatSessionId = null
+    this.messages = []
+    this.insights = null
+    this.input = ''
+    this.error = ''
+    this.isLoading = false
+    this.loadingQuery = ''
+    this.loadingScopeGroupIds = []
+    this.loadingProgressEvents = []
+    this.chatHistorySummaries = []
+    this.isChatHistoryLoading = false
+    this.feedbackStateByMessageId = {}
+    this.detailedAnalysisExpandedByMessageId = {}
+    this.historyPersistenceNotice = ''
+    this.chatContextNotice = ''
+  }
+
+  private workspaceSummary(workspace: MainChatWorkspace): PoolChatSessionSummary {
+    const previous = this.chatHistorySummaries.find(summary => summary.id === workspace.sessionId)
+    return {
+      id: workspace.sessionId || workspace.key, title: workspace.title,
+      selectedGroupIds: workspace.scopeIds, isPinned: previous?.isPinned ?? false,
+      createdAt: previous?.createdAt || workspace.createdAt, updatedAt: workspace.updatedAt, messageCount: workspace.messages.length,
     }
   }
 
-  private upsertLoadingProgress(progress: TicketWorkflowProgress) {
-    const nextEvents = this.loadingProgressEvents.filter((event) => event.stage !== progress.stage)
-    this.loadingProgressEvents = [...nextEvents, progress]
+  isChatSessionPending(id: string) { return !!this.findChatWorkspace(id)?.pending }
+  isLocalChatSession(id: string) { return id.startsWith('local-') }
+  trackChatSessionId(_index: number, session: PoolChatSessionSummary) { return session.id }
+
+  async handleSend(rawMessage = this.input) {
+    const message = rawMessage.trim()
+    if (!message || this.isLoading || this.isChatSessionOpening || !this.currentUser || this.isSigningOut) return
+    const origin = this.captureChatWorkspace()
+    if ([...this.chatWorkspaces.values()].filter(workspace => workspace.pending).length >= 3) {
+      origin.error = 'Three chats are already investigating. You can keep switching conversations; wait for one to finish before starting another request.'
+      this.projectChatWorkspace(origin)
+      return
+    }
+    const owner = this.currentUser.username
+    const epoch = this.chatAuthEpoch
+    const requestId = crypto.randomUUID()
+    const controller = new AbortController()
+    const scope = [...origin.scopeIds]
+    const sessionId = origin.sessionId
+    const userId = ++this.nextChatMessageId
+    const assistantId = ++this.nextChatMessageId
+    const requestStartedAt = performance.now()
+    if (!origin.messages.length) origin.title = message.replace(/\s+/g, ' ').slice(0, 80)
+    origin.messages = [...origin.messages, { id: userId, role: 'user', text: message }]
+    origin.error = ''
+    origin.updatedAt = new Date().toISOString()
+    origin.pending = {
+      id: requestId, controller, query: message, scopeIds: scope,
+      progress: [{ stage: 'request', title: 'Submitting request', detail: 'Sending query for the captured application scope.', state: 'completed', order: 0, timestampUtc: origin.updatedAt }],
+    }
+    this.projectChatWorkspace(origin)
+    const valid = () => this.chatAuthEpoch === epoch && this.currentUser?.username === owner &&
+      this.chatWorkspaces.get(origin.key) === origin && origin.pending?.id === requestId
+    const visible = () => this.activeChatKey === origin.key && !this.isPoolReportWorkspace
+    try {
+      const result = await this.api.askPoolSenseWithProgress(message, scope, progress => {
+        if (!valid()) return
+        origin.pending!.progress = [...origin.pending!.progress.filter(event => event.stage !== progress.stage), progress]
+          .sort((a, b) => a.order - b.order)
+        if (visible()) this.loadingProgressEvents = origin.pending!.progress
+      }, sessionId, controller.signal)
+      if (!valid()) return
+      const completedInMs = performance.now() - requestStartedAt
+      if (visible()) this.captureChatWorkspace()
+      const assistant: AssistantMessage = {
+        id: assistantId, role: 'assistant', text: result.suggestedResolution, query: message, result,
+        workflowProgress: [...origin.pending!.progress].sort((a, b) => a.order - b.order),
+        completedInMs,
+      }
+      origin.messages = [...origin.messages, assistant]
+      origin.feedback[assistantId] = createFeedbackState(getDefaultFeedbackTicketId(result.similarIncidents))
+      origin.insights = result
+      origin.sessionId = result.chatSessionId || sessionId
+      origin.historyNotice = result.historyPersistenceError || ''
+      origin.contextNotice = ''
+      origin.input = ''
+      origin.updatedAt = new Date().toISOString()
+      if (origin.sessionId) {
+        origin.unlisted = true
+        const summary = this.workspaceSummary(origin)
+        this.chatHistorySummaries = [...this.chatHistorySummaries.filter(item => item.id !== summary.id), summary]
+      }
+      if (visible()) this.projectChatWorkspace(origin)
+      void this.loadChatHistory()
+    } catch (requestError) {
+      if (!valid() || controller.signal.aborted) return
+      origin.error = requestError instanceof Error ? requestError.message : 'Unable to reach PoolSense.'
+      if (visible()) this.error = origin.error
+    } finally {
+      if (valid()) {
+        origin.pending = undefined
+        if (visible()) this.projectChatWorkspace(origin)
+      }
+    }
   }
 
   private upsertPoolTroubleshootProgress(progress: TicketWorkflowProgress) {
     const nextEvents = this.poolTroubleshootProgressEvents.filter((event) => event.stage !== progress.stage)
     this.poolTroubleshootProgressEvents = [...nextEvents, progress]
-  }
-
-  private getSortedLoadingProgressEvents() {
-    return [...this.loadingProgressEvents].sort((first, second) => first.order - second.order)
   }
 
   async handleLoginSubmit() {
@@ -767,6 +822,7 @@ export class AppComponent implements OnInit {
 
     try {
       const loginResult = await this.api.login(username, password, this.loginForm.rememberMe)
+      this.invalidateChatRequests()
       this.currentUser = loginResult.user
       this.loginForm = {
         username: '',
@@ -783,7 +839,16 @@ export class AppComponent implements OnInit {
   }
 
   async handleLogout() {
-    await this.api.logout()
+    if (this.isSigningOut) return
+    this.isSigningOut = true
+    this.invalidateChatRequests()
+    try { await this.api.logout() }
+    catch (requestError) {
+      this.error = requestError instanceof Error ? requestError.message : 'Unable to sign out.'
+      this.isSigningOut = false
+      return
+    }
+    this.isSigningOut = false
     this.currentUser = null
     this.messages = []
     this.insights = null
@@ -809,6 +874,292 @@ export class AppComponent implements OnInit {
     this.feedbackStateByMessageId = {}
     this.applicationFeedbackInsights = null
     this.applicationFeedbackInsightsError = ''
+    this.chatHistorySummaries = []
+    this.chatContextNotice = ''
+    this.activeChatSessionId = null
+    this.chatHistoryError = ''
+    this.historyPersistenceNotice = ''
+    this.isChatHistoryDrawerOpen = false
+    this.renamingChatSessionId = null
+    this.renamingChatSessionTitle = ''
+  }
+
+  async loadChatHistory() {
+    if (!this.currentUser) {
+      return
+    }
+
+    this.isChatHistoryLoading = true
+    this.chatHistoryError = ''
+    const epoch = this.chatAuthEpoch
+    const owner = this.currentUser.username
+    const version = ++this.historyListVersion
+
+    try {
+      const summaries = await this.api.listPoolChatSessions()
+      if (epoch !== this.chatAuthEpoch || this.currentUser?.username !== owner || version !== this.historyListVersion) return
+      this.chatHistorySummaries = summaries.filter(summary => !this.removedChatSessionIds.has(summary.id))
+      for (const workspace of this.chatWorkspaces.values()) {
+        const summary = this.chatHistorySummaries.find(item => item.id === workspace.sessionId)
+        if (summary) {
+          workspace.title = summary.title
+          workspace.unlisted = false
+        } else if (workspace.sessionId && workspace.unlisted && !this.removedChatSessionIds.has(workspace.sessionId)) {
+          this.chatHistorySummaries.push(this.workspaceSummary(workspace))
+        }
+      }
+    } catch (requestError) {
+      if (epoch !== this.chatAuthEpoch || this.currentUser?.username !== owner || version !== this.historyListVersion) {
+        return
+      }
+      this.chatHistoryError = requestError instanceof Error ? requestError.message : 'Unable to load your chat history.'
+    } finally {
+      if (epoch === this.chatAuthEpoch && version === this.historyListVersion) this.isChatHistoryLoading = false
+    }
+  }
+
+  get pinnedChatSessions() {
+    return this.chatHistorySummaries.filter((session) => session.isPinned)
+  }
+
+  get recentChatSessions() {
+    const local = [...this.chatWorkspaces.values()].filter(workspace => !workspace.sessionId && workspace.messages.length > 0)
+      .map(workspace => this.workspaceSummary(workspace))
+    return [...local, ...this.chatHistorySummaries.filter(session => !session.isPinned)]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  }
+
+  get isHistoryRailVisible() {
+    return this.activeSection === 'main' && (this.isNarrowViewport ? this.isChatHistoryDrawerOpen : !this.isChatHistoryCollapsed)
+  }
+
+  toggleChatHistory() {
+    if (this.isNarrowViewport) {
+      this.isChatHistoryDrawerOpen = !this.isChatHistoryDrawerOpen
+      return
+    }
+
+    this.isChatHistoryCollapsed = !this.isChatHistoryCollapsed
+  }
+
+  toggleOperationalContext() {
+    this.isOperationalContextCollapsed = !this.isOperationalContextCollapsed
+  }
+
+  closeChatHistoryDrawer() {
+    this.isChatHistoryDrawerOpen = false
+  }
+
+  startNewChat() {
+    const previous = this.captureChatWorkspace()
+    this.cancelHistoryRead()
+    if (!previous.sessionId && !previous.messages.length && !previous.pending) this.chatWorkspaces.delete(previous.key)
+    const workspace = this.createChatWorkspace()
+    if (this.isPoolReportWorkspace) this.clearPoolReportWorkspace()
+    this.projectChatWorkspace(workspace)
+    this.isChatHistoryDrawerOpen = false
+    this.cancelChatSessionRename()
+    this.activeSection = 'main'
+  }
+
+  async openChatSession(summary: PoolChatSessionSummary) {
+    if (this.isSigningOut) return
+    this.captureChatWorkspace()
+    this.cancelHistoryRead()
+    const cached = this.findChatWorkspace(summary.id)
+    const workspace = cached ?? this.createChatWorkspace(summary.id, summary.title, summary.selectedGroupIds ?? [])
+    if (this.isPoolReportWorkspace) this.clearPoolReportWorkspace()
+    if (/^\/Pool\//i.test(window.location.pathname)) window.history.pushState({}, '', '/')
+    this.activeSection = 'main'
+    this.isChatHistoryDrawerOpen = false
+    this.chatHistoryError = ''
+    this.projectChatWorkspace(workspace)
+    if (workspace.hydrated || workspace.pending || this.isLocalChatSession(summary.id)) return
+    const epoch = this.chatAuthEpoch
+    const owner = this.currentUser?.username
+    const version = this.historySelectionVersion
+    const controller = new AbortController()
+    this.historyReadController = controller
+    this.isChatSessionOpening = true
+    const valid = () => epoch === this.chatAuthEpoch && this.currentUser?.username === owner &&
+      version === this.historySelectionVersion && this.activeChatKey === workspace.key
+    try {
+      const session = await this.api.getPoolChatSession(summary.id, controller.signal)
+      if (!valid() || this.removedChatSessionIds.has(summary.id)) return
+      const restoredMessages: ChatMessage[] = []
+      const restoredFeedbackState: Record<number, FeedbackState> = {}
+      let pendingQuery = ''
+
+      for (const stored of session.messages) {
+        if (stored.role === 'user') {
+          pendingQuery = stored.content
+          restoredMessages.push({ id: ++this.nextChatMessageId, role: 'user', text: stored.content })
+          continue
+        }
+
+        const result = stored.result ?? this.createFallbackWorkflowResult(stored.content)
+        const assistantMessage: AssistantMessage = {
+          id: ++this.nextChatMessageId,
+          role: 'assistant',
+          text: stored.content || result.suggestedResolution,
+          query: pendingQuery,
+          result,
+          workflowProgress: [],
+        }
+        restoredFeedbackState[assistantMessage.id] = createFeedbackState(
+          getDefaultFeedbackTicketId(result.similarIncidents),
+        )
+        restoredMessages.push(assistantMessage)
+        pendingQuery = ''
+      }
+
+      workspace.messages = restoredMessages
+      workspace.feedback = restoredFeedbackState
+      workspace.insights = [...restoredMessages].reverse().find(message => message.role === 'assistant')?.result ?? null
+      workspace.scopeIds = session.session.selectedGroupIds ?? []
+      workspace.sessionId = session.session.id
+      workspace.title = session.session.title
+      workspace.hydrated = true
+      this.projectChatWorkspace(workspace)
+    } catch (requestError) {
+      if (!valid() || controller.signal.aborted) return
+      this.chatHistoryError = requestError instanceof Error ? requestError.message : 'Unable to open this conversation.'
+    } finally {
+      if (valid()) {
+        this.isChatSessionOpening = false
+        this.historyReadController = undefined
+      }
+    }
+  }
+
+  beginChatSessionRename(summary: PoolChatSessionSummary) {
+    if (this.isLocalChatSession(summary.id)) return
+    this.renamingChatSessionId = summary.id
+    this.renamingChatSessionTitle = summary.title
+  }
+
+  cancelChatSessionRename() {
+    this.renamingChatSessionId = null
+    this.renamingChatSessionTitle = ''
+  }
+
+  async confirmChatSessionRename(summary: PoolChatSessionSummary) {
+    if (this.isLocalChatSession(summary.id)) return
+    const epoch = this.chatAuthEpoch
+    const title = this.renamingChatSessionTitle.trim()
+    if (!title || title === summary.title) {
+      this.cancelChatSessionRename()
+      return
+    }
+
+    try {
+      await this.api.patchPoolChatSession(summary.id, { title })
+      if (epoch !== this.chatAuthEpoch) return
+      const workspace = this.findChatWorkspace(summary.id)
+      if (workspace) workspace.title = title
+      await this.loadChatHistory()
+    } catch (requestError) {
+      if (epoch === this.chatAuthEpoch) this.chatHistoryError = requestError instanceof Error ? requestError.message : 'Unable to rename this conversation.'
+    } finally {
+      if (epoch === this.chatAuthEpoch) this.cancelChatSessionRename()
+    }
+  }
+
+  async handleChatSessionTogglePin(summary: PoolChatSessionSummary) {
+    if (this.isLocalChatSession(summary.id)) return
+    const epoch = this.chatAuthEpoch
+    try {
+      await this.api.patchPoolChatSession(summary.id, { isPinned: !summary.isPinned })
+      if (epoch !== this.chatAuthEpoch) return
+      await this.loadChatHistory()
+    } catch (requestError) {
+      if (epoch === this.chatAuthEpoch) this.chatHistoryError = requestError instanceof Error ? requestError.message : 'Unable to update this conversation.'
+    }
+  }
+
+  async handleChatSessionDelete(summary: PoolChatSessionSummary) {
+    if (this.isChatSessionPending(summary.id)) {
+      this.chatHistoryError = 'Wait for this conversation to finish before deleting it. You can continue switching chats.'
+      return
+    }
+    if (!window.confirm(`Delete "${summary.title}"? This cannot be undone.`)) {
+      return
+    }
+
+    const epoch = this.chatAuthEpoch
+    try {
+      if (!this.isLocalChatSession(summary.id)) await this.api.deletePoolChatSession(summary.id)
+      if (epoch !== this.chatAuthEpoch) return
+      this.removedChatSessionIds.add(summary.id)
+      if (this.activeChatSessionId === summary.id) {
+        this.startNewChat()
+      }
+      const workspace = this.findChatWorkspace(summary.id)
+      if (workspace) this.chatWorkspaces.delete(workspace.key)
+      this.chatHistorySummaries = this.chatHistorySummaries.filter(item => item.id !== summary.id)
+      await this.loadChatHistory()
+    } catch (requestError) {
+      if (epoch === this.chatAuthEpoch) this.chatHistoryError = requestError instanceof Error ? requestError.message : 'Unable to delete this conversation.'
+    }
+  }
+
+  chatHistoryScopeLabel(summary: PoolChatSessionSummary) {
+    const groupIds = summary.selectedGroupIds ?? []
+    if (groupIds.length === 0) {
+      return 'All applications'
+    }
+
+    const names = groupIds.map((groupId) => this.getGroupDisplayName(groupId))
+    if (names.length <= 2) {
+      return names.join(', ')
+    }
+
+    return `${names.slice(0, 2).join(', ')} +${names.length - 2}`
+  }
+
+  chatHistoryRelativeTime(isoTimestamp: string) {
+    const timestamp = new Date(isoTimestamp)
+    if (Number.isNaN(timestamp.getTime())) {
+      return ''
+    }
+
+    const minutes = Math.round((Date.now() - timestamp.getTime()) / 60000)
+    if (minutes < 1) {
+      return 'Just now'
+    }
+    if (minutes < 60) {
+      return `${minutes}m ago`
+    }
+    const hours = Math.round(minutes / 60)
+    if (hours < 24) {
+      return `${hours}h ago`
+    }
+    const days = Math.round(hours / 24)
+    if (days < 7) {
+      return `${days}d ago`
+    }
+
+    return timestamp.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+
+  private createFallbackWorkflowResult(content: string): TicketWorkflowResult {
+    return {
+      suggestedRootCause: '',
+      suggestedResolution: content,
+      confidence: 0,
+      similarIncidents: [],
+      failurePattern: {
+        id: 0,
+        system: '',
+        component: '',
+        failureType: '',
+        resolutionCategory: '',
+        ticketId: '',
+        createdAt: '',
+      },
+      reasoning: '',
+      failurePatternFrequency: 0,
+    }
   }
 
   handleComposerKeydown(event: KeyboardEvent) {
@@ -839,6 +1190,8 @@ export class AppComponent implements OnInit {
 
       if (this.poolReportSourceEventId || this.poolReport || this.isPoolReportLoading) {
         this.clearPoolReportWorkspace()
+        const workspace = this.chatWorkspaces.get(this.activeChatKey)
+        if (workspace) this.projectChatWorkspace(workspace)
       }
     }
 
@@ -849,6 +1202,279 @@ export class AppComponent implements OnInit {
     if (section === 'applicationFeedback' && this.currentUser && !this.applicationFeedbackInsights) {
       void this.loadApplicationFeedbackInsights()
     }
+
+    if (section === 'codeRepositories' && this.currentUser) {
+      // Drop applications that no longer exist; an empty scope keeps meaning "all applications".
+      const known = new Set(this.projects.map(project => project.projectId))
+      this.codeRepoScopeIds = this.codeRepoScopeIds.filter(projectId => known.has(projectId))
+      void this.loadCodeRepositories()
+      void this.loadCodeChatHistory()
+      this.startCodeRepoPolling()
+    } else {
+      this.stopCodeRepoPolling()
+    }
+  }
+
+  private startCodeRepoPolling() {
+    this.stopCodeRepoPolling()
+    this.codeRepoTimer = window.setInterval(() => {
+      if (!document.hidden) void this.loadCodeRepositories(true)
+    }, 30000)
+  }
+
+  private stopCodeRepoPolling() {
+    if (this.codeRepoTimer !== null) {
+      window.clearInterval(this.codeRepoTimer)
+      this.codeRepoTimer = null
+    }
+  }
+
+  get isCodeRepoBusy() {
+    return this.isCodeRepoLoading
+  }
+
+  get hasCodeRepoScope() {
+    return this.projects.length > 0
+  }
+
+  get codeRepoScopeSelectValue() {
+    return this.codeRepoScopeIds.length === 0 ? this.allGroupValue : this.codeRepoScopeIds[0]
+  }
+
+  get codeRepoUnselectedProjects() {
+    return this.projects.filter(project => !this.codeRepoScopeIds.includes(project.projectId))
+  }
+
+  get codeRepoScopeLabel() {
+    if (this.codeRepoScopeIds.length === 0) return 'All applications'
+    return this.codeRepoScopeIds.map(projectId => this.getCodeRepoProjectName(projectId)).join(', ')
+  }
+
+  getCodeRepoProjectName(projectId: string) {
+    return this.projects.find(project => project.projectId === projectId)?.projectName ?? projectId
+  }
+
+  async loadCodeRepositories(silent = false) {
+    if (!this.currentUser) return
+    const version = ++this.codeRepoLoadVersion
+    if (!silent) this.isCodeRepoLoading = true
+    try {
+      this.codeRepoConnection = await this.api.codeRequest<GitHubAccessStatus>('/github/access')
+      const records = this.hasCodeRepoScope && this.codeRepoConnection.available
+        ? await this.api.getCodeRepositories(this.codeRepoScopeIds)
+        : []
+      if (version !== this.codeRepoLoadVersion) return
+      this.codeRepoList = records
+      if (!silent) this.codeRepoError = ''
+    } catch (requestError) {
+      if (version !== this.codeRepoLoadVersion) return
+      if (!this.codeRepoConnection) this.codeRepoConnection = { configured: false, available: false, login: null, message: '' }
+      this.codeRepoError = requestError instanceof Error ? requestError.message : 'Unable to load code repositories.'
+    } finally {
+      if (version === this.codeRepoLoadVersion) this.isCodeRepoLoading = false
+    }
+  }
+
+  handleCodeRepoScopeSelectChange(value: string) {
+    void this.changeCodeRepoScope(!value || value === this.allGroupValue ? [] : [value])
+  }
+
+  handleCodeRepoScopeAdd(projectId: string) {
+    this.codeRepoScopeAddValue = ''
+    if (!projectId || this.codeRepoScopeIds.includes(projectId)) return
+    void this.changeCodeRepoScope([...this.codeRepoScopeIds, projectId])
+  }
+
+  handleCodeRepoScopeRemove(projectId: string) {
+    void this.changeCodeRepoScope(this.codeRepoScopeIds.filter(selected => selected !== projectId))
+  }
+
+  private async changeCodeRepoScope(projectIds: string[]) {
+    if (this.isCodeRepoBusy || this.isCodeChatAsking) return
+    const sameScope = projectIds.length === this.codeRepoScopeIds.length && projectIds.every(projectId => this.codeRepoScopeIds.includes(projectId))
+    if (sameScope) return
+    this.codeRepoScopeIds = projectIds
+    this.codeRepoScopeAddValue = ''
+    this.codeRepoList = []
+    this.codeRepoNotice = ''
+    this.resetCodeChat()
+    await Promise.all([this.loadCodeRepositories(), this.loadCodeChatHistory()])
+  }
+
+  get hasReadyCodeRepository() {
+    return this.codeRepoList.some(repo => repo.enabled && repo.indexedCommit)
+  }
+
+  async loadCodeChatHistory() {
+    if (!this.currentUser || !this.hasCodeRepoScope) {
+      this.codeChatHistory = []
+      return
+    }
+    this.isCodeChatHistoryLoading = true
+    try {
+      this.codeChatHistory = await this.api.getCodeChatHistory(this.codeRepoScopeIds)
+    } catch (requestError) {
+      this.codeChatError = requestError instanceof Error ? requestError.message : 'Unable to load conversation history.'
+    } finally {
+      this.isCodeChatHistoryLoading = false
+    }
+  }
+
+  async openCodeChatSession(sessionId: string) {
+    if (this.isCodeChatAsking || this.isCodeChatTyping || sessionId === this.codeChatSessionId) return
+    this.isCodeChatHistoryLoading = true
+    this.codeChatError = ''
+    try {
+      const session = await this.api.getCodeChatSession(sessionId)
+      this.codeChatSessionId = session.session.id
+      this.codeChatMessages = session.messages.map(message =>
+        this.createCodeChatMessage(message.role, message.content, message.citations, message.createdAt))
+      this.scrollCodeChatToBottom()
+    } catch (requestError) {
+      this.codeChatError = requestError instanceof Error ? requestError.message : 'Unable to load this conversation.'
+    } finally {
+      this.isCodeChatHistoryLoading = false
+    }
+  }
+
+  async deleteCodeChatSession(sessionId: string, event?: Event) {
+    event?.stopPropagation()
+    if (this.isCodeChatAsking || this.isCodeChatTyping) return
+    try {
+      await this.api.deleteCodeChatSession(sessionId)
+      this.codeChatHistory = this.codeChatHistory.filter(session => session.id !== sessionId)
+      if (this.codeChatSessionId === sessionId) this.resetCodeChat()
+    } catch (requestError) {
+      this.codeChatError = requestError instanceof Error ? requestError.message : 'Unable to delete this conversation.'
+    }
+  }
+
+  async handleCodeChatAsk() {
+    const question = this.codeChatQuestion.trim()
+    if (!question || !this.hasCodeRepoScope || this.isCodeChatAsking || this.isCodeChatTyping) return
+
+    const history: CodeChatTurn[] = this.codeChatMessages
+      .filter(message => !message.isError)
+      .slice(-8)
+      .map(message => ({ role: message.role, content: message.text }))
+
+    this.codeChatMessages = [...this.codeChatMessages, this.createCodeChatMessage('user', question)]
+    this.codeChatQuestion = ''
+    this.isCodeChatAsking = true
+    const mode = this.codeSearchMode
+    this.codeChatPendingMode = mode
+    this.codeChatError = ''
+    this.scrollCodeChatToBottom()
+    const requestStartedAt = performance.now()
+
+    try {
+      const response = await this.api.askCodeChat(this.codeRepoScopeIds, question, history, this.codeChatSessionId, mode)
+      const completedInMs = performance.now() - requestStartedAt
+      this.codeChatSessionId = response.sessionId
+      const answerMessage = {
+        ...this.createCodeChatMessage('assistant', mode === 'deep' ? '' : response.answer, response.citations, response.generatedAt, response.codeKnowledgeStatus, response.codeSearchCoverage),
+        completedInMs,
+        searchMode: response.searchMode ?? mode,
+      }
+      this.codeChatMessages = [...this.codeChatMessages, answerMessage]
+      if (mode === 'deep') this.revealCodeChatAnswer(answerMessage, response.answer)
+      void this.loadCodeChatHistory()
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : 'Unable to answer from repository source.'
+      this.codeChatMessages = [...this.codeChatMessages, { ...this.createCodeChatMessage('assistant', message), isError: true }]
+    } finally {
+      this.isCodeChatAsking = false
+      this.scrollCodeChatToBottom()
+    }
+  }
+
+  handleCodeChatKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      void this.handleCodeChatAsk()
+    }
+  }
+
+  resetCodeChat() {
+    this.stopCodeChatReveal()
+    this.codeChatMessages = []
+    this.codeChatSessionId = null
+    this.codeChatError = ''
+  }
+
+  trackCodeChatMessage(_index: number, message: CodeChatMessage) {
+    return message.id
+  }
+
+  trackCodeChatSession(_index: number, session: CodeChatSessionSummary) {
+    return session.id
+  }
+
+  private revealCodeChatAnswer(message: CodeChatMessage, answer: string) {
+    this.stopCodeChatReveal()
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      message.text = answer
+      return
+    }
+    // Fenced blocks, links and table rows appear whole, so half-written Markdown never renders.
+    const atomic = [...answer.matchAll(/^(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^\1[ \t]*$|(?![\s\S]))|\[[^\]\n]*\]\([^)\n]*\)|^[ \t]*\|[^\n]*$/gm)]
+      .map(match => [match.index, match.index + match[0].length])
+    // About 1,000 characters a second, but never longer than eight seconds in total.
+    const duration = Math.min(8000, Math.max(1200, answer.length))
+    const startedAt = performance.now()
+    this.isCodeChatTyping = true
+    const reveal = () => {
+      let position = Math.min(answer.length, Math.max(1, Math.ceil(answer.length * (performance.now() - startedAt) / duration)))
+      const range = atomic.find(([start, end]) => position > start && position < end)
+      if (range) position = range[1]
+      if (/[\uD800-\uDBFF]/.test(answer[position - 1])) position++
+      const follow = this.isCodeChatNearBottom()
+      message.text = answer.slice(0, position)
+      if (follow) this.scrollCodeChatToBottom()
+      if (position < answer.length) this.codeChatRevealTimer = window.setTimeout(reveal, 40)
+      else this.stopCodeChatReveal()
+    }
+    reveal()
+  }
+
+  private stopCodeChatReveal() {
+    if (this.codeChatRevealTimer !== null) window.clearTimeout(this.codeChatRevealTimer)
+    this.codeChatRevealTimer = null
+    this.isCodeChatTyping = false
+  }
+
+  /** The view follows new text only while the reader has not scrolled up. */
+  private isCodeChatNearBottom() {
+    const element = this.codeChatTranscript?.nativeElement
+    return !element || element.scrollHeight - element.scrollTop - element.clientHeight < 80
+  }
+
+  get codeSearchModeDescription() {
+    return this.codeSearchModes.find(option => option.value === this.codeSearchMode)?.description ?? ''
+  }
+
+  codeAnswerDurationLabel(message: CodeChatMessage): string | null {
+    const duration = formatAnswerDuration(message.completedInMs)
+    return duration ? `Generated in ${duration}` : null
+  }
+
+  private createCodeChatMessage(role: 'user' | 'assistant', text: string, citations: CodeEvidence[] = [], generatedAt = new Date().toISOString(), codeKnowledgeStatus = '', codeSearchCoverage?: CodeSearchCoverage): CodeChatMessage {
+    return {
+      id: Date.now() + Math.random(),
+      role,
+      text,
+      citations,
+      generatedAt,
+      codeKnowledgeStatus,
+      codeSearchCoverage,
+    }
+  }
+
+  private scrollCodeChatToBottom() {
+    setTimeout(() => {
+      const element = this.codeChatTranscript?.nativeElement
+      if (element) element.scrollTop = element.scrollHeight
+    })
   }
 
   toggleSidebar() {
@@ -860,16 +1486,16 @@ export class AppComponent implements OnInit {
       ? [...this.selectedGroupIds, groupId]
       : this.selectedGroupIds.filter((selectedGroupId) => selectedGroupId !== groupId)
 
-    this.setSelectedGroupIds(next.length === 0 ? [] : next)
+    this.changeChatScope(next.length === 0 ? [] : next)
   }
 
   handleScopeSelectChange(value: string) {
     if (!value || value === this.allGroupValue) {
-      this.setSelectedGroupIds([])
+      this.changeChatScope([])
       return
     }
 
-    this.setSelectedGroupIds([value])
+    this.changeChatScope([value])
   }
 
   handleAddGroupSelect(groupId: string) {
@@ -889,6 +1515,17 @@ export class AppComponent implements OnInit {
     this.scopeAddSelectValue = ''
   }
 
+  private changeChatScope(groupIds: string[]) {
+    if (this.isLoading || this.isChatSessionOpening) return
+    const sameScope = groupIds.length === this.selectedGroupIds.length &&
+      groupIds.every(groupId => this.selectedGroupIds.includes(groupId))
+    if (!sameScope && (this.messages.length > 0 || this.activeChatSessionId)) {
+      this.startNewChat()
+      this.chatContextNotice = 'Application scope changed. Started a new chat to keep conversation context separate.'
+    }
+    this.setSelectedGroupIds(groupIds)
+  }
+
   trackGroupId(_index: number, groupId: string) {
     return groupId
   }
@@ -897,7 +1534,12 @@ export class AppComponent implements OnInit {
     return group.groupId
   }
 
+  trackProjectById(_index: number, project: { projectId: string }) {
+    return project.projectId
+  }
+
   private clearPoolReportWorkspace() {
+    this.poolReportReadVersion++
     this.poolReport = null
     this.poolReportSourceEventId = ''
     this.isPoolReportLoading = false
@@ -967,6 +1609,7 @@ export class AppComponent implements OnInit {
   }
 
   handleEditProject(project: ProjectConfig) {
+    if (this.isProjectSaving) return
     this.editingProjectId = project.projectId
     this.projectForm = {
       projectId: project.projectId,
@@ -980,45 +1623,19 @@ export class AppComponent implements OnInit {
       nyraKbNames: project.nyraKbNames,
       githubUrls: project.githubUrls ?? '',
     }
-    const repositoryUrls = (project.githubUrls ?? '').split(';').map(url => url.trim()).filter(Boolean)
-    this.projectRepositoryRows = repositoryUrls.length ? repositoryUrls.map(url => ({ url })) : [{ url: '' }]
     this.projectNotice = `Editing ${project.projectName}.`
     this.projectError = ''
   }
 
-  addProjectRepository() {
-    this.projectRepositoryRows.push({ url: '' })
-  }
-
-  removeProjectRepository(index: number) {
-    this.projectRepositoryRows.splice(index, 1)
-    if (!this.projectRepositoryRows.length) {
-      this.addProjectRepository()
-    }
-  }
-
   cancelProjectEdit() {
+    if (this.isProjectSaving) return
     this.resetProjectForm()
     this.projectNotice = ''
     this.projectError = ''
   }
 
   async handleProjectSubmit() {
-    const repositoryUrls = this.projectRepositoryRows.flatMap(row => row.url.split(';'))
-      .map(url => url.trim()).filter(Boolean)
-
-    for (const repositoryUrl of repositoryUrls) {
-      try {
-        const parsedUrl = new URL(repositoryUrl)
-        if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
-          throw new Error('Unsupported repository URL protocol')
-        }
-      } catch {
-        this.projectError = 'Enter a valid HTTP or HTTPS URL for each repository.'
-        this.projectNotice = ''
-        return
-      }
-    }
+    if (this.isProjectSaving) return
 
     const payload: ProjectConfigInput = {
       ...this.projectForm,
@@ -1027,7 +1644,7 @@ export class AppComponent implements OnInit {
       emailRecipients: this.projectForm.emailRecipients.trim(),
       applicationFilter: this.projectForm.applicationFilter.trim(),
       nyraKbNames: this.projectForm.nyraKbNames.trim(),
-      githubUrls: repositoryUrls.join(';'),
+      githubUrls: this.projectForm.githubUrls,
     }
 
     if (!payload.projectName) {
@@ -1038,20 +1655,26 @@ export class AppComponent implements OnInit {
     this.projectError = ''
     this.projectNotice = ''
     this.isProjectSaving = true
+    const repositoryEditor = this.codeRepositories
+    let applicationSaved = false
 
     try {
+      repositoryEditor?.validate()
       if (this.editingProjectId) {
         await this.api.updateProject(this.editingProjectId, payload)
-        this.projectNotice = `Updated ${payload.projectName}.`
+        applicationSaved = true
+        const queued = await repositoryEditor?.saveChanges() ?? 0
+        this.projectNotice = `Updated ${payload.projectName}.` + (queued ? ` Queued ${queued} ${queued === 1 ? 'repository' : 'repositories'} for indexing.` : '')
       } else {
         await this.api.createProject(payload)
         this.projectNotice = `Created ${payload.projectName}.`
+        this.resetProjectForm()
       }
 
-      this.resetProjectForm()
       await this.loadProjectWorkspace(true)
     } catch (requestError) {
-      this.projectError = requestError instanceof Error ? requestError.message : 'Unable to save the application configuration.'
+      const message = requestError instanceof Error ? requestError.message : 'Unable to save the application configuration.'
+      this.projectError = applicationSaved ? `Application settings were saved, but repository changes could not be completed. ${message}` : message
     } finally {
       this.isProjectSaving = false
     }
@@ -1147,8 +1770,54 @@ export class AppComponent implements OnInit {
     return content.length > 200 ? `${content.slice(0, 200).trimEnd()}...` : content
   }
 
+  isLatestAssistantMessage(message: AssistantMessage): boolean {
+    for (let index = this.messages.length - 1; index >= 0; index -= 1) {
+      const candidate = this.messages[index]
+      if (candidate.role === 'assistant') {
+        return candidate.id === message.id
+      }
+    }
+
+    return false
+  }
+
+  isDetailedAnalysisExpanded(message: AssistantMessage): boolean {
+    const state = this.detailedAnalysisExpandedByMessageId[message.id]
+    return state ?? this.isLatestAssistantMessage(message)
+  }
+
+  toggleDetailedAnalysis(message: AssistantMessage) {
+    this.detailedAnalysisExpandedByMessageId = {
+      ...this.detailedAnalysisExpandedByMessageId,
+      [message.id]: !this.isDetailedAnalysisExpanded(message),
+    }
+  }
+
+  getResultConfidencePercent(result: TicketWorkflowResult): number {
+    return Math.max(0, Math.min(100, Math.round((result.confidence || 0) * 100)))
+  }
+
+  getEvidenceSourceCounts(result: TicketWorkflowResult): { pool: number; nyra: number; code: number } {
+    return {
+      pool: result.similarIncidents?.length ?? 0,
+      nyra: result.nyraDocuments?.length ?? 0,
+      code: result.codeDocuments?.length ?? 0,
+    }
+  }
+
+  getTopIncidentMatches(result: TicketWorkflowResult, limit = 5) {
+    return (result.similarIncidents ?? [])
+      .filter((incident) => incident.ticketId.trim().length > 0)
+      .slice(0, limit)
+      .map((incident) => ({
+        ticketId: incident.ticketId,
+        percent: Math.max(0, Math.min(100, Math.round((incident.similarity || 0) * 100))),
+      }))
+  }
+
   getTroubleshootingSteps(resolution: string): string[] {
     const text = (resolution || '').trim()
+    if (/```|~~~/.test(text)) return []
     if (!text) {
       return []
     }
@@ -1349,6 +2018,24 @@ export class AppComponent implements OnInit {
     this.expandedWorkflowActivityMessageId = this.isWorkflowActivityExpanded(messageId) ? null : messageId
   }
 
+  readonly completedDurationTitle = 'Elapsed time from sending your question to receiving this completed response.'
+
+  answerDurationLabel(message: ChatMessage): string | null {
+    if (message.role !== 'assistant') return null
+    const clientDuration = formatAnswerDuration(message.completedInMs)
+    if (clientDuration) return `Completed in ${clientDuration}`
+    const serverDuration = formatAnswerDuration(message.result?.processingDurationMs)
+    return serverDuration ? `Generated in ${serverDuration}` : null
+  }
+
+  answerDurationTitle(message: ChatMessage): string | null {
+    if (message.role !== 'assistant') return null
+    const clientDuration = formatAnswerDuration(message.completedInMs)
+    if (clientDuration) return this.completedDurationTitle
+    const serverDuration = formatAnswerDuration(message.result?.processingDurationMs)
+    return serverDuration ? 'Server-measured generation time recorded when this answer was saved.' : null
+  }
+
   trackIncident(_index: number, incident: SimilarIncident) {
     return incident.ticketId
   }
@@ -1357,7 +2044,20 @@ export class AppComponent implements OnInit {
     return document.documentId || document.sourceUrl || document.citation
   }
 
-  setEvidenceTab(tab: 'incidents' | 'nyra') {
+  clearCodeAnswers() {
+    const removedIds = new Set(this.messages
+      .filter(message => message.role === 'assistant' && (message.result.codeDocuments?.length ?? 0) > 0)
+      .map(message => message.id))
+    this.messages = this.messages.filter(message => !removedIds.has(message.id))
+    if (this.insights?.codeDocuments?.length) this.insights = null
+    this.poolTroubleshootEntries = this.poolTroubleshootEntries.filter(entry => !entry.codeDocuments?.length)
+    for (const messageId of removedIds) delete this.feedbackStateByMessageId[messageId]
+    if (this.openFeedbackTargetMessageId !== null && removedIds.has(this.openFeedbackTargetMessageId)) this.openFeedbackTargetMessageId = null
+    if (this.expandedWorkflowActivityMessageId !== null && removedIds.has(this.expandedWorkflowActivityMessageId)) this.expandedWorkflowActivityMessageId = null
+    this.activeEvidenceTab = 'incidents'
+  }
+
+  setEvidenceTab(tab: 'incidents' | 'nyra' | 'code') {
     this.activeEvidenceTab = tab
   }
 
@@ -1386,6 +2086,7 @@ export class AppComponent implements OnInit {
   }
 
   openPoolRecommendation(report: PoolRecommendationReportListItem) {
+    this.captureChatWorkspace()
     const reportUrl = report.reportUrl || `/Pool/${encodeURIComponent(report.sourceEventId)}`
     window.history.pushState({}, '', reportUrl)
     this.poolReportSourceEventId = report.sourceEventId
@@ -1485,7 +2186,6 @@ export class AppComponent implements OnInit {
   private resetProjectForm() {
     this.editingProjectId = null
     this.projectForm = createDefaultProjectForm()
-    this.projectRepositoryRows = [{ url: '' }]
   }
 
   private async initializeSession() {
@@ -1519,6 +2219,7 @@ export class AppComponent implements OnInit {
       await this.loadAuthenticatedWorkspace()
       await this.loadInitialPoolReport()
     })()
+    void this.loadChatHistory()
   }
 
   private async loadAuthenticatedWorkspace() {
@@ -1594,7 +2295,20 @@ export class AppComponent implements OnInit {
   }
 
   private async loadPoolReport(poolReportId: string) {
+    this.cancelHistoryRead()
+    const epoch = this.chatAuthEpoch
+    const version = ++this.poolReportReadVersion
+    const valid = () => epoch === this.chatAuthEpoch && version === this.poolReportReadVersion
     this.activeSection = 'main'
+    this.activeChatSessionId = null
+    this.isLoading = false
+    this.loadingQuery = ''
+    this.loadingScopeGroupIds = []
+    this.loadingProgressEvents = []
+    this.messages = []
+    this.insights = null
+    this.error = ''
+    this.historyPersistenceNotice = ''
     this.poolReport = null
     this.poolReportError = ''
     this.poolTroubleshootQuestion = ''
@@ -1605,6 +2319,7 @@ export class AppComponent implements OnInit {
 
     try {
       const report = await this.api.getPoolReport(poolReportId)
+      if (!valid()) return
       this.poolReport = report
       this.poolReportSourceEventId = report.sourceEventId || poolReportId
       this.applyPoolReportScope(report)
@@ -1615,9 +2330,9 @@ export class AppComponent implements OnInit {
         this.insights = null
       }
     } catch (requestError) {
-      this.poolReportError = requestError instanceof Error ? requestError.message : 'Unable to load the PoolSense report.'
+      if (valid()) this.poolReportError = requestError instanceof Error ? requestError.message : 'Unable to load the PoolSense report.'
     } finally {
-      this.isPoolReportLoading = false
+      if (valid()) this.isPoolReportLoading = false
     }
   }
 
@@ -1647,6 +2362,7 @@ export class AppComponent implements OnInit {
     )
     this.messages = [userMessage, assistantMessage]
     this.insights = result
+    this.activeChatSessionId = null
     this.input = ''
   }
 

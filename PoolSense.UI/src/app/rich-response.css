@@ -1,0 +1,59 @@
+:host { display: block; min-width: 0; }
+.rich-response { overflow-wrap: anywhere; min-width: 0; }
+:host ::ng-deep .rich-response > div > p,
+:host ::ng-deep .rich-response > div > ul,
+:host ::ng-deep .rich-response > div > ol,
+:host ::ng-deep .rich-response > div > blockquote { margin-block: 0 .9rem; }
+:host ::ng-deep .rich-response > div > h1,
+:host ::ng-deep .rich-response > div > h2,
+:host ::ng-deep .rich-response > div > h3,
+:host ::ng-deep .rich-response > div > h4,
+:host ::ng-deep .rich-response > div > h5,
+:host ::ng-deep .rich-response > div > h6 { margin-block: 1.5rem .65rem; }
+:host ::ng-deep .rich-response > div > :first-child { margin-top: 0; }
+:host ::ng-deep .rich-response > div > :last-child { margin-bottom: 0; }
+/* Rich blocks are child components; shared styles are scoped below via the host ancestry. */
+:host ::ng-deep .rich-block {
+  display: block; position: relative; inset: auto; width: 100%; max-width: 100%; margin: 1rem 0;
+  padding: 0; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--panel-subtle); color: var(--ink); box-sizing: border-box;
+}
+:host ::ng-deep .rich-block:modal {
+  position: fixed; inset: 3vh 3vw; width: 94vw; max-width: 94vw; max-height: 94vh;
+  margin: auto; overflow: auto; box-shadow: var(--shadow-lg);
+}
+:host ::ng-deep .rich-block::backdrop { background: rgb(2 6 23 / 70%); }
+:host ::ng-deep .rich-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem;
+  padding: .6rem .8rem; border-bottom: 1px solid var(--border);
+}
+:host ::ng-deep .rich-toolbar strong { font-size: .8rem; overflow-wrap: anywhere; }
+:host ::ng-deep .rich-toolbar > div { display: flex; flex-wrap: wrap; gap: .35rem; }
+:host ::ng-deep .rich-toolbar button {
+  padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 7px;
+  color: var(--ink); background: var(--panel-bg); cursor: pointer; font: inherit; font-size: .75rem;
+}
+:host ::ng-deep .rich-toolbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:host ::ng-deep .rich-block pre { margin: 0; padding: 1rem; overflow: auto; white-space: pre; max-height: 28rem; }
+:host ::ng-deep .rich-block:modal pre { max-height: 70vh; }
+:host ::ng-deep .rich-block code { font-family: var(--mono-font); font-size: .8rem; }
+:host ::ng-deep .rich-error { padding: .8rem; background: var(--error-bg); color: var(--error-color); }
+:host ::ng-deep .rich-status { padding: .5rem .8rem; color: var(--muted); font-size: .8rem; }
+:host ::ng-deep .rich-diagram { padding: 1rem; overflow: auto; text-align: center; }
+:host ::ng-deep .rich-diagram svg { max-width: 100%; height: auto; }
+:host ::ng-deep .rich-chart { position: relative; height: 20rem; min-width: 0; padding: .75rem; box-sizing: border-box; }
+:host ::ng-deep .rich-chart[hidden] { display: none; }
+:host ::ng-deep .rich-block:modal .rich-chart { height: 65vh; }
+:host ::ng-deep .rich-data { padding: .75rem; font-size: .8rem; }
+:host ::ng-deep .rich-data summary { cursor: pointer; }
+:host ::ng-deep .rich-table-scroll,
+:host ::ng-deep .markdown-body > div { overflow-x: auto; }
+:host ::ng-deep table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; margin: .75rem 0; font-size: .85rem; }
+:host ::ng-deep th, :host ::ng-deep td { border: 1px solid var(--border); padding: .5rem .75rem; text-align: left; }
+:host ::ng-deep th { background: var(--panel-subtle); color: var(--heading-text); }
+:host ::ng-deep h1, :host ::ng-deep h2, :host ::ng-deep h3 { color: var(--heading-text); line-height: 1.3; }
+:host ::ng-deep h1 { font-size: 1.5rem; } :host ::ng-deep h2 { font-size: 1.25rem; } :host ::ng-deep h3 { font-size: 1.05rem; }
+:host ::ng-deep p, :host ::ng-deep li { line-height: 1.65; }
+:host ::ng-deep a { color: var(--accent); }
+:host ::ng-deep blockquote { margin-inline: 0; border-left: 3px solid var(--accent); padding-left: 1rem; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { :host ::ng-deep * { scroll-behavior: auto; transition: none; } }

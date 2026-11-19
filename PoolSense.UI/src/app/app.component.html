@@ -67,7 +67,7 @@
     </form>
   </section>
 
-  <div *ngIf="!isSessionLoading && currentUser" class="app-shell" [class.app-shell-sidebar-collapsed]="isSidebarCollapsed">
+  <div *ngIf="!isSessionLoading && currentUser" class="app-shell" [class.app-shell-sidebar-collapsed]="isSidebarCollapsed" [class.app-shell-history]="activeSection === 'main' && isHistoryRailVisible && !isNarrowViewport" [class.app-shell-context-collapsed]="activeSection === 'main' && isOperationalContextCollapsed">
     <aside class="project-panel sidebar-panel" [class.sidebar-panel-collapsed]="isSidebarCollapsed" [attr.aria-label]="isSidebarCollapsed ? 'Primary navigation collapsed' : 'Primary navigation'">
       <div class="project-panel-header sidebar-brand">
         <div *ngIf="!isSidebarCollapsed" class="sidebar-brand-copy">
@@ -84,7 +84,7 @@
         </button>
       </div>
 
-      <nav class="sidebar-nav" aria-label="Workspace sections">
+      <nav class="sidebar-nav" aria-label="Workspace sections" tabindex="0">
         <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'main'" (click)="setActiveSection('main')" [attr.aria-pressed]="activeSection === 'main'" aria-label="Open PoolSense main panel" [attr.title]="isSidebarCollapsed ? 'PoolSense' : null">
           <span class="sidebar-nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -140,6 +140,23 @@
           </span>
         </button>
 
+        <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'codeRepositories'" (click)="setActiveSection('codeRepositories')" [attr.aria-pressed]="activeSection === 'codeRepositories'" aria-label="Open code repositories" [attr.title]="isSidebarCollapsed ? 'Code Repositories' : null">
+          <span class="sidebar-nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="4" r="2"></circle>
+              <circle cx="6" cy="20" r="2"></circle>
+              <circle cx="18" cy="8" r="2"></circle>
+              <path d="M6 6v12"></path>
+              <path d="M18 10a4 4 0 0 1-4 4h-4a4 4 0 0 0-4 4"></path>
+            </svg>
+          </span>
+          <span *ngIf="!isSidebarCollapsed" class="sidebar-nav-body">
+            <span class="sidebar-nav-kicker">CodeRAG</span>
+            <span class="sidebar-nav-title">Code Repositories</span>
+            <span class="sidebar-nav-copy">Add GitHub repositories and index them as code knowledge for an application.</span>
+          </span>
+        </button>
+
         <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'applicationFeedback'" (click)="setActiveSection('applicationFeedback')" [attr.aria-pressed]="activeSection === 'applicationFeedback'" aria-label="Open application feedback" [attr.title]="isSidebarCollapsed ? 'Application Feedback' : null">
           <span class="sidebar-nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -174,6 +191,97 @@
     </aside>
 
     <ng-container *ngIf="activeSection === 'main'; else nonMainView">
+    <div *ngIf="isNarrowViewport && isChatHistoryDrawerOpen" class="chat-history-backdrop" (click)="closeChatHistoryDrawer()" aria-hidden="true"></div>
+    <aside *ngIf="isHistoryRailVisible" class="chat-history-panel" [class.chat-history-drawer]="isNarrowViewport" aria-label="Chat history">
+      <header class="chat-history-header">
+        <div class="chat-history-heading">
+          <p class="panel-kicker">History</p>
+          <h2>Conversations</h2>
+        </div>
+        <div class="chat-history-header-actions">
+          <button type="button" class="chat-history-new-button" (click)="startNewChat()">+ New chat</button>
+          <button type="button" class="chat-history-icon-button" (click)="isNarrowViewport ? closeChatHistoryDrawer() : toggleChatHistory()" [attr.aria-label]="isNarrowViewport ? 'Close chat history' : 'Collapse chat history'" [attr.title]="isNarrowViewport ? 'Close' : 'Collapse'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6"></path>
+            </svg>
+          </button>
+        </div>
+      </header>
+      <p *ngIf="chatHistoryError" class="chat-history-error" role="alert">{{ chatHistoryError }}</p>
+      <p *ngIf="isChatHistoryLoading && chatHistorySummaries.length === 0" class="chat-history-state">Loading your conversations…</p>
+      <p *ngIf="!isChatHistoryLoading && pinnedChatSessions.length === 0 && recentChatSessions.length === 0 && !chatHistoryError" class="chat-history-state">No saved conversations yet. Your first answer is saved here automatically.</p>
+      <div class="chat-history-scroll">
+        <div *ngIf="pinnedChatSessions.length > 0" class="chat-history-group">
+          <p class="chat-history-group-label">Pinned</p>
+          <ul class="chat-history-list">
+            <li *ngFor="let session of pinnedChatSessions; trackBy: trackChatSessionId" class="chat-history-item" [class.chat-history-item-active]="session.id === activeChatSessionId">
+              <button type="button" class="chat-history-open" (click)="openChatSession(session)" [title]="session.title" [attr.aria-label]="session.title" [attr.aria-current]="session.id === activeChatSessionId ? 'true' : null">
+                <span class="chat-history-item-title">{{ session.title }}</span>
+                <span class="chat-history-item-meta">{{ chatHistoryRelativeTime(session.updatedAt) }} · {{ chatHistoryScopeLabel(session) }}</span>
+                <span *ngIf="isChatSessionPending(session.id)" class="chat-history-item-meta">Investigating…</span>
+              </button>
+              <div class="chat-history-item-actions">
+                <form *ngIf="renamingChatSessionId === session.id; else pinnedItemActions" class="chat-history-rename" (ngSubmit)="confirmChatSessionRename(session)">
+                  <input type="text" [(ngModel)]="renamingChatSessionTitle" name="pinnedRenameTitle" maxlength="100" aria-label="Conversation title" (keydown.escape)="cancelChatSessionRename()" />
+                  <button type="submit" class="chat-history-icon-button" aria-label="Save title" title="Save">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"></path></svg>
+                  </button>
+                  <button type="button" class="chat-history-icon-button" (click)="cancelChatSessionRename()" aria-label="Cancel rename" title="Cancel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>
+                  </button>
+                </form>
+                <ng-template #pinnedItemActions>
+                  <button type="button" class="chat-history-icon-button" (click)="handleChatSessionTogglePin(session)" [attr.aria-label]="session.isPinned ? 'Unpin conversation' : 'Pin conversation'" [attr.title]="session.isPinned ? 'Unpin' : 'Pin'">
+                    <svg viewBox="0 0 24 24" [attr.fill]="session.isPinned ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"></path><path d="M9 3h6l-1 7 3 3H7l3-3-1-7z"></path></svg>
+                  </button>
+                  <button type="button" class="chat-history-icon-button" (click)="beginChatSessionRename(session)" aria-label="Rename conversation" title="Rename">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                  </button>
+                  <button type="button" class="chat-history-icon-button chat-history-danger" (click)="handleChatSessionDelete(session)" aria-label="Delete conversation" [disabled]="isChatSessionPending(session.id)" [title]="isChatSessionPending(session.id) ? 'Wait for this conversation to finish before deleting' : 'Delete'">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M6 6l1 14h10l1-14"></path></svg>
+                  </button>
+                </ng-template>
+              </div>
+            </li>
+          </ul>
+        </div>
+        <div *ngIf="recentChatSessions.length > 0" class="chat-history-group">
+          <p class="chat-history-group-label">Recent</p>
+          <ul class="chat-history-list">
+            <li *ngFor="let session of recentChatSessions; trackBy: trackChatSessionId" class="chat-history-item" [class.chat-history-item-active]="session.id === activeChatSessionId">
+              <button type="button" class="chat-history-open" (click)="openChatSession(session)" [title]="session.title" [attr.aria-label]="session.title" [attr.aria-current]="session.id === activeChatSessionId ? 'true' : null">
+                <span class="chat-history-item-title">{{ session.title }}</span>
+                <span class="chat-history-item-meta">{{ chatHistoryRelativeTime(session.updatedAt) }} · {{ chatHistoryScopeLabel(session) }}</span>
+                <span *ngIf="isChatSessionPending(session.id)" class="chat-history-item-meta">Investigating…</span>
+                <span *ngIf="!isChatSessionPending(session.id) && isLocalChatSession(session.id)" class="chat-history-item-meta">Not saved</span>
+              </button>
+              <div class="chat-history-item-actions">
+                <form *ngIf="renamingChatSessionId === session.id; else recentItemActions" class="chat-history-rename" (ngSubmit)="confirmChatSessionRename(session)">
+                  <input type="text" [(ngModel)]="renamingChatSessionTitle" name="recentRenameTitle" maxlength="100" aria-label="Conversation title" (keydown.escape)="cancelChatSessionRename()" />
+                  <button type="submit" class="chat-history-icon-button" aria-label="Save title" title="Save">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"></path></svg>
+                  </button>
+                  <button type="button" class="chat-history-icon-button" (click)="cancelChatSessionRename()" aria-label="Cancel rename" title="Cancel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>
+                  </button>
+                </form>
+                <ng-template #recentItemActions>
+                  <button type="button" class="chat-history-icon-button" (click)="handleChatSessionTogglePin(session)" [disabled]="isLocalChatSession(session.id)" [attr.aria-label]="session.isPinned ? 'Unpin conversation' : 'Pin conversation'" [attr.title]="isLocalChatSession(session.id) ? 'Available after this conversation is saved' : (session.isPinned ? 'Unpin' : 'Pin')">
+                    <svg viewBox="0 0 24 24" [attr.fill]="session.isPinned ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"></path><path d="M9 3h6l-1 7 3 3H7l3-3-1-7z"></path></svg>
+                  </button>
+                  <button type="button" class="chat-history-icon-button" (click)="beginChatSessionRename(session)" aria-label="Rename conversation" [disabled]="isLocalChatSession(session.id)" [title]="isLocalChatSession(session.id) ? 'Available after this conversation is saved' : 'Rename'">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                  </button>
+                  <button type="button" class="chat-history-icon-button chat-history-danger" (click)="handleChatSessionDelete(session)" aria-label="Delete conversation" [disabled]="isChatSessionPending(session.id)" [title]="isChatSessionPending(session.id) ? 'Wait for this conversation to finish before deleting' : 'Delete'">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M6 6l1 14h10l1-14"></path></svg>
+                  </button>
+                </ng-template>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </aside>
     <section class="workspace-panel workspace-chat">
       <header class="workspace-header">
         <div>
@@ -183,6 +291,15 @@
           <p class="helper-text">{{ appVersion }} · {{ deploymentLabel }} · {{ deploymentContextLabel }}</p>
         </div>
         <div class="workspace-actions">
+          <button type="button" class="feedback-button feedback-button-secondary context-panel-toggle" (click)="toggleOperationalContext()" [attr.aria-expanded]="!isOperationalContextCollapsed" aria-controls="operational-context" [attr.aria-label]="isOperationalContextCollapsed ? 'Expand operational context' : 'Collapse operational context'">
+            {{ isOperationalContextCollapsed ? 'Show context' : 'Hide context' }}
+          </button>
+          <button type="button" class="chat-history-toggle" (click)="toggleChatHistory()" [attr.aria-expanded]="isNarrowViewport ? isChatHistoryDrawerOpen : !isChatHistoryCollapsed" aria-label="Toggle chat history" title="Chat history">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M12 7v5l3 2"></path>
+            </svg>
+          </button>
           <div class="workspace-banner">
             <span class="workspace-dot"></span>
             <span>{{ isLoading ? 'Analyzing live incident context' : 'Ready for triage' }}</span>
@@ -370,8 +487,9 @@
                 </div>
               </div>
             </div>
-            <div class="message-body markdown-body" [innerHTML]="entry.renderedAnswer"></div>
+            <app-rich-response class="message-body" [content]="entry.answer"></app-rich-response>
             <p class="helper-text">{{ entry.generatedAt | date: 'medium' }} · Checked {{ entry.retrievedSimilarIncidentCount ?? 0 }} fresh incident{{ (entry.retrievedSimilarIncidentCount ?? 0) === 1 ? '' : 's' }}<span *ngIf="entry.nyraKnowledgeBaseUsed"> + NYRA KB ({{ (entry.nyraKnowledgeBaseNames ?? []).join(', ') }}, {{ entry.retrievedNyraDocumentCount ?? 0 }} doc{{ (entry.retrievedNyraDocumentCount ?? 0) === 1 ? '' : 's' }})</span></p>
+            <app-code-evidence *ngIf="(entry.codeDocuments ?? []).length > 0 || entry.codeSearchCoverage" [documents]="entry.codeDocuments ?? []" [status]="entry.codeKnowledgeStatus ?? ''" [coverage]="entry.codeSearchCoverage"></app-code-evidence>
             <ul *ngIf="(entry.nyraDocuments ?? []).length > 0" class="troubleshoot-doc-list">
               <li *ngFor="let document of entry.nyraDocuments ?? []; trackBy: trackNyraDocument">
                 <a *ngIf="document.sourceUrl; else plainTroubleshootCitation" [href]="document.sourceUrl" target="_blank" rel="noopener noreferrer">{{ document.title || document.citation }}</a>
@@ -396,7 +514,7 @@
                 name="searchScopeMode"
                 [ngModel]="scopeModeSelectValue"
                 (ngModelChange)="handleScopeSelectChange($event)"
-                [disabled]="isLoading">
+                [disabled]="isLoading || isChatSessionOpening">
                 <option [value]="allGroupValue">All Applications</option>
                 <option *ngFor="let group of groups; trackBy: trackGroupById" [value]="group.groupId">{{ group.displayName }}</option>
               </select>
@@ -404,19 +522,22 @@
 
             <span *ngFor="let groupId of selectedGroupIds; trackBy: trackGroupId" class="scope-chip">
               {{ getGroupDisplayName(groupId) }}
-              <button type="button" class="scope-chip-remove" (click)="handleGroupChange(groupId, false)" [disabled]="isLoading" aria-label="Remove application from search scope">&times;</button>
+              <button type="button" class="scope-chip-remove" (click)="handleGroupChange(groupId, false)" [disabled]="isLoading || isChatSessionOpening" aria-label="Remove application from search scope">&times;</button>
             </span>
 
-            <select
-              *ngIf="unselectedGroups.length > 0"
-              class="scope-add-select"
-              name="searchScopeAdd"
-              [(ngModel)]="scopeAddSelectValue"
-              (ngModelChange)="handleAddGroupSelect($event)"
-              [disabled]="isLoading">
-              <option value="">+ Add</option>
-              <option *ngFor="let group of unselectedGroups; trackBy: trackGroupById" [value]="group.groupId">{{ group.displayName }}</option>
-            </select>
+            <div *ngIf="unselectedGroups.length > 0" class="scope-add-control">
+              <svg class="scope-add-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>
+              <select
+                class="scope-add-select"
+                name="searchScopeAdd"
+                [(ngModel)]="scopeAddSelectValue"
+                (ngModelChange)="handleAddGroupSelect($event)"
+                [disabled]="isLoading || isChatSessionOpening"
+                aria-label="Add application to search scope">
+                <option value="">Add</option>
+                <option *ngFor="let group of unselectedGroups; trackBy: trackGroupById" [value]="group.groupId">{{ group.displayName }}</option>
+              </select>
+            </div>
           </div>
         </div>
         <span class="field-note">Search scope defaults to all applications. Pick one from the dropdown or use + Add to include more.</span>
@@ -437,50 +558,6 @@
             <p class="panel-kicker">Conversation</p>
             <h3>Describe an issue to start the investigation</h3>
             <p class="conversation-empty-copy">Users should be able to see the conversation, suggested fix, similar incidents, and system insights together on one screen.</p>
-
-            <div class="conversation-feature-grid" aria-label="Conversation capabilities">
-              <div class="conversation-feature-item">
-                <span class="conversation-feature-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 3v18"></path>
-                    <path d="M4 9h16"></path>
-                    <path d="M4 15h16"></path>
-                  </svg>
-                </span>
-                <div>
-                  <h4>One place, full context</h4>
-                  <p>Keep the entire investigation-conversation, suggestions, incidents, and insights-in one view.</p>
-                </div>
-              </div>
-              <div class="conversation-feature-item">
-                <span class="conversation-feature-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 3 9.5 8.5 4 11l5.5 2.5L12 19l2.5-5.5L20 11l-5.5-2.5Z"></path>
-                    <path d="M5 3v4"></path>
-                    <path d="M3 5h4"></path>
-                    <path d="M19 17v4"></path>
-                    <path d="M17 19h4"></path>
-                  </svg>
-                </span>
-                <div>
-                  <h4>Smarter suggestions</h4>
-                  <p>Get recommended fixes and similar incidents as you describe the issue.</p>
-                </div>
-              </div>
-              <div class="conversation-feature-item">
-                <span class="conversation-feature-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M5 20V10"></path>
-                    <path d="M12 20V4"></path>
-                    <path d="M19 20v-7"></path>
-                  </svg>
-                </span>
-                <div>
-                  <h4>Actionable insights</h4>
-                  <p>Surface system insights and recent changes to speed up resolution.</p>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -491,9 +568,19 @@
           </article>
 
           <article *ngIf="message.role === 'assistant'" class="message-bubble message-bubble-assistant">
-            <p class="message-label">PoolSense</p>
+            <div class="message-bubble-header">
+              <p class="message-label">PoolSense</p>
+              <span *ngIf="answerDurationLabel(message) as durationLabel" class="answer-duration" [attr.title]="answerDurationTitle(message)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"></circle>
+                  <path d="M12 7v5l3 2"></path>
+                </svg>
+                <span class="answer-duration-text">{{ durationLabel }}</span>
+                <span class="sr-only">{{ answerDurationTitle(message) }}</span>
+              </span>
+            </div>
 
-            <div *ngIf="message.workflowProgress.length > 0" class="workflow-activity-panel" [class.workflow-activity-panel-expanded]="isWorkflowActivityExpanded(message.id)">
+            <div *ngIf="message.workflowProgress.length > 0 || message.result.queryCategory || message.result.nyraKnowledgeBaseMessage" class="workflow-activity-panel" [class.workflow-activity-panel-expanded]="isWorkflowActivityExpanded(message.id)">
               <button
                 type="button"
                 class="workflow-activity-toggle"
@@ -507,7 +594,7 @@
                 </span>
                 <span class="workflow-activity-toggle-copy">
                   <strong>Workflow activity</strong>
-                  <small>{{ message.workflowProgress.length }} backend update{{ message.workflowProgress.length === 1 ? '' : 's' }} captured for this answer</small>
+                  <small>{{ message.workflowProgress.length === 0 ? 'Pipeline details for this answer' : message.workflowProgress.length + ' backend update' + (message.workflowProgress.length === 1 ? '' : 's') + ' captured for this answer' }}</small>
                 </span>
               </button>
 
@@ -523,42 +610,93 @@
                   </div>
                   <span class="workflow-activity-state">{{ step.state }}</span>
                 </div>
+                <div class="workflow-activity-meta" *ngIf="message.result.queryCategory || message.result.nyraKnowledgeBaseMessage">
+                  <div class="thinking-panel" *ngIf="message.result.queryCategory">
+                    <p class="thinking-line"><strong>Query type:</strong> {{ message.result.queryCategory }}<span *ngIf="message.result.queryCategorizationReasoning"> — {{ message.result.queryCategorizationReasoning }}</span></p>
+                    <p class="thinking-line" *ngIf="message.result.sourcePlan"><strong>Source scope:</strong> {{ message.result.sourcePlan.label }} ({{ message.result.sourcePlan.origin }})</p>
+                    <p class="thinking-line">
+                      <strong>Sources used:</strong>{{ ' ' }}<span *ngIf="message.result.usedPoolDatabase">Pool database</span>
+                      <span *ngIf="message.result.usedPoolDatabase && message.result.nyraKnowledgeBaseUsed"> + </span>
+                      <span *ngIf="message.result.nyraKnowledgeBaseUsed">NYRA KB ({{ (message.result.nyraKnowledgeBaseNames ?? []).join(', ') }})</span>
+                      <span *ngIf="(message.result.codeDocuments?.length ?? 0) > 0">{{ message.result.usedPoolDatabase || message.result.nyraKnowledgeBaseUsed ? ' + ' : '' }}Code</span>
+                      <span *ngIf="!message.result.usedPoolDatabase && !message.result.nyraKnowledgeBaseUsed && (message.result.codeDocuments?.length ?? 0) === 0">Request details only; no source evidence returned</span>
+                    </p>
+                  </div>
+                  <p *ngIf="message.result.nyraKnowledgeBaseMessage" class="project-card-meta">{{ message.result.nyraKnowledgeBaseMessage }}</p>
+                </div>
               </div>
             </div>
 
-            <div class="thinking-panel" *ngIf="message.result.queryCategory">
-              <p class="thinking-line"><strong>Query type:</strong> {{ message.result.queryCategory }}<span *ngIf="message.result.queryCategorizationReasoning"> — {{ message.result.queryCategorizationReasoning }}</span></p>
-              <p class="thinking-line">
-                <strong>Sources used:</strong>
-                <span *ngIf="message.result.usedPoolDatabase">Pool database</span>
-                <span *ngIf="message.result.usedPoolDatabase && message.result.nyraKnowledgeBaseUsed"> + </span>
-                <span *ngIf="message.result.nyraKnowledgeBaseUsed">NYRA KB ({{ (message.result.nyraKnowledgeBaseNames ?? []).join(', ') }})</span>
-                <span *ngIf="!message.result.usedPoolDatabase && !message.result.nyraKnowledgeBaseUsed">Ticket details only</span>
-              </p>
-            </div>
-
             <div class="assistant-summary">
+              <div class="result-overview">
+                <div class="result-overview-header">
+                  <span class="result-confidence" role="img" [attr.aria-label]="'Confidence ' + getResultConfidencePercent(message.result) + ' percent'">
+                    <span class="result-confidence-track" aria-hidden="true"><span class="result-confidence-fill" [style.width.%]="getResultConfidencePercent(message.result)"></span></span>
+                    <span class="result-confidence-value">{{ getResultConfidencePercent(message.result) }}%</span>
+                    <span class="result-confidence-label">confidence</span>
+                  </span>
+                  <span class="result-source-chips" aria-label="Evidence source counts">
+                    <span *ngIf="message.result.sourcePlan" class="result-source-chip">{{ message.result.sourcePlan.label }}</span>
+                    <span class="result-source-chip" [class.result-source-chip-muted]="getEvidenceSourceCounts(message.result).pool === 0">{{ message.result.sourcePlan?.pool === false ? 'Pool not searched' : 'Pool incidents ' + getEvidenceSourceCounts(message.result).pool }}</span>
+                    <span class="result-source-chip" [class.result-source-chip-muted]="getEvidenceSourceCounts(message.result).nyra === 0">{{ message.result.sourcePlan?.wiki === false ? 'Wiki not searched' : 'NYRA docs ' + getEvidenceSourceCounts(message.result).nyra }}</span>
+                    <span class="result-source-chip" [class.result-source-chip-muted]="getEvidenceSourceCounts(message.result).code === 0">{{ message.result.sourcePlan?.code === false ? 'Code not searched' : 'Code excerpts ' + getEvidenceSourceCounts(message.result).code }}</span>
+                  </span>
+                </div>
+                <div class="incident-match-chart" *ngIf="getTopIncidentMatches(message.result).length > 0">
+                  <p class="incident-match-title">Top incident matches</p>
+                  <div class="incident-match-row" *ngFor="let match of getTopIncidentMatches(message.result)">
+                    <span class="incident-match-label">{{ match.ticketId }}</span>
+                    <span class="incident-match-track" role="img" [attr.aria-label]="match.ticketId + ' similarity ' + match.percent + ' percent'">
+                      <span class="incident-match-fill" [style.width.%]="match.percent"></span>
+                    </span>
+                    <span class="incident-match-value">{{ match.percent }}%</span>
+                  </div>
+                </div>
+              </div>
               <section class="assistant-card assistant-card-rootcause">
-                <h3><span class="assistant-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path></svg></span>Root Cause</h3>
-                <p>{{ message.result.suggestedRootCause || 'Not provided' }}</p>
+                <h3><span class="assistant-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0-3.42 0Z"></path></svg></span>{{ message.result.queryCategory === 'Info' ? 'Overview' : 'Root Cause' }}</h3>
+                <app-rich-response [content]="message.result.suggestedRootCause || 'Not provided'"></app-rich-response>
               </section>
               <section class="assistant-card assistant-card-resolution">
-                <h3><span class="assistant-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>Recommended Resolution</h3>
-                <ng-container *ngIf="getTroubleshootingSteps(message.result.suggestedResolution) as resolutionSteps">
+                <h3><span class="assistant-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>{{ message.result.queryCategory === 'Info' ? 'Explanation' : 'Recommended Resolution' }}</h3>
+                <ng-container *ngIf="(message.result.queryCategory === 'Info' ? [] : getTroubleshootingSteps(message.result.suggestedResolution)) as resolutionSteps">
                   <ol *ngIf="resolutionSteps.length > 0; else plainResolution" class="assistant-steps-list">
-                    <li *ngFor="let step of resolutionSteps; let i = index"><span class="assistant-step-index">{{ i + 1 }}</span><span>{{ step }}</span></li>
+                    <li *ngFor="let step of resolutionSteps; let i = index"><span class="assistant-step-index">{{ i + 1 }}</span><app-rich-response [content]="step"></app-rich-response></li>
                   </ol>
                 </ng-container>
-                <ng-template #plainResolution><p>{{ message.result.suggestedResolution || 'Not provided' }}</p></ng-template>
+                <ng-template #plainResolution><app-rich-response [content]="message.result.suggestedResolution || 'Not provided'"></app-rich-response></ng-template>
               </section>
             </div>
+
+            <app-code-search-status *ngIf="message.result.codeSearchCoverage && (['partial', 'timed-out', 'failed', 'not-ready', 'authorization-unavailable', 'stale'].includes(message.result.codeKnowledgeStatus ?? '') || message.result.codeSearchCoverage.deadlineExceeded || !message.result.codeSearchCoverage.authorizationComplete || (message.result.codeSearchCoverage.warnings?.length ?? 0) > 0)" [status]="message.result.codeKnowledgeStatus ?? ''" [coverage]="message.result.codeSearchCoverage"></app-code-search-status>
+            <p *ngIf="message.result.visualizationPlan?.needed && message.result.visualizationStatus === 'unavailable'" class="helper-text" role="status">{{ message.result.visualizationMessage || 'No validated visualization is available for this answer.' }}</p>
+            <section *ngIf="message.result.detailedAnalysisMarkdown" class="detailed-analysis" [class.detailed-analysis-collapsed]="!isDetailedAnalysisExpanded(message)">
+              <h3 class="detailed-analysis-heading">
+                <button
+                  type="button"
+                  class="detailed-analysis-toggle"
+                  [attr.aria-expanded]="isDetailedAnalysisExpanded(message)"
+                  [attr.aria-controls]="'detailed-analysis-content-' + message.id"
+                  (click)="toggleDetailedAnalysis(message)">
+                  <span class="detailed-analysis-caret" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
+                  </span>
+                  <span>{{ message.result.visualizationPlan?.needed && message.result.visualizationPlan?.kind !== 'process' ? 'Visualization and details' : (message.result.processDiagramStatus ? 'Process flow and details' : 'Detailed analysis') }}</span>
+                  <span class="detailed-analysis-hint">{{ isDetailedAnalysisExpanded(message) ? 'Hide' : 'Show' }}</span>
+                </button>
+              </h3>
+              <app-rich-response
+                *ngIf="isDetailedAnalysisExpanded(message)"
+                [id]="'detailed-analysis-content-' + message.id"
+                class="detailed-analysis-content"
+                [content]="message.result.detailedAnalysisMarkdown"></app-rich-response>
+            </section>
 
             <div class="nyra-kb-status" [class.nyra-kb-status-active]="message.result.nyraKnowledgeBaseUsed">
               <span class="workspace-dot"></span>
               <span *ngIf="message.result.nyraKnowledgeBaseUsed">NYRA KB {{ message.result.nyraKnowledgeBaseStatus || 'Queried' }}: {{ (message.result.nyraKnowledgeBaseNames ?? []).join(', ') }}</span>
               <span *ngIf="!message.result.nyraKnowledgeBaseUsed">NYRA KB not used for this query.</span>
             </div>
-            <p *ngIf="message.result.nyraKnowledgeBaseMessage" class="project-card-meta">{{ message.result.nyraKnowledgeBaseMessage }}</p>
 
             <div class="feedback-panel">
               <div *ngIf="message.result.similarIncidents.length > 0" class="feedback-target-row">
@@ -705,9 +843,9 @@
       </div>
 
       <form *ngIf="!poolReportSourceEventId" class="composer" (ngSubmit)="handleSend()">
-        <p class="panel-kicker composer-heading">Start the conversation</p>
-        <div class="prompt-strip" aria-label="Suggested prompts">
-          <button *ngFor="let prompt of quickPrompts; let i = index" type="button" class="prompt-chip" (click)="handleSend(prompt)" [disabled]="isLoading">
+        <p class="panel-kicker composer-heading">{{ messages.length === 0 ? 'Start the conversation' : 'Follow up' }}</p>
+          <div class="prompt-strip" aria-label="Suggested prompts" *ngIf="messages.length === 0">
+          <button *ngFor="let prompt of quickPrompts; let i = index" type="button" class="prompt-chip" (click)="handleSend(prompt)" [disabled]="isLoading || isChatSessionOpening">
             <span class="prompt-chip-icon" aria-hidden="true">
               <svg *ngIf="i === 0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
               <svg *ngIf="i === 1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path><path d="M8 6v12"></path></svg>
@@ -718,8 +856,8 @@
         </div>
         <label class="sr-only" for="incident-input">Describe your issue</label>
         <div class="composer-input-row">
-          <textarea id="incident-input" class="composer-input" name="incident-input" [(ngModel)]="input" (keydown)="handleComposerKeydown($event)" placeholder="Describe your issue... (Enter to send, Shift+Enter for new line)" rows="2" [disabled]="isLoading"></textarea>
-          <button type="submit" class="composer-send-icon-button" [disabled]="isLoading || !input.trim()" aria-label="Ask PoolSense">
+          <textarea id="incident-input" class="composer-input" name="incident-input" [(ngModel)]="input" (keydown)="handleComposerKeydown($event)" placeholder="Describe your issue... (Enter to send, Shift+Enter for new line)" rows="2" [disabled]="isLoading || isChatSessionOpening || isSigningOut"></textarea>
+          <button type="submit" class="composer-send-icon-button" [disabled]="isLoading || isChatSessionOpening || isSigningOut || !input.trim()" aria-label="Ask PoolSense">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m22 2-7 20-4-9-9-4Z"></path>
               <path d="M22 2 11 13"></path>
@@ -737,7 +875,7 @@
             </span>
             Add the service, symptom, and any recent deployment or dependency change.
           </p>
-          <button type="submit" class="send-button composer-poolsense-button" [disabled]="isLoading || !input.trim()">
+          <button type="submit" class="send-button composer-poolsense-button" [disabled]="isLoading || isChatSessionOpening || isSigningOut || !input.trim()">
             <span class="button-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 3 9.5 8.5 4 11l5.5 2.5L12 19l2.5-5.5L20 11l-5.5-2.5Z"></path>
@@ -751,11 +889,14 @@
           </button>
         </div>
         <p *ngIf="error" class="error-banner">{{ error }}</p>
+        <p *ngIf="isChatSessionOpening" class="helper-text" role="status">Opening conversation… You can select another chat while it loads.</p>
+        <p *ngIf="historyPersistenceNotice" class="warn-banner" role="status">{{ historyPersistenceNotice }}</p>
+        <p *ngIf="chatContextNotice" class="helper-text" role="status">{{ chatContextNotice }}</p>
       </form>
 
     </section>
 
-    <aside class="insight-panel">
+    <aside id="operational-context" class="insight-panel" [hidden]="isOperationalContextCollapsed">
       <div class="insight-panel-header">
         <div>
           <p class="panel-kicker">Incident Insights</p>
@@ -798,51 +939,64 @@
 
           <div class="confidence-track" aria-hidden="true"><span class="confidence-fill" [style.width.%]="confidence"></span></div>
 
-          <div class="system-grid">
-            <div class="system-grid-item">
-              <div class="system-grid-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
-                </svg>
+          <ng-container *ngIf="(insights.failurePattern.system && insights.failurePattern.system !== 'Unknown system') || (insights.failurePattern.component && insights.failurePattern.component !== 'Unknown component') || (insights.failurePattern.resolutionCategory && insights.failurePattern.resolutionCategory !== 'Unclassified') || (insights.failurePattern.ticketId && insights.failurePattern.ticketId !== 'Not linked'); else patternNotClassified">
+            <div class="system-grid">
+              <div class="system-grid-item" [class.system-grid-item-placeholder]="!insights.failurePattern.system || insights.failurePattern.system === 'Unknown system'">
+                <div class="system-grid-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                  </svg>
+                </div>
+                <div>
+                  <p class="system-label">System</p>
+                  <p class="data-mono">{{ insights.failurePattern.system || 'Unknown system' }}</p>
+                </div>
               </div>
-              <p class="system-label">System</p>
-              <p class="data-mono">{{ insights.failurePattern.system || 'Unknown system' }}</p>
-            </div>
-            <div class="system-grid-item">
-              <div class="system-grid-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="1"></circle>
-                  <circle cx="19" cy="12" r="1"></circle>
-                  <circle cx="5" cy="12" r="1"></circle>
-                  <path d="M12 5v14M19 9v6M5 9v6"></path>
-                </svg>
+              <div class="system-grid-item" [class.system-grid-item-placeholder]="!insights.failurePattern.component || insights.failurePattern.component === 'Unknown component'">
+                <div class="system-grid-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="1"></circle>
+                    <circle cx="19" cy="12" r="1"></circle>
+                    <circle cx="5" cy="12" r="1"></circle>
+                    <path d="M12 5v14M19 9v6M5 9v6"></path>
+                  </svg>
+                </div>
+                <div>
+                  <p class="system-label">Component</p>
+                  <p class="data-mono">{{ insights.failurePattern.component || 'Unknown component' }}</p>
+                </div>
               </div>
-              <p class="system-label">Component</p>
-              <p class="data-mono">{{ insights.failurePattern.component || 'Unknown component' }}</p>
-            </div>
-            <div class="system-grid-item">
-              <div class="system-grid-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                  <line x1="9" y1="9" x2="15" y2="9"></line>
-                  <line x1="9" y1="15" x2="15" y2="15"></line>
-                </svg>
+              <div class="system-grid-item" [class.system-grid-item-placeholder]="!insights.failurePattern.resolutionCategory || insights.failurePattern.resolutionCategory === 'Unclassified'">
+                <div class="system-grid-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="9" y1="9" x2="15" y2="9"></line>
+                    <line x1="9" y1="15" x2="15" y2="15"></line>
+                  </svg>
+                </div>
+                <div>
+                  <p class="system-label">Resolution Category</p>
+                  <p>{{ insights.failurePattern.resolutionCategory || 'Unclassified' }}</p>
+                </div>
               </div>
-              <p class="system-label">Resolution Category</p>
-              <p>{{ insights.failurePattern.resolutionCategory || 'Unclassified' }}</p>
-            </div>
-            <div class="system-grid-item">
-              <div class="system-grid-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
-                </svg>
+              <div class="system-grid-item" [class.system-grid-item-placeholder]="!insights.failurePattern.ticketId || insights.failurePattern.ticketId === 'Not linked'">
+                <div class="system-grid-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                  </svg>
+                </div>
+                <div>
+                  <p class="system-label">Pattern Ticket</p>
+                  <p class="data-mono">{{ insights.failurePattern.ticketId || 'Not linked' }}</p>
+                </div>
               </div>
-              <p class="system-label">Pattern Ticket</p>
-              <p class="data-mono">{{ insights.failurePattern.ticketId || 'Not linked' }}</p>
             </div>
-          </div>
+          </ng-container>
+          <ng-template #patternNotClassified>
+            <p class="insight-placeholder-line">System, component and pattern not classified yet</p>
+          </ng-template>
 
           <div class="reasoning-block">
             <div class="reasoning-header">
@@ -854,73 +1008,9 @@
               </div>
               <p class="system-label">Reasoning</p>
             </div>
-            <ng-container *ngIf="getReasoningSegments(insights.reasoning) as reasoningSegments">
-              <ul *ngIf="reasoningSegments.length > 1; else singleReasoningSegment" class="reasoning-list">
-                <li *ngFor="let segment of reasoningSegments">{{ segment }}</li>
-              </ul>
-              <ng-template #singleReasoningSegment>
-                <p class="reasoning-single">{{ reasoningSegments[0] }}</p>
-              </ng-template>
-            </ng-container>
+            <app-rich-response [content]="insights.reasoning || 'No reasoning details available.'"></app-rich-response>
           </div>
 
-          <div class="telemetry-block">
-            <div class="card-heading-row">
-              <div>
-                <p class="panel-kicker">System Insights</p>
-                <h3>Telemetry snapshot</h3>
-              </div>
-              <span class="section-count data-mono">LIVE</span>
-            </div>
-
-            <div class="telemetry-chart telemetry-cards" aria-label="Telemetry snapshot">
-              <div class="telemetry-card-item">
-                <div class="telemetry-card-icon" [style.background]="telemetry[0].color">
-                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                  </svg>
-                </div>
-                <div class="telemetry-card-content">
-                  <p class="telemetry-card-label">{{ telemetry[0].name }}</p>
-                  <p class="data-mono telemetry-card-value">{{ telemetry[0].value }}%</p>
-                  <div class="telemetry-card-bar">
-                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[0].value" [style.background]="telemetry[0].color"></span>
-                  </div>
-                </div>
-              </div>
-              <div class="telemetry-card-item">
-                <div class="telemetry-card-icon" [style.background]="telemetry[1].color">
-                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 17"></polyline>
-                    <polyline points="17 6 23 6 23 12"></polyline>
-                  </svg>
-                </div>
-                <div class="telemetry-card-content">
-                  <p class="telemetry-card-label">{{ telemetry[1].name }}</p>
-                  <p class="data-mono telemetry-card-value">{{ telemetry[1].value }}%</p>
-                  <div class="telemetry-card-bar">
-                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[1].value" [style.background]="telemetry[1].color"></span>
-                  </div>
-                </div>
-              </div>
-              <div class="telemetry-card-item">
-                <div class="telemetry-card-icon" [style.background]="telemetry[2].color">
-                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="1"></circle>
-                    <path d="M12 8v-4m0 16v-4m-4-4h-4m16 0h-4m-8.485-7.07l-2.828 2.828m11.314 0l2.828-2.828m-14.314 14.314l-2.828-2.828m11.314 0l2.828 2.828"></path>
-                    <circle cx="12" cy="12" r="8"></circle>
-                  </svg>
-                </div>
-                <div class="telemetry-card-content">
-                  <p class="telemetry-card-label">{{ telemetry[2].name }}</p>
-                  <p class="data-mono telemetry-card-value">{{ telemetry[2].value }}%</p>
-                  <div class="telemetry-card-bar">
-                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[2].value" [style.background]="telemetry[2].color"></span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </section>
 
         <section class="insight-card evidence-panel">
@@ -939,7 +1029,12 @@
               <button type="button" class="evidence-tab" [class.evidence-tab-active]="activeEvidenceTab === 'nyra'" (click)="setEvidenceTab('nyra')" role="tab">
                 NYRA KB (Wiki) <span class="evidence-tab-count">{{ (insights.nyraDocuments ?? []).length }}</span>
               </button>
+              <button type="button" class="evidence-tab" [class.evidence-tab-active]="activeEvidenceTab === 'code'" (click)="setEvidenceTab('code')" role="tab">
+                Code <span class="evidence-tab-count">{{ (insights.codeDocuments ?? []).length }}</span>
+              </button>
             </div>
+
+            <app-code-evidence *ngIf="activeEvidenceTab === 'code'" [documents]="insights.codeDocuments ?? []" [status]="insights.codeKnowledgeStatus ?? ''" [coverage]="insights.codeSearchCoverage"></app-code-evidence>
 
             <ng-container *ngIf="activeEvidenceTab === 'incidents'">
               <p *ngIf="insights.similarIncidents.length === 0" class="empty-copy">No related incidents were returned.</p>
@@ -1140,7 +1235,7 @@
                     <span class="project-chip">{{ report.emailSent ? 'SENT' : '75%' }}</span>
                     <span class="similarity-badge">{{ formatPercent(report.confidence) }}</span>
                   </div>
-                  <p class="pool-recommendation-summary">{{ report.summary || 'No summary available.' }}</p>
+                  <app-rich-response class="pool-recommendation-summary" [content]="report.summary || 'No summary available.'"></app-rich-response>
                   <div class="pool-recommendation-meta">
                     <span>{{ report.projectName || report.projectId || 'Unmapped project' }}</span>
                     <span class="meta-separator">•</span>
@@ -1165,7 +1260,7 @@
       </ng-container>
 
       <ng-template #nonPoolRecommendationView>
-      <ng-container *ngIf="activeSection === 'projectConfig'; else applicationFeedbackView">
+      <ng-container *ngIf="activeSection === 'projectConfig'; else codeRepositoriesView">
       <section class="workspace-panel project-config-screen">
         <div class="project-config-screen-header">
           <div>
@@ -1254,7 +1349,7 @@
                   <h3>{{ editingProjectId ? 'Edit application configuration' : 'Add application configuration' }}</h3>
                   <p>Define a new application and its polling settings.</p>
                 </div>
-                <button *ngIf="editingProjectId" type="button" class="feedback-button feedback-button-secondary" (click)="cancelProjectEdit()">Cancel edit</button>
+                <button *ngIf="editingProjectId" type="button" class="feedback-button feedback-button-secondary" (click)="cancelProjectEdit()" [disabled]="isProjectSaving">Cancel edit</button>
               </div>
 
               <div class="project-form-grid application-config-grid">
@@ -1274,17 +1369,6 @@
                   <input class="field-input" type="text" name="nyraKbNames" [(ngModel)]="projectForm.nyraKbNames" placeholder="FSCOUserGuide, FSCO_WIN" [disabled]="isProjectSaving" />
                   <span class="field-note">Optional, comma-separated. NYRA document retrieval runs only when populated.</span>
                 </label>
-
-                <div class="field-group field-group-full repository-fields" role="group" aria-labelledby="repository-urls-label">
-                  <div class="repository-fields-heading">
-                    <span class="field-label" id="repository-urls-label">GitHub repository URLs</span>
-                    <button type="button" class="repository-icon-button" (click)="addProjectRepository()" title="Add repository" aria-label="Add repository" [disabled]="isProjectSaving"><span aria-hidden="true">+</span></button>
-                  </div>
-                  <div class="repository-url-row" *ngFor="let repository of projectRepositoryRows; let index = index">
-                    <input class="field-input" type="text" inputmode="url" [name]="'githubUrl' + index" [(ngModel)]="repository.url" [attr.aria-label]="'Repository URL ' + (index + 1)" placeholder="https://github.com/team/repository" autocomplete="off" spellcheck="false" [disabled]="isProjectSaving" />
-                    <button type="button" class="repository-icon-button" (click)="removeProjectRepository(index)" title="Remove repository" [attr.aria-label]="'Remove repository ' + (index + 1)" [disabled]="isProjectSaving || (projectRepositoryRows.length === 1 && !repository.url)"><span aria-hidden="true">&times;</span></button>
-                  </div>
-                </div>
 
                 <label class="field-group">
                   <span class="field-label">Application ID</span>
@@ -1341,6 +1425,8 @@
                   <span><strong>Polling enabled</strong><small>Allow ingestion to process this application on schedule.</small></span>
                 </label>
               </div>
+
+              <app-code-repositories *ngIf="editingProjectId" [projectId]="editingProjectId" [saving]="isProjectSaving"></app-code-repositories>
 
               <div class="composer-footer application-config-footer">
                 <p class="helper-text application-config-helper">
@@ -1403,7 +1489,7 @@
                       <p class="project-card-meta">{{ project.projectId }}</p>
                     </div>
                     <div class="application-card-actions">
-                      <button type="button" class="feedback-button feedback-button-secondary project-edit-button application-card-edit-button" (click)="handleEditProject(project)">
+                      <button type="button" class="feedback-button feedback-button-secondary project-edit-button application-card-edit-button" (click)="handleEditProject(project)" [disabled]="isProjectSaving">
                         <span class="button-icon" aria-hidden="true">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 20h9"></path>
@@ -1434,6 +1520,156 @@
                     </div>
                   </div>
                 </article>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+      </ng-container>
+    </ng-template>
+
+    <ng-template #codeRepositoriesView>
+      <ng-container *ngIf="activeSection === 'codeRepositories'; else applicationFeedbackView">
+      <section class="workspace-panel project-config-screen code-rag-screen">
+        <div class="project-config-screen-header">
+          <div>
+            <p class="panel-kicker">CodeRAG</p>
+            <h2>Code Repositories</h2>
+            <p class="workspace-copy">Chat with indexed source across your selected applications.</p>
+          </div>
+          <div class="settings-banner-group">
+            <div class="workspace-banner">
+              <span class="workspace-dot"></span>
+              <span>{{ codeRepoList.length }} indexed {{ codeRepoList.length === 1 ? 'repository' : 'repositories' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <p *ngIf="codeRepoError" class="project-feedback-banner">{{ codeRepoError }}</p>
+        <p *ngIf="codeRepoNotice" class="project-feedback-banner project-feedback-banner-success">{{ codeRepoNotice }}</p>
+        <p *ngIf="codeRepoConnection && !codeRepoConnection.available && !codeRepoError" class="project-feedback-banner">
+          {{ codeRepoConnection.message || 'GitHub access is managed by the administrator and is currently unavailable.' }}
+        </p>
+
+        <section class="project-studio">
+          <div class="project-form-card code-rag-controls">
+            <div class="project-form-grid code-rag-control-grid">
+              <div class="field-group">
+                <span class="field-label">Application scope</span>
+                <div class="scope-control-row code-rag-scope-row" role="group" aria-label="Application scope">
+                  <div class="scope-mode-control">
+                    <span class="scope-mode-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+                    </span>
+                    <select class="scope-mode-select" name="codeRepoScopeMode" [ngModel]="codeRepoScopeSelectValue" (ngModelChange)="handleCodeRepoScopeSelectChange($event)" [disabled]="isCodeRepoBusy || isCodeChatAsking || projects.length === 0" aria-label="Application">
+                      <option [value]="allGroupValue">All Applications</option>
+                      <option *ngFor="let project of projects; trackBy: trackProjectById" [value]="project.projectId">{{ project.projectName }}</option>
+                    </select>
+                  </div>
+
+                  <span *ngFor="let projectId of codeRepoScopeIds; trackBy: trackGroupId" class="scope-chip">
+                    {{ getCodeRepoProjectName(projectId) }}
+                    <button type="button" class="scope-chip-remove" (click)="handleCodeRepoScopeRemove(projectId)" [disabled]="isCodeRepoBusy || isCodeChatAsking" aria-label="Remove application from scope">&times;</button>
+                  </span>
+
+                  <div *ngIf="codeRepoScopeIds.length > 0 && codeRepoUnselectedProjects.length > 0" class="scope-add-control">
+                    <svg class="scope-add-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>
+                    <select class="scope-add-select" name="codeRepoScopeAdd" [(ngModel)]="codeRepoScopeAddValue" (ngModelChange)="handleCodeRepoScopeAdd($event)" [disabled]="isCodeRepoBusy || isCodeChatAsking" aria-label="Add application to scope">
+                      <option value="">Add</option>
+                      <option *ngFor="let project of codeRepoUnselectedProjects; trackBy: trackProjectById" [value]="project.projectId">{{ project.projectName }}</option>
+                    </select>
+                  </div>
+                </div>
+                <span class="field-note">{{ projects.length === 0 ? 'Create an application in Application Configuration first.' : 'All applications by default. Pick an application, then + Add more. Manage repositories in Application Configuration.' }}</span>
+              </div>
+
+              <div class="code-rag-actions">
+                <button type="button" class="feedback-button feedback-button-secondary" (click)="loadCodeRepositories()" [disabled]="isCodeRepoBusy">
+                  <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12a9 9 0 0 1-15.3 6.4L3 15"></path>
+                    <path d="M3 12a9 9 0 0 1 15.3-6.4L21 9"></path>
+                    <path d="M3 15v4h4"></path>
+                    <path d="M21 9V5h-4"></path>
+                  </svg>
+                  {{ isCodeRepoLoading ? 'Reloading...' : 'Reload' }}
+                </button>
+                <button type="button" class="feedback-button feedback-button-secondary" (click)="setActiveSection('projectConfig')">Manage repositories</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="project-list-card code-rag-chat-card">
+            <div class="card-heading-row code-rag-chat-heading">
+              <div>
+                <p class="panel-kicker">Conversation</p>
+                <h3>{{ codeRepoScopeIds.length === 0 ? 'All applications repository chat' : codeRepoScopeLabel + ' repository chat' }}</h3>
+              </div>
+              <button type="button" class="feedback-button feedback-button-secondary" (click)="resetCodeChat()" [disabled]="isCodeChatAsking || (codeChatMessages.length === 0 && !codeChatSessionId)">New chat</button>
+            </div>
+
+            <p *ngIf="codeChatError" class="project-feedback-banner">{{ codeChatError }}</p>
+
+            <div class="code-rag-chat-layout">
+              <aside class="code-rag-history" aria-label="Saved conversations">
+                <p class="code-rag-history-title">History <span class="code-rag-history-count">{{ codeChatHistory.length }}</span></p>
+                <p *ngIf="isCodeChatHistoryLoading && codeChatHistory.length === 0" class="helper-text">Loading...</p>
+                <p *ngIf="!isCodeChatHistoryLoading && codeChatHistory.length === 0" class="helper-text">Saved conversations for this application scope will appear here.</p>
+                <ul class="code-rag-history-list">
+                  <li *ngFor="let session of codeChatHistory; trackBy: trackCodeChatSession">
+                    <button type="button" class="code-rag-history-item" [class.code-rag-history-item-active]="session.id === codeChatSessionId" (click)="openCodeChatSession(session.id)" [disabled]="isCodeChatAsking" [attr.title]="session.title">
+                      <span class="code-rag-history-item-title">{{ session.title }}</span>
+                      <span class="code-rag-history-item-meta">{{ session.updatedAt | date: 'MMM d, HH:mm' }} · {{ session.messageCount }} msg</span>
+                    </button>
+                    <button type="button" class="code-rag-history-delete" (click)="deleteCodeChatSession(session.id, $event)" [disabled]="isCodeChatAsking" aria-label="Delete conversation" title="Delete conversation">&times;</button>
+                  </li>
+                </ul>
+              </aside>
+
+              <div class="code-rag-chat-main">
+                <div #codeChatTranscript class="code-rag-transcript" aria-live="polite">
+                  <div *ngIf="codeChatMessages.length === 0 && !isCodeChatAsking" class="project-empty code-rag-chat-empty">
+                    <p class="empty-copy">{{ hasReadyCodeRepository ? 'Ask about a class, method, API, or workflow in the indexed repositories. Follow-up questions keep the conversation context.' : 'Add a repository to an application in scope from Application Configuration and wait for it to be indexed before asking questions.' }}</p>
+                  </div>
+
+                  <ng-container *ngFor="let message of codeChatMessages; trackBy: trackCodeChatMessage">
+                    <article *ngIf="message.role === 'user'" class="message-bubble message-bubble-user">
+                      <p class="message-label">You</p>
+                      <p class="message-body code-rag-message-text">{{ message.text }}</p>
+                    </article>
+
+                    <article *ngIf="message.role === 'assistant'" class="message-bubble message-bubble-assistant" [class.code-rag-message-error]="message.isError">
+                      <div class="message-bubble-header code-rag-message-header">
+                        <p class="message-label">CodeRAG <span class="code-rag-message-time">{{ message.generatedAt | date: 'shortTime' }}</span></p>
+                        <span *ngIf="codeAnswerDurationLabel(message) as durationLabel" class="answer-duration" [attr.title]="completedDurationTitle">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9"></circle>
+                            <path d="M12 7v5l3 2"></path>
+                          </svg>
+                          <span class="answer-duration-text">{{ durationLabel }}</span>
+                          <span class="sr-only">{{ completedDurationTitle }}</span>
+                        </span>
+                      </div>
+                      <app-rich-response class="message-body" [content]="message.text"></app-rich-response>
+                      <app-code-evidence *ngIf="message.citations.length > 0" class="code-rag-citations" [documents]="message.citations" [status]="message.codeKnowledgeStatus ?? ''" [coverage]="message.codeSearchCoverage"></app-code-evidence>
+                    </article>
+                  </ng-container>
+
+                  <article *ngIf="isCodeChatAsking" class="message-bubble message-bubble-assistant code-rag-message-pending">
+                    <p class="message-label">CodeRAG</p>
+                    <p class="message-body">Searching indexed source and preparing an answer...</p>
+                  </article>
+                </div>
+
+                <form class="code-rag-composer" (ngSubmit)="handleCodeChatAsk()">
+                  <label class="sr-only" for="code-chat-question">Ask the repository</label>
+                  <textarea id="code-chat-question" class="field-input code-rag-question" name="codeChatQuestion" [(ngModel)]="codeChatQuestion" (keydown)="handleCodeChatKeydown($event)" maxlength="4000" rows="2"                   placeholder="Ask the repository... (Enter to send, Shift+Enter for a new line)" [disabled]="isCodeChatAsking || !hasCodeRepoScope"></textarea>
+                  <div class="composer-footer">
+                    <p class="helper-text">{{ codeChatQuestion.length }}/4000</p>
+                                      <button type="submit" class="send-button" [disabled]="isCodeChatAsking || !hasCodeRepoScope || !codeChatQuestion.trim()">
+                      <span>{{ isCodeChatAsking ? 'Thinking...' : 'Send' }}</span>
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           </div>

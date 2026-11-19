@@ -4,9 +4,20 @@ public sealed class TicketWorkflowResult
 {
     public string SuggestedRootCause { get; set; } = string.Empty;
     public string SuggestedResolution { get; set; } = string.Empty;
+    public string DetailedAnalysisMarkdown { get; set; } = string.Empty;
+    public string ProcessDiagramStatus { get; set; } = string.Empty;
+    public string ProcessDiagramMessage { get; set; } = string.Empty;
+    public VisualizationPlan? VisualizationPlan { get; set; }
+    public string VisualizationStatus { get; set; } = string.Empty;
+    public string VisualizationMessage { get; set; } = string.Empty;
+    public TicketSourcePlan? SourcePlan { get; set; }
     public double Confidence { get; set; }
     public IReadOnlyList<SimilarIncidentResult> SimilarIncidents { get; set; } = [];
     public IReadOnlyList<NyraDocumentResult> NyraDocuments { get; set; } = [];
+    public IReadOnlyList<PoolSense.Api.Services.CodeRAG.CodeEvidence> CodeDocuments { get; set; } = [];
+    public string CodeKnowledgeStatus { get; set; } = "not-available";
+    public PoolSense.Api.Services.CodeRAG.CodeSearchCoverage? CodeSearchCoverage { get; set; }
+    public string FeedbackAuthorization { get; set; } = string.Empty;
     public bool NyraKnowledgeBaseUsed { get; set; }
     public string NyraKnowledgeBaseStatus { get; set; } = string.Empty;
     public string NyraKnowledgeBaseMessage { get; set; } = string.Empty;
@@ -18,6 +29,9 @@ public sealed class TicketWorkflowResult
     public FailurePattern FailurePattern { get; set; } = new();
     public string Reasoning { get; set; } = string.Empty;
     public int FailurePatternFrequency { get; set; }
+    public string ChatSessionId { get; set; } = string.Empty;
+    public string HistoryPersistenceError { get; set; } = string.Empty;
+    public double? ProcessingDurationMs { get; set; }
 }
 
 public sealed class SimilarIncidentResult

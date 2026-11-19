@@ -7,7 +7,6 @@ public interface IFailurePatternRepository
 {
     Task InsertFailurePattern(FailurePattern failurePattern, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<FailurePattern>> GetPatternsBySystem(string system, CancellationToken cancellationToken = default);
-    Task<int> CountPatternOccurrences(string system, string failureType, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<FailureTypeFrequency>> GetMostFrequentFailureTypes(int limit = 10, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ComponentFrequency>> GetMostProblematicComponents(int limit = 10, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SystemIncidentFrequency>> GetSystemsWithRepeatedIncidents(int minimumIncidentCount = 2, int limit = 10, CancellationToken cancellationToken = default);
@@ -129,36 +128,6 @@ public class FailurePatternRepository : IFailurePatternRepository
         }
 
         return results;
-    }
-
-    public async Task<int> CountPatternOccurrences(string system, string failureType, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(system) || string.IsNullOrWhiteSpace(failureType))
-        {
-            return 0;
-        }
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        var scopedProjects = await GetScopedProjectsAsync(cancellationToken);
-
-        var sql = """
-            SELECT COUNT(*)
-            FROM dbo.failure_patterns
-            WHERE system = @system
-              AND failure_type = @failureType
-            """;
-
-        sql = ApplyScopeToWhereClause(sql, "WHERE system = @system\n              AND failure_type = @failureType", scopedProjects);
-
-        await using var command = new SqlCommand(sql, connection);
-        command.Parameters.AddWithValue("@system", system);
-        command.Parameters.AddWithValue("@failureType", failureType);
-        ApplyScopeParameters(command, scopedProjects);
-
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt32(result ?? 0);
     }
 
     public async Task<IReadOnlyList<FailureTypeFrequency>> GetMostFrequentFailureTypes(int limit = 10, CancellationToken cancellationToken = default)

@@ -12,11 +12,13 @@ public sealed class NyraEmbeddingGenerator : IEmbeddingGenerator<string, Embeddi
     private const int DefaultEmbeddingDimensions = 1536;
     private readonly HttpClient _httpClient;
     private readonly IOptionsMonitor<NyraSettings> _settings;
+    private readonly NyraTokenProvider _tokens;
 
-    public NyraEmbeddingGenerator(HttpClient httpClient, IOptionsMonitor<NyraSettings> settings)
+    public NyraEmbeddingGenerator(HttpClient httpClient, IOptionsMonitor<NyraSettings> settings, NyraTokenProvider? tokens = null)
     {
         _httpClient = httpClient;
         _settings = settings;
+        _tokens = tokens ?? NyraGateway.TokenProvider;
     }
 
     public async Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
@@ -37,60 +39,61 @@ public sealed class NyraEmbeddingGenerator : IEmbeddingGenerator<string, Embeddi
         var tokenUrl = string.IsNullOrWhiteSpace(settings.TokenUrl)
             ? null
             : settings.TokenUrl;
-        var token = await NyraGateway.FetchTokenAsync(
-            tokenUrl: tokenUrl,
-            issuer: settings.Issuer,
-            clientId: settings.ClientId,
-            clientSecret: settings.ClientSecret,
-            audience: settings.Audience,
-            scope: settings.Scope,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
         var generateUrl = GetEmbeddingGenerateUrl(settings);
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, generateUrl);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         var apiKey = NyraSettingsResolver.GetApiKeyHeaderValue(settings);
-        if (!string.IsNullOrWhiteSpace(apiKey))
+        HttpResponseMessage? response = null;
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            request.Headers.Add("NYRA-API-KEY", apiKey);
-        }
+            var token = await _tokens.GetTokenAsync(tokenUrl, settings.Issuer, settings.ClientId, settings.ClientSecret,
+                settings.Audience, settings.Scope, cancellationToken).ConfigureAwait(false);
+            using var request = new HttpRequestMessage(HttpMethod.Post, generateUrl);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (!string.IsNullOrWhiteSpace(apiKey))
+                request.Headers.Add("NYRA-API-KEY", apiKey);
 
-        request.Content = JsonContent.Create(new
-        {
-            model = GetRequiredOption(settings.EmbeddingModel, "Nyra:EmbeddingModel"),
-            texts,
-            subscription_type = FirstNonEmpty(settings.EmbeddingSubscriptionType, "azure"),
-            api_version = GetRequiredOption(settings.EmbeddingApiVersion, "Nyra:EmbeddingApiVersion")
-        });
-
-        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"Embedding service returned {(int)response.StatusCode}: {body}");
-        }
-
-        using var json = JsonDocument.Parse(body);
-        var vectors = new List<float[]>();
-        CollectEmbeddingVectors(json.RootElement, vectors);
-
-        if (vectors.Count < texts.Length)
-        {
-            throw new InvalidOperationException($"Expected at least {texts.Length} embedding vectors in response: {body}");
-        }
-
-        var embeddings = new GeneratedEmbeddings<Embedding<float>>(texts.Length);
-        foreach (var vector in vectors.Take(texts.Length))
-        {
-            embeddings.Add(new Embedding<float>(vector)
+            request.Content = JsonContent.Create(new
             {
-                CreatedAt = DateTimeOffset.UtcNow,
-                ModelId = settings.EmbeddingModel
+                model = GetRequiredOption(settings.EmbeddingModel, "Nyra:EmbeddingModel"),
+                texts,
+                subscription_type = FirstNonEmpty(settings.EmbeddingSubscriptionType, "azure"),
+                api_version = GetRequiredOption(settings.EmbeddingApiVersion, "Nyra:EmbeddingApiVersion")
             });
+
+            response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized || attempt != 0)
+                break;
+
+            response.Dispose();
+            response = null;
+            _tokens.InvalidateToken(tokenUrl, settings.Issuer, settings.ClientId, settings.ClientSecret,
+                settings.Audience, settings.Scope);
         }
 
-        return embeddings;
+        using (response)
+        {
+            var body = await response!.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Embedding service returned {(int)response.StatusCode}: {body}");
+
+            using var json = JsonDocument.Parse(body);
+            var vectors = new List<float[]>();
+            CollectEmbeddingVectors(json.RootElement, vectors);
+
+            if (vectors.Count < texts.Length)
+                throw new InvalidOperationException($"Expected at least {texts.Length} embedding vectors in response: {body}");
+
+            var embeddings = new GeneratedEmbeddings<Embedding<float>>(texts.Length);
+            foreach (var vector in vectors.Take(texts.Length))
+            {
+                embeddings.Add(new Embedding<float>(vector)
+                {
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    ModelId = settings.EmbeddingModel
+                });
+            }
+
+            return embeddings;
+        }
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null)

@@ -1,6 +1,7 @@
 using PoolSense.Api.Data;
 using PoolSense.Api.Models;
 using PoolSense.Api.Services.Nyra;
+using PoolSense.Api.Services.CodeRAG;
 
 namespace PoolSense.Api.Services;
 
@@ -8,6 +9,7 @@ public sealed class PoolTroubleshootEvidence
 {
     public IReadOnlyList<TicketKnowledge> SimilarIncidents { get; init; } = [];
     public IReadOnlyList<NyraDocumentResult> NyraDocuments { get; init; } = [];
+    public CodeRetrievalResult Code { get; init; } = CodeRetrievalResult.Skipped;
     public bool NyraKnowledgeBaseUsed { get; init; }
     public IReadOnlyList<string> NyraKnowledgeBaseNames { get; init; } = [];
 }
@@ -34,19 +36,22 @@ public sealed class PoolTroubleshootEvidenceService : IPoolTroubleshootEvidenceS
     private readonly INyraDocumentRetrievalService _nyraDocumentRetrievalService;
     private readonly IProjectRepository _projectRepository;
     private readonly ILogger<PoolTroubleshootEvidenceService> _logger;
+    private readonly ICodeKnowledgeService _codeKnowledge;
 
     public PoolTroubleshootEvidenceService(
         IEmbeddingService embeddingService,
         IVectorStore vectorStore,
         INyraDocumentRetrievalService nyraDocumentRetrievalService,
         IProjectRepository projectRepository,
-        ILogger<PoolTroubleshootEvidenceService> logger)
+        ILogger<PoolTroubleshootEvidenceService> logger,
+        ICodeKnowledgeService codeKnowledge)
     {
         _embeddingService = embeddingService;
         _vectorStore = vectorStore;
         _nyraDocumentRetrievalService = nyraDocumentRetrievalService;
         _projectRepository = projectRepository;
         _logger = logger;
+        _codeKnowledge = codeKnowledge;
     }
 
     public async Task<PoolTroubleshootEvidence> RetrieveAsync(
@@ -65,6 +70,7 @@ public sealed class PoolTroubleshootEvidenceService : IPoolTroubleshootEvidenceS
 
         var embedding = await _embeddingService.GenerateEmbedding(query);
         var similarIncidentsTask = _vectorStore.SearchSimilarTickets(embedding, EvidenceLimit, scopedProjectIds, cancellationToken);
+        var codeTask = _codeKnowledge.RetrieveAsync(query, scopedProjectIds ?? [], cancellationToken);
 
         var kbNames = SplitCommaSeparated(project?.NyraKbNames ?? string.Empty);
         var nyraDocuments = kbNames.Count == 0
@@ -76,6 +82,7 @@ public sealed class PoolTroubleshootEvidenceService : IPoolTroubleshootEvidenceS
         return new PoolTroubleshootEvidence
         {
             SimilarIncidents = similarIncidents,
+            Code = await codeTask,
             NyraDocuments = nyraDocuments,
             NyraKnowledgeBaseUsed = kbNames.Count > 0,
             NyraKnowledgeBaseNames = kbNames

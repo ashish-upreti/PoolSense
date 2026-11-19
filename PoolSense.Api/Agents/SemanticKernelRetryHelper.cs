@@ -43,7 +43,8 @@ internal static class SemanticKernelRetryHelper
         ILlmTokenUsageRepository tokenUsageRepository,
         string operationName,
         string model,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool retryDeployment = true)
     {
         ArgumentNullException.ThrowIfNull(kernel);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
@@ -55,9 +56,10 @@ internal static class SemanticKernelRetryHelper
 
         try
         {
-            var result = await ExecuteWithDeploymentRetryAsync(
-                () => kernel.InvokePromptAsync(prompt, arguments, cancellationToken: cancellationToken),
-                cancellationToken);
+            var result = retryDeployment
+                ? await ExecuteWithDeploymentRetryAsync(
+                    () => kernel.InvokePromptAsync(prompt, arguments, cancellationToken: cancellationToken), cancellationToken)
+                : await kernel.InvokePromptAsync(prompt, arguments, cancellationToken: cancellationToken);
             var outputText = result.ToString();
 
             await TryLogUsageAsync(tokenUsageRepository, new LlmTokenUsageRecord

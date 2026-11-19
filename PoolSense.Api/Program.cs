@@ -8,9 +8,11 @@ using PoolSense.Api.Agents;
 using PoolSense.Api.Configuration;
 using PoolSense.Api.Connectors;
 using PoolSense.Api.Data;
+using PoolSense.Api.Filters;
 using PoolSense.Api.Options;
 using PoolSense.Api.Orchestration;
 using PoolSense.Api.Services;
+using PoolSense.Api.Services.CodeRAG;
 using PoolSense.Api.Services.Nyra;
 using PoolSense.Api.Logging;
 using Serilog;
@@ -36,6 +38,7 @@ try
     builder.Host.UseSerilog((_, services, configuration) => configuration
         .ReadFrom.Services(services)
         .MinimumLevel.Information()
+        .MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", Serilog.Events.LogEventLevel.Warning)
         .Enrich.FromLogContext()
         .WriteTo.Console(outputTemplate: ConsoleOutputTemplate),
         writeToProviders: true);
@@ -49,6 +52,9 @@ try
     builder.Services.AddControllers(options =>
     {
         options.Filters.Add(new AuthorizeFilter());
+        // Route values never have %2F decoded by ASP.NET Core, so ids containing a slash
+        // would otherwise reach actions still escaped and fail lookups.
+        options.Filters.Add<DecodedRouteValueFilter>();
     });
     builder.Services.Configure<AiSettings>(builder.Configuration.GetSection("AiSettings"));
     builder.Services.Configure<NyraSettings>(builder.Configuration.GetSection("Nyra"));
@@ -58,8 +64,17 @@ try
     builder.Services.Configure<ActiveDirectoryOptions>(builder.Configuration.GetSection(ActiveDirectoryOptions.SectionName));
     builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
     builder.Services.Configure<TicketAutomationSettings>(builder.Configuration.GetSection("TicketAutomation"));
+    builder.Services.AddOptions<RetrievalCacheWarmupOptions>()
+        .Bind(builder.Configuration.GetSection(RetrievalCacheWarmupOptions.SectionName))
+        .Validate(options => options.MaxStartupSnapshots is >= 1 and <= 8
+            && options.MaxConcurrency is >= 1 and <= 2
+            && options.QueueCapacity is >= 1 and <= 64,
+            "Retrieval cache warmup limits must not exceed eight startup snapshots, two workers, or 64 queued repositories.")
+        .ValidateOnStart();
     builder.Services.AddHttpContextAccessor();
     builder.Services.AddSingleton<IRsaKeyMaterialProvider, RsaKeyMaterialProvider>();
+    builder.Services.AddCodeKnowledge(builder.Configuration, builder.Environment);
+    builder.Services.AddHostedService<RetrievalCacheWarmupService>();
     builder.Services.AddSingleton<ISessionPasswordStore, SessionPasswordStore>();
     builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
     builder.Services.AddSingleton<ISessionSlidingExpirationService, SessionSlidingExpirationService>();
@@ -120,6 +135,7 @@ try
     builder.Services.AddSingleton<TicketKnowledgeReembedJobStatus>();
     builder.Services.AddSingleton<ITicketKnowledgeReembeddingService, TicketKnowledgeReembeddingService>();
     builder.Services.AddScoped<IPoolSenseSqlConnectionFactory, PoolSenseSqlConnectionFactory>();
+    builder.Services.AddScoped<IPoolChatHistoryStore, PoolChatHistoryStore>();
     builder.Services.AddScoped<IAuthUserRepository, AuthUserRepository>();
     builder.Services.AddScoped<IVectorSimilaritySearch, CosineVectorSimilaritySearch>();
     builder.Services.AddScoped<SqlServerVectorStore>();
@@ -220,6 +236,13 @@ try
 
 
     var app = builder.Build();
+    if (app.Services.GetRequiredService<IOptions<CodeRAGOptions>>().Value.Enabled)
+        app.Logger.LogInformation("Code knowledge storage validated at {StoragePath}. Existing snapshots are retained.",
+            app.Services.GetRequiredService<CodeIndexFiles>().BasePath);
+    var codeSemanticOptions = app.Services.GetRequiredService<IOptions<CodeSemanticOptions>>().Value;
+    app.Logger.LogInformation("Code semantic retrieval enabled: {Enabled}; adaptive: {Adaptive}; dimensions: {Dimensions}; total cap: {MaxChunks}; new embeddings per build: {MaxNewEmbeddings}; cooldown seconds: {Cooldown}.",
+        codeSemanticOptions.Enabled, codeSemanticOptions.AdaptiveCoverageEnabled, codeSemanticOptions.Dimensions,
+        codeSemanticOptions.MaxChunks, codeSemanticOptions.MaxNewEmbeddingsPerBuild, codeSemanticOptions.BatchCooldownSeconds);
     var spaIndexPath = Path.Combine(app.Environment.WebRootPath ?? string.Empty, "index.html");
     var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("StartupSecurity");
     var authOptions = app.Services.GetRequiredService<IOptions<AuthOptions>>().Value;

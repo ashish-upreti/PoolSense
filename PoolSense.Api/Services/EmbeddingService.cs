@@ -4,6 +4,9 @@ using PoolSense.Api.Agents;
 using PoolSense.Api.Configuration;
 using PoolSense.Api.Logging;
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace PoolSense.Api.Services;
 
@@ -12,6 +15,16 @@ namespace PoolSense.Api.Services;
 /// </summary>
 public interface IEmbeddingService
 {
+    string Profile => string.Empty;
+    string QueryCacheProfile => Profile;
+    string PreviousProfile => string.Empty;
+
+    Task<float[]> GenerateEmbedding(string text, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return GenerateEmbedding(text).WaitAsync(cancellationToken);
+    }
+
     /// <summary>
     /// Generates an embedding vector for the provided text.
     /// </summary>
@@ -20,11 +33,123 @@ public interface IEmbeddingService
     Task<float[]> GenerateEmbedding(string text);
 }
 
+public interface IEmbeddingBatchService
+{
+    Task<IReadOnlyList<float[]>> GenerateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken);
+}
+
 /// <summary>
 /// Uses the configured embedding generator to create vector representations of text.
 /// </summary>
-public class EmbeddingService : IEmbeddingService
+public class EmbeddingService : IEmbeddingService, IEmbeddingBatchService
 {
+    public string Profile
+    {
+        get
+        {
+            var settings = _nyraSettings.CurrentValue;
+            var identity = JsonSerializer.Serialize(new
+            {
+                settings.EmbeddingModel,
+                Dimensions = 1536,
+                settings.GatewayEndpoint,
+                settings.EmbeddingEndpoint,
+                settings.EmbeddingGenerateUrl,
+                settings.EmbeddingApiVersion,
+                settings.EmbeddingSubscriptionType,
+                settings.ActiveProfile
+            });
+            return "nyra-sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+        }
+    }
+
+    public string QueryCacheProfile
+    {
+        get
+        {
+            var credentials = ResolveSettings(_nyraSettings.CurrentValue);
+            var credentialIdentity = JsonSerializer.Serialize(new
+            {
+                credentials.AuthMode,
+                credentials.ClientId,
+                credentials.ClientSecret,
+                credentials.Issuer,
+                credentials.TokenUrl,
+                credentials.Audience,
+                credentials.Scope,
+                ApiKey = NyraSettingsResolver.GetApiKeyHeaderValue(credentials)
+            });
+            var identity = JsonSerializer.Serialize(new
+            {
+                Profile,
+                Credentials = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(credentialIdentity)))
+            });
+            return "nyra-query-sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+        }
+    }
+
+    // Reads vectors written by the brief credential-bound persisted-profile format without changing their identity.
+    public string PreviousProfile
+    {
+        get
+        {
+            var settings = ResolveSettings(_nyraSettings.CurrentValue);
+            var credentialIdentity = JsonSerializer.Serialize(new
+            {
+                settings.AuthMode,
+                settings.ClientId,
+                settings.ClientSecret,
+                settings.Issuer,
+                settings.TokenUrl,
+                settings.Audience,
+                settings.Scope,
+                ApiKey = NyraSettingsResolver.GetApiKeyHeaderValue(settings)
+            });
+            var identity = JsonSerializer.Serialize(new
+            {
+                settings.EmbeddingModel,
+                Dimensions = 1536,
+                settings.GatewayEndpoint,
+                settings.EmbeddingEndpoint,
+                settings.EmbeddingGenerateUrl,
+                settings.EmbeddingApiVersion,
+                settings.EmbeddingSubscriptionType,
+                settings.ActiveProfile,
+                Credentials = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(credentialIdentity)))
+            });
+            return "nyra-sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+        }
+    }
+
+    private static NyraSettings ResolveSettings(NyraSettings settings)
+    {
+        var copy = new NyraSettings
+        {
+            ActiveProfile = settings.ActiveProfile,
+            AuthMode = settings.AuthMode,
+            ApiKey = settings.ApiKey,
+            ClientId = settings.ClientId,
+            ClientSecret = settings.ClientSecret,
+            Issuer = settings.Issuer,
+            Audience = settings.Audience,
+            Scope = settings.Scope,
+            GatewayEndpoint = settings.GatewayEndpoint,
+            TokenUrl = settings.TokenUrl,
+            ResponsesUrl = settings.ResponsesUrl,
+            Model = settings.Model,
+            CategorizationModel = settings.CategorizationModel,
+            ResolutionModel = settings.ResolutionModel,
+            EmbeddingEndpoint = settings.EmbeddingEndpoint,
+            EmbeddingGenerateUrl = settings.EmbeddingGenerateUrl,
+            EmbeddingModel = settings.EmbeddingModel,
+            EmbeddingSubscriptionType = settings.EmbeddingSubscriptionType,
+            EmbeddingApiVersion = settings.EmbeddingApiVersion,
+            Profiles = settings.Profiles
+        };
+        NyraSettingsResolver.ApplyActiveProfile(copy);
+        return copy;
+    }
+
     private readonly IEmbeddingGenerator<string, Embedding<float>> _embeddingGenerator;
     private readonly ILlmTokenUsageRepository _tokenUsageRepository;
     private readonly IOptionsMonitor<NyraSettings> _nyraSettings;
@@ -51,21 +176,51 @@ public class EmbeddingService : IEmbeddingService
     /// </summary>
     /// <param name="text">The text to embed.</param>
     /// <returns>The embedding vector.</returns>
-    public async Task<float[]> GenerateEmbedding(string text)
+    public Task<float[]> GenerateEmbedding(string text) => GenerateEmbedding(text, CancellationToken.None);
+
+    public async Task<IReadOnlyList<float[]>> GenerateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(texts);
+        if (texts.Count is < 1 or > 16) throw new ArgumentOutOfRangeException(nameof(texts), "Embedding batches contain 1-16 texts.");
+        cancellationToken.ThrowIfCancellationRequested();
+        var stopwatch = Stopwatch.StartNew();
+        var input = string.Join("\n", texts);
+        try
+        {
+            var generated = await SemanticKernelRetryHelper.ExecuteWithDeploymentRetryAsync(
+                () => _embeddingGenerator.GenerateAsync(texts, new EmbeddingGenerationOptions { Dimensions = 1536 }, cancellationToken), cancellationToken);
+            if (generated.Count != texts.Count) throw new InvalidDataException("Embedding batch response count does not match its inputs.");
+            var vectors = generated.Select(embedding => embedding.Vector.ToArray()).ToArray();
+            await TryLogUsageAsync(input, generated, 1536, stopwatch, true, "");
+            _logger.LogInformation("Generated embedding batch of {Count} in {DurationMs}ms.", vectors.Length, stopwatch.Elapsed.TotalMilliseconds);
+            return vectors;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            await TryLogUsageAsync(input, null, null, stopwatch, false, exception.Message);
+            throw;
+        }
+    }
+
+    public async Task<float[]> GenerateEmbedding(string text, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(text);
+        cancellationToken.ThrowIfCancellationRequested();
 
         _logger.LogInformation("Generating embedding for text length {TextLength}.", text.Length);
         var stopwatch = Stopwatch.StartNew();
         var options = new EmbeddingGenerationOptions { Dimensions = 1536 };
         try
         {
-            var embedding = await SemanticKernelRetryHelper.ExecuteWithDeploymentRetryAsync(() => _embeddingGenerator.GenerateAsync(text, options));
+            var embedding = await SemanticKernelRetryHelper.ExecuteWithDeploymentRetryAsync(
+                () => _embeddingGenerator.GenerateAsync(text, options, cancellationToken), cancellationToken);
             var vector = embedding.Vector.ToArray();
             await TryLogUsageAsync(text, embedding, vector.Length, stopwatch, success: true, errorMessage: string.Empty);
             _logger.LogInformation("Embedding generated with vector size {VectorSize}.", vector.Length);
             return vector;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             await TryLogUsageAsync(

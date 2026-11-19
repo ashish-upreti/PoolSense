@@ -4,3 +4,36 @@ GET {{PoolSense.Api_HostAddress}}/weatherforecast/
 Accept: application/json
 
 ###
+
+### Managed GitHub PAT status (sign in to PoolSense first)
+GET {{PoolSense.Api_HostAddress}}/api/github/access
+
+### List accessible repository registrations
+@projectId = YOUR_PROJECT_ID
+@repositoryId = REPOSITORY_ID_FROM_CREATE
+GET {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories
+
+### Add repository and queue initial indexing
+POST {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories
+X-PoolSense-CSRF: 1
+Content-Type: application/json
+
+{"url":"https://github.com/dotnet/runtime","branch":"main","enabled":true}
+
+### Get one registration
+GET {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}
+
+### Update branch/settings; the API verifies access using its managed PAT
+PUT {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}
+X-PoolSense-CSRF: 1
+Content-Type: application/json
+
+{"url":"https://github.com/dotnet/runtime","branch":"main","enabled":true}
+
+### Check current branch SHA; rebuild only if changed
+POST {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}/refresh
+X-PoolSense-CSRF: 1
+
+### Remove a repository
+DELETE {{PoolSense.Api_HostAddress}}/api/projects/{{projectId}}/repositories/{{repositoryId}}
+X-PoolSense-CSRF: 1
