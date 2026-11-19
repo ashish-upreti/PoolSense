@@ -123,6 +123,18 @@ test('route placeholders and parentheses are quoted only in plain flowchart rect
   const sequence = 'sequenceDiagram\n participant API\n API->>API: POST /pool/{poolId}/troubleshoot'
   expect(prepareMermaid(sequence)).toBe(sequence)
 })
+test('accepts generic type names inside quoted flowchart labels', () => {
+  const source = `flowchart TD
+    A["Caller provides text"] --> B["SimilaritySearchService.SearchSimilarTickets"]
+    B --> C["EmbeddingService.GenerateEmbedding"]
+    C --> D["IEmbeddingGenerator.GenerateAsync"]
+    D --> E["NYRA embedding HTTP endpoint"]
+    E --> F["Embedding<float> vector"]
+    F --> G["float[] embedding"]
+    G --> H["Vector store similarity search"]
+    G --> I["ticket_knowledge.embedding vector(1536)"]`
+  expect(prepareMermaid(source)).toBe(source)
+})
 test('GFM and verbatim code are split once without altering code', () => {
   const blocks = richBlocks(markdown)
   expect(blocks.filter(block => block.kind === 'chart')).toHaveLength(5)

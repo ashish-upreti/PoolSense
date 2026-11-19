@@ -94,6 +94,12 @@ type FeedbackState = {
 
 type AppSection = 'main' | 'poolRecommendations' | 'projectConfig' | 'codeRepositories' | 'applicationFeedback'
 
+type TelemetryDatum = {
+  name: string
+  value: number
+  color: string
+}
+
 type GitHubAccessStatus = { configured: boolean; available: boolean; login: string | null; message: string }
 
 type CodeChatMessage = {
@@ -354,6 +360,7 @@ export class AppComponent implements OnInit, OnDestroy {
   codeChatPendingMode: CodeSearchMode = 'quick'
   isCodeChatHistoryLoading = false
   private codeChatRevealTimer: number | null = null
+  private codeChatRequestSessionId: string | null = null
   applicationFeedbackForm = createDefaultApplicationFeedbackForm()
   applicationFeedbackError = ''
   applicationFeedbackNotice = ''
@@ -512,6 +519,27 @@ export class AppComponent implements OnInit, OnDestroy {
 
   get confidence() {
     return this.insights ? Math.round(this.insights.confidence * 100) : 0
+  }
+
+  get telemetry(): TelemetryDatum[] {
+    if (!this.insights) {
+      return []
+    }
+
+    const avgSimilarity =
+      this.insights.similarIncidents.length > 0
+        ? Math.round(
+            (this.insights.similarIncidents.reduce((sum, incident) => sum + incident.similarity, 0) /
+              this.insights.similarIncidents.length) *
+              100,
+          )
+        : 0
+
+    return [
+      { name: 'Confidence', value: this.confidence, color: '#6366f1' },
+      { name: 'Incidents', value: avgSimilarity, color: '#818cf8' },
+      { name: 'Pattern fit', value: Math.min(this.insights.failurePatternFrequency * 10, 100), color: '#a5b4fc' },
+    ]
   }
 
   get patterns() {
@@ -1321,7 +1349,8 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   async openCodeChatSession(sessionId: string) {
-    if (this.isCodeChatAsking || this.isCodeChatTyping || sessionId === this.codeChatSessionId) return
+    if (sessionId === this.codeChatSessionId) return
+    this.stopCodeChatReveal()
     this.isCodeChatHistoryLoading = true
     this.codeChatError = ''
     try {
@@ -1361,6 +1390,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.codeChatMessages = [...this.codeChatMessages, this.createCodeChatMessage('user', question)]
     this.codeChatQuestion = ''
     this.isCodeChatAsking = true
+    this.codeChatRequestSessionId = this.codeChatSessionId
     const mode = this.codeSearchMode
     this.codeChatPendingMode = mode
     this.codeChatError = ''
@@ -1370,20 +1400,25 @@ export class AppComponent implements OnInit, OnDestroy {
     try {
       const response = await this.api.askCodeChat(this.codeRepoScopeIds, question, history, this.codeChatSessionId, mode)
       const completedInMs = performance.now() - requestStartedAt
-      this.codeChatSessionId = response.sessionId
       const answerMessage = {
-        ...this.createCodeChatMessage('assistant', mode === 'deep' ? '' : response.answer, response.citations, response.generatedAt, response.codeKnowledgeStatus, response.codeSearchCoverage),
-        completedInMs,
+        ...this.createCodeChatMessage('assistant', '', response.citations, response.generatedAt, response.codeKnowledgeStatus, response.codeSearchCoverage),
+        completedInMs: completedInMs || response.timingsMs?.['total'],
         searchMode: response.searchMode ?? mode,
       }
-      this.codeChatMessages = [...this.codeChatMessages, answerMessage]
-      if (mode === 'deep') this.revealCodeChatAnswer(answerMessage, response.answer)
+      if (this.codeChatSessionId === this.codeChatRequestSessionId) {
+        this.codeChatSessionId = response.sessionId
+        this.codeChatMessages = [...this.codeChatMessages, answerMessage]
+        this.revealCodeChatAnswer(answerMessage, response.answer)
+      }
       void this.loadCodeChatHistory()
     } catch (requestError) {
-      const message = requestError instanceof Error ? requestError.message : 'Unable to answer from repository source.'
-      this.codeChatMessages = [...this.codeChatMessages, { ...this.createCodeChatMessage('assistant', message), isError: true }]
+      if (this.codeChatSessionId === this.codeChatRequestSessionId) {
+        const message = requestError instanceof Error ? requestError.message : 'Unable to answer from repository source.'
+        this.codeChatMessages = [...this.codeChatMessages, { ...this.createCodeChatMessage('assistant', message), isError: true }]
+      }
     } finally {
       this.isCodeChatAsking = false
+      this.codeChatRequestSessionId = null
       this.scrollCodeChatToBottom()
     }
   }
@@ -1425,12 +1460,13 @@ export class AppComponent implements OnInit, OnDestroy {
     this.isCodeChatTyping = true
     const reveal = () => {
       let position = Math.min(answer.length, Math.max(1, Math.ceil(answer.length * (performance.now() - startedAt) / duration)))
+      const boundary = answer.slice(position).search(/\s/)
+      if (position < answer.length && boundary > 0) position += boundary
       const range = atomic.find(([start, end]) => position > start && position < end)
       if (range) position = range[1]
       if (/[\uD800-\uDBFF]/.test(answer[position - 1])) position++
-      const follow = this.isCodeChatNearBottom()
       message.text = answer.slice(0, position)
-      if (follow) this.scrollCodeChatToBottom()
+      this.scrollCodeChatToBottom()
       if (position < answer.length) this.codeChatRevealTimer = window.setTimeout(reveal, 40)
       else this.stopCodeChatReveal()
     }
@@ -1443,19 +1479,19 @@ export class AppComponent implements OnInit, OnDestroy {
     this.isCodeChatTyping = false
   }
 
-  /** The view follows new text only while the reader has not scrolled up. */
-  private isCodeChatNearBottom() {
-    const element = this.codeChatTranscript?.nativeElement
-    return !element || element.scrollHeight - element.scrollTop - element.clientHeight < 80
-  }
-
   get codeSearchModeDescription() {
     return this.codeSearchModes.find(option => option.value === this.codeSearchMode)?.description ?? ''
   }
 
+  get isActiveCodeChatPending() {
+    return this.isCodeChatAsking && this.codeChatSessionId === this.codeChatRequestSessionId
+  }
+
   codeAnswerDurationLabel(message: CodeChatMessage): string | null {
     const duration = formatAnswerDuration(message.completedInMs)
-    return duration ? `Generated in ${duration}` : null
+    if (duration) return `Generated in ${duration}`
+    const completedAt = new Date(message.generatedAt)
+    return Number.isNaN(completedAt.valueOf()) ? 'Response completed' : `Completed at ${completedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
   }
 
   private createCodeChatMessage(role: 'user' | 'assistant', text: string, citations: CodeEvidence[] = [], generatedAt = new Date().toISOString(), codeKnowledgeStatus = '', codeSearchCoverage?: CodeSearchCoverage): CodeChatMessage {
