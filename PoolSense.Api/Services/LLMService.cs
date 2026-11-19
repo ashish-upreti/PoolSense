@@ -18,6 +18,8 @@ public interface ILLMService
     /// <param name="prompt">The prompt text to submit.</param>
     /// <returns>The model response.</returns>
     Task<string> GetResponseAsync(string prompt);
+    /// <summary>Same request as <see cref="GetResponseAsync(string)"/>, but the caller can abandon it, e.g. on a request time limit.</summary>
+    Task<string> GetResponseAsync(string prompt, CancellationToken token) => GetResponseAsync(prompt).WaitAsync(token);
     Task<string> GetBoundedResponseAsync(string prompt, int maxOutputTokens, CancellationToken token) =>
         throw new NotSupportedException("This provider does not support bounded generation.");
 }
@@ -52,7 +54,9 @@ public class LLMService : ILLMService
     /// </summary>
     /// <param name="prompt">The prompt text to submit.</param>
     /// <returns>The model response.</returns>
-    public async Task<string> GetResponseAsync(string prompt)
+    public Task<string> GetResponseAsync(string prompt) => GetResponseAsync(prompt, CancellationToken.None);
+
+    public async Task<string> GetResponseAsync(string prompt, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         return await SemanticKernelRetryHelper.InvokePromptWithDeploymentRetryAsync(
@@ -61,7 +65,8 @@ public class LLMService : ILLMService
             new KernelArguments { ["prompt"] = prompt },
             _tokenUsageRepository,
             "GenericPrompt",
-            _nyraSettings.CurrentValue.Model);
+            _nyraSettings.CurrentValue.Model,
+            token);
     }
 
     public Task<string> GetBoundedResponseAsync(string prompt, int maxOutputTokens, CancellationToken token)

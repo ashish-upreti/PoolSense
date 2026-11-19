@@ -70,6 +70,14 @@ public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
             knowledge is null ? null : Microsoft.Extensions.Options.Options.Create(knowledge));
 
     [Fact]
+    public async Task MisspeltPlainWords_AreCorrectedFromTheIndex_ForSearchAndEvidenceSelection()
+    {
+        using var fixture = await RetrievalFixture.CreateAsync();
+        var result = await Service(fixture).RetrieveAsync("Which code handles cancelld?", ["project"], default);
+        Assert.Contains(result.Documents, document => document.FilePath == "Refunds.cs");
+    }
+
+    [Fact]
     public async Task ParallelSearch_DoesNotUseHeadChecksOrGlobalIndexGate_AndHonorsScope()
     {
         using var fixture = await RetrievalFixture.CreateAsync();
@@ -138,6 +146,31 @@ public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
         Assert.Equal(4, broader.Coverage.SearchedRepositories);
         Assert.Contains(broader.Documents, document => document.FilePath == "Orders.cs");
         Assert.Contains(broader.Documents, document => document.FilePath == "Shipping.cs");
+    }
+
+    [Fact]
+    public async Task DeepSearch_OutlastsQuickDeadline_AndSearchesEveryRepositoryInScope()
+    {
+        using var fixture = await RetrievalFixture.CreateAsync();
+        fixture.Settings.SearchDeadlineSeconds = .2;
+        fixture.Settings.RepositoryRoutingEnabled = true;
+        fixture.Settings.RepositoryShortlistSize = 1;
+        fixture.GitHub.SlowRepository = "refunds";
+
+        var quick = await Service(fixture).RetrieveAsync("orders CaptureCharge", ["project", "shipping-only"], default);
+        Assert.True(quick.Coverage.DeadlineExceeded);
+
+        var deep = await Service(fixture).RetrieveAsync("orders CaptureCharge", ["project", "shipping-only"], true, default);
+        Assert.Equal("ready", deep.Status);
+        Assert.False(deep.Coverage.DeadlineExceeded);
+        Assert.Equal(4, deep.Coverage.SearchedRepositories);
+        Assert.Contains(deep.Documents, document => document.FilePath == "Orders.cs");
+
+        // A deep deadline configured below the quick one never shortens the search.
+        fixture.Settings.SearchDeadlineSeconds = 20;
+        fixture.Settings.DeepSearch.DeadlineSeconds = .2;
+        var floored = await Service(fixture).RetrieveAsync("orders CaptureCharge", ["project", "shipping-only"], true, default);
+        Assert.False(floored.Coverage.DeadlineExceeded);
     }
 
     [Fact]
@@ -392,6 +425,24 @@ public sealed class CodeRetrievalImprovementsTests(ITestOutputHelper output)
         Assert.Contains("not exhaustive", notice);
         Assert.Contains("Searched 1 of 3", notice);
         Assert.Contains("unverified repositories were not used", notice);
+    }
+
+    [Theory]
+    [InlineData("partial, ready", true, false)]
+    [InlineData("partial, ready", false, true)]
+    [InlineData("failed, partial", true, true)]
+    [InlineData("missing-index, ready", false, true)]
+    public void SemanticNotice_IsOmittedOnceConfiguredTargetsAreReached_AndKeptForRealDegradation(string status, bool targetReached, bool expected)
+    {
+        var coverage = new CodeSearchCoverage
+        {
+            AuthorizedRepositories = 9, SearchedRepositories = 9, SemanticStatus = status,
+            SemanticIndexedChunks = targetReached ? 5760 : 640, SemanticTargetChunks = 5760, SemanticEligibleChunks = 49892, SemanticTargetReached = targetReached
+        };
+        var notice = CodeRetrievalMessages.Notice(new("ready", []) { Coverage = coverage });
+        Assert.Equal(expected, notice.Contains("Semantic retrieval is limited"));
+        Assert.Equal(expected, notice.Contains("target vectors"));
+        if (!expected) Assert.Equal("", notice);
     }
 
     [Fact]

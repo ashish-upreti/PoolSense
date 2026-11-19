@@ -66,9 +66,12 @@ export interface CodeChatTurn {
   content: string
 }
 
+export type CodeSearchMode = 'quick' | 'deep'
+
 export interface CodeAskResponse {
   timingsMs?: Record<string, number>
   codeSearchCoverage?: CodeSearchCoverage
+  searchMode?: CodeSearchMode
   projectId: string
   projectIds?: string[]
   sessionId: string
@@ -436,7 +439,7 @@ export class ApiService {
     return query ? '?' + query : ''
   }
 
-  askCodeChat(projectIds: string[], question: string, history: CodeChatTurn[], sessionId: string | null): Promise<CodeAskResponse> {
+  askCodeChat(projectIds: string[], question: string, history: CodeChatTurn[], sessionId: string | null, mode: CodeSearchMode = 'quick'): Promise<CodeAskResponse> {
     // Match CodeChatTurn.Content validation without shortening displayed or saved answers.
     const maxContentLength = 8000
     const truncated = '\n[Earlier message truncated]'
@@ -444,7 +447,7 @@ export class ApiService {
       ...turn,
       content: turn.content.slice(0, maxContentLength - truncated.length).replace(/[\uD800-\uDBFF]$/, '') + truncated,
     })
-    return this.codeRequest<CodeAskResponse>('/code-chat/ask', 'POST', { projectIds, question, history: boundedHistory, sessionId })
+    return this.codeRequest<CodeAskResponse>('/code-chat/ask', 'POST', { projectIds, question, history: boundedHistory, sessionId, mode })
   }
 
   getCodeChatHistory(projectIds: string[]): Promise<CodeChatSessionSummary[]> {

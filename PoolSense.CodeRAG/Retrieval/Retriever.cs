@@ -13,8 +13,92 @@ public sealed class Retriever
     private static readonly HashSet<string> StopWords = new(
         "a an the in on of to for from with and or is are was be does do how what where when why can could would should please give show explain describe me my this that it its code codebase repository repo through about".Split(' '));
     private static string[] Words(string text) => Regex.Matches(text, @"[A-Za-z_][A-Za-z_0-9]{1,}").Select(m => m.Value).ToArray();
-    private static string Fts(string text) => string.Join(" OR ", Words(text).Where(w => !StopWords.Contains(w.ToLowerInvariant()))
-        .Distinct(StringComparer.Ordinal).Take(40).Select(w => $"\"{w}\"*"));
+    private static string Fts(string text, IReadOnlyDictionary<string, string[]>? rewrite = null) => string.Join(" OR ", Words(text)
+        .Where(w => !StopWords.Contains(w.ToLowerInvariant()))
+        .SelectMany(w => rewrite?.GetValueOrDefault(w) ?? [w])
+        .Distinct(StringComparer.OrdinalIgnoreCase).Take(40).Select(w => $"\"{w}\"*"));
+    private static readonly string[] Suffixes = ["ations", "ation", "ments", "ment", "ings", "ing", "ies", "als", "al", "ers", "er", "ed", "es", "s"];
+
+    /// <summary>
+    /// Prefix form of a plain English word, so "retrieval" also matches Retriever and RetrieveAsync and "indexing" matches indexer.
+    /// Identifiers (mixed case, digits, underscores) and short words are returned unchanged.
+    /// </summary>
+    public static string Stem(string word)
+    {
+        if (word.Length < 5 || !Regex.IsMatch(word, "^[A-Za-z][a-z]+$")) return word;
+        var lower = word.ToLowerInvariant();
+        foreach (var suffix in Suffixes)
+        {
+            if (!lower.EndsWith(suffix, StringComparison.Ordinal) || lower.Length - suffix.Length < 4) continue;
+            if (suffix == "s" && lower.EndsWith("ss", StringComparison.Ordinal)) break;
+            var stem = lower[..^suffix.Length];
+            return stem.Length > 4 && stem[^1] == stem[^2] && !"aeioulsz".Contains(stem[^1]) ? stem[..^1] : stem;
+        }
+        return lower;
+    }
+
+    /// <summary>
+    /// Search form for each plain word of the question: its stem, or, when nothing indexed starts with the stem, the stem of the
+    /// most common indexed word one edit away (two for words of eight or more letters), so a misspelt "retreival" still finds
+    /// retrieval code. Stems alone rank better than stem plus exact word, which over-weights namespaces such as "Indexing".
+    /// </summary>
+    private static Dictionary<string, string[]> SearchForms(SqliteConnection db, IEnumerable<string> words, Dictionary<string, string> corrections)
+    {
+        var forms = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        var plain = words.Where(word => word.Length >= 5 && !StopWords.Contains(word.ToLowerInvariant()) && Regex.IsMatch(word, "^[A-Za-z][a-z]+$"))
+            .Distinct(StringComparer.Ordinal).Take(40).ToArray();
+        if (plain.Length == 0) return forms;
+        var vocabulary = true;
+        try { Execute(db, "CREATE VIRTUAL TABLE IF NOT EXISTS temp.symbol_search_vocab USING fts5vocab(main, symbol_search, 'row')"); }
+        catch (SqliteException) { vocabulary = false; }
+        foreach (var word in plain)
+        {
+            var stem = Stem(word);
+            forms[word] = [stem];
+            if (!vocabulary || Indexed(db, stem)) continue;
+            var lower = word.ToLowerInvariant();
+            var limit = lower.Length >= 8 ? 2 : 1;
+            var nearest = Query(db, """
+                SELECT term, doc FROM temp.symbol_search_vocab
+                WHERE term >= @p0 AND term < @p1 AND length(term) BETWEEN @p2 AND @p3
+                """, reader => (Term: reader.GetString(0), Documents: reader.GetInt64(1)),
+                lower[..1], lower[..1] + char.MaxValue, lower.Length - limit, lower.Length + limit)
+                .Select(item => (item.Term, item.Documents, Distance: Distance(lower, item.Term, limit)))
+                .Where(item => item.Distance <= limit).OrderBy(item => item.Distance).ThenByDescending(item => item.Documents)
+                .ThenBy(item => item.Term, StringComparer.Ordinal).FirstOrDefault();
+            if (nearest.Term is null) continue;
+            forms[word] = [Stem(nearest.Term)];
+            corrections[word] = nearest.Term;
+        }
+        return forms;
+    }
+
+    private static bool Indexed(SqliteConnection db, string prefix) => Query(db,
+        "SELECT 1 FROM temp.symbol_search_vocab WHERE term >= @p0 AND term < @p1 LIMIT 1", _ => true, prefix, prefix + char.MaxValue).Count > 0;
+
+    /// <summary>Edit distance counting a swap of adjacent letters as one edit; stops early once it exceeds <paramref name="limit"/>.</summary>
+    private static int Distance(string a, string b, int limit)
+    {
+        var twoBack = new int[b.Length + 1];
+        var previous = new int[b.Length + 1];
+        var current = new int[b.Length + 1];
+        for (var j = 0; j <= b.Length; j++) previous[j] = j;
+        for (var i = 1; i <= a.Length; i++)
+        {
+            current[0] = i;
+            var rowMinimum = i;
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var value = Math.Min(Math.Min(previous[j] + 1, current[j - 1] + 1), previous[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) value = Math.Min(value, twoBack[j - 2] + 1);
+                current[j] = value;
+                rowMinimum = Math.Min(rowMinimum, value);
+            }
+            if (rowMinimum > limit) return limit + 1;
+            (twoBack, previous, current) = (previous, current, twoBack);
+        }
+        return previous[b.Length];
+    }
     private static string Layer(Symbol s) => Path.GetExtension(s.FilePath).ToLowerInvariant() is ".ts" or ".tsx" or ".js" or ".jsx"
         ? "frontend" : Path.GetExtension(s.FilePath).ToLowerInvariant();
     public static string Render(IEnumerable<Symbol> symbols) => string.Join("\n\n", symbols.Select(s =>
@@ -43,6 +127,9 @@ public sealed class Retriever
         return result;
     }
 
+    /// <summary>Misspelt question words corrected by the last <see cref="Retrieve"/> call, mapped to the indexed word searched instead.</summary>
+    public IReadOnlyDictionary<string, string> Corrections { get; private set; } = new Dictionary<string, string>();
+
     public IReadOnlyList<Symbol> Retrieve(string question, SqliteConnection db, string root,
         int limit = 32, int maxChars = MaxContextChars, Action<string>? progress = null, CancellationToken token = default)
     {
@@ -50,6 +137,9 @@ public sealed class Retriever
         var key = RootKey(root);
         var terms = Words(question).Where(w => !w.Equals(Path.GetFileName(root), StringComparison.OrdinalIgnoreCase)).ToArray();
         if (Fts(string.Join(' ', terms)).Length == 0) return [];
+        var corrections = new Dictionary<string, string>(StringComparer.Ordinal);
+        var forms = SearchForms(db, terms, corrections);
+        Corrections = corrections;
         var flow = terms.Any(w => new[] { "flow", "workflow", "journey", "architecture", "diagram", "graph", "connection", "connections", "dependencies", "relationships", "integration" }.Contains(w.ToLowerInvariant())) ||
             Regex.IsMatch(question, @"\bend[\s-]+to[\s-]+end\b", RegexOptions.IgnoreCase);
         var candidates = new Dictionary<string, Symbol>();
@@ -57,7 +147,7 @@ public sealed class Retriever
         List<Symbol> Search(string text, double weight = 1, bool chunks = false, string actions = "", string[]? extensions = null)
         {
             token.ThrowIfCancellationRequested();
-            var match = Fts(text);
+            var match = Fts(text, forms);
             if (match.Length == 0) return [];
             if (actions.Length > 0) match = $"({match}) AND ({Fts(actions)})";
             var args = new List<object?> { match, key, chunks ? 1 : 0 };

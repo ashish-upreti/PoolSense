@@ -28,6 +28,19 @@ public sealed class CodeRAGOptions
     public int StartupJitterSeconds { get; set; } = 5;
     public OkfOptions Knowledge { get; set; } = new();
     public CodeSemanticOptions Semantic { get; set; } = new();
+    public CodeDeepSearchOptions DeepSearch { get; set; } = new();
+}
+
+/// <summary>Limits for a user-requested deep repository search. Each applies only when larger than its quick-search counterpart.</summary>
+public sealed class CodeDeepSearchOptions
+{
+    public double DeadlineSeconds { get; set; } = 60;
+    /// <summary>Whole-request limit covering search and answer generation.</summary>
+    public int RequestTimeoutSeconds { get; set; } = 120;
+    public int CandidatesPerRepository { get; set; } = 40;
+    public int GlobalCandidateLimit { get; set; } = 512;
+    public int MaxEvidenceSpans { get; set; } = 24;
+    public int ContextCharacters { get; set; } = 48000;
 }
 
 public sealed record ManagedGitHubIdentity(long GitHubId, string Login, string ProtectedToken);
@@ -103,8 +116,17 @@ public sealed record CodeSearchCoverage
 
 public static class CodeRetrievalMessages
 {
+    /// <summary>
+    /// A bounded semantic index that has reached its configured targets is the normal steady state, not a degradation.
+    /// Coverage counts stay available in <see cref="CodeSearchCoverage"/>.
+    /// </summary>
+    public static bool SemanticLimited(string semanticStatus, bool targetReached) => semanticStatus.Split(',')
+        .Select(status => status.Trim())
+        .Any(status => status is not ("disabled" or "ready" or "reused" or "not-used") && !(status == "partial" && targetReached));
+
     public static string Notice(CodeRetrievalResult result)
     {
+        var semanticLimited = SemanticLimited(result.Coverage.SemanticStatus, result.Coverage.SemanticTargetReached);
         var note = result.Status switch
         {
             "partial" => "Code search is incomplete; showing the evidence collected so far, not exhaustive repository coverage.",
@@ -122,13 +144,13 @@ public static class CodeRetrievalMessages
             "stale" => "Showing a previous indexed snapshot pending background freshness/refresh; it may differ from current or deployed code.",
             _ => ""
         };
-        if (result.Coverage.SemanticStatus.Split(',').Any(status => status.Trim() is not ("disabled" or "ready" or "reused" or "not-used")))
+        if (semanticLimited)
             note += " Semantic retrieval is limited; lexical and graph evidence remains available.";
         if (result.Status is "partial" or "timed-out")
             note += $" Searched {result.Coverage.SearchedRepositories} of {result.Coverage.AuthorizedRepositories} confirmed accessible repositories.";
         if (!result.Coverage.AuthorizationComplete)
             note += " Access verification is incomplete; unverified repositories were not used.";
-        if (result.Coverage.SemanticTargetChunks > 0)
+        if (semanticLimited && result.Coverage.SemanticTargetChunks > 0)
             note += $" Known semantic coverage: {result.Coverage.SemanticIndexedChunks}/{result.Coverage.SemanticTargetChunks} target vectors ({result.Coverage.SemanticEligibleChunks} eligible chunks). "
                 + (result.Coverage.SemanticTargetReached ? "Configured targets reached, not full-corpus coverage." : "Coverage grows in bounded background batches.");
         return note.Trim();
@@ -147,6 +169,9 @@ public sealed record CodeAskRequest
     [Required, MaxLength(4000)] public string Question { get; init; } = "";
     [MaxLength(20)] public IReadOnlyList<CodeChatTurn> History { get; init; } = [];
     [MaxLength(32)] public string? SessionId { get; init; }
+    /// <summary>"quick" (default) or "deep". Deep searches every repository in scope with the larger CodeRAG:DeepSearch limits.</summary>
+    [RegularExpression("^(quick|deep)$")] public string? Mode { get; init; }
+    public bool IsDeep => Mode == "deep";
 }
 
 /// <summary>Asks a question against the indexed repositories of several applications (empty <see cref="ProjectIds"/> = every application).</summary>
@@ -156,8 +181,9 @@ public sealed record CodeScopedAskRequest
     [Required, MaxLength(4000)] public string Question { get; init; } = "";
     [MaxLength(20)] public IReadOnlyList<CodeChatTurn> History { get; init; } = [];
     [MaxLength(32)] public string? SessionId { get; init; }
+    [RegularExpression("^(quick|deep)$")] public string? Mode { get; init; }
 
-    public CodeAskRequest ToAskRequest() => new() { Question = Question, History = History, SessionId = SessionId };
+    public CodeAskRequest ToAskRequest() => new() { Question = Question, History = History, SessionId = SessionId, Mode = Mode };
 }
 
 /// <summary>
@@ -204,6 +230,7 @@ public sealed record CodeAskResponse(string ProjectId, string SessionId, string 
 {
     public IReadOnlyDictionary<string, double> TimingsMs { get; init; } = new Dictionary<string, double>();
     public CodeSearchCoverage? CodeSearchCoverage { get; init; }
+    public string SearchMode { get; init; } = "quick";
     /// <summary>Applications the answer was scoped to; empty means every application.</summary>
     public IReadOnlyList<string> ProjectIds { get; init; } = ProjectId.Length == 0 ? [] : [ProjectId];
 }

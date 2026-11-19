@@ -5164,7 +5164,7 @@
   font-size: 0.78rem;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 720px) {
   .code-rag-control-grid,
   .code-rag-url-row {
     grid-template-columns: 1fr;

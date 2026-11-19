@@ -25,6 +25,12 @@ public static class CodeRAGRegistration
                 || settings.BackgroundBatchSize is < 1 or > 20 || settings.BackgroundCheckSeconds is < 1 or > 300
                 || settings.StartupJitterSeconds is < 0 or > 30)
                 throw new InvalidOperationException("Invalid CodeRAG resource limits.");
+            var deep = settings.DeepSearch;
+            if (!double.IsFinite(deep.DeadlineSeconds) || deep.DeadlineSeconds is < .05 or > 300
+                || deep.RequestTimeoutSeconds is < 10 or > 300
+                || deep.CandidatesPerRepository is < 1 or > 100 || deep.GlobalCandidateLimit is < 24 or > 1024
+                || deep.MaxEvidenceSpans is < 1 or > 40 || deep.ContextCharacters is < 1000 or > 96000)
+                throw new InvalidOperationException("Invalid CodeRAG deep search limits. The search deadline is at most 300 seconds, the request timeout 10-300 seconds; the other limits share the quick-search ranges.");
             if (settings.Semantic.Enabled && settings.Semantic.Dimensions != 1536)
                 throw new InvalidOperationException("CodeRAG semantic dimensions must match the configured NYRA embedding dimensions (1536).");
             if (settings.Semantic.MaxChunks is < 1 or > 768 || settings.Semantic.MaxNewEmbeddingsPerBuild is < 0 or > 64

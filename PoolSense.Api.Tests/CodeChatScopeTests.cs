@@ -74,6 +74,41 @@ public class CodeChatScopeTests
     }
 
     [Theory]
+    [InlineData(null, false, "quick")]
+    [InlineData("deep", true, "deep")]
+    public async Task Ask_SearchMode_SelectsRetrievalDepth_AndIsReported(string? mode, bool deep, string reported)
+    {
+        var knowledge = new RecordingKnowledge();
+        var llm = new RecordingLlm();
+        var service = new CodeChatService(knowledge, new RecordingHistory(), new Projects("app-a"), llm, new NoAudit());
+
+        var response = await service.AskAsync("user", "app-a", new CodeScopedAskRequest { Question = "q", Mode = mode }.ToAskRequest(), CancellationToken.None);
+
+        Assert.Equal(deep, knowledge.LastDeep);
+        Assert.Equal(reported, response.SearchMode);
+        Assert.Equal(deep, llm.LastPrompt.Contains("Search depth"));
+    }
+
+    [Fact]
+    public async Task Ask_DeepSearchOverItsTimeLimit_ReportsTimeoutAndSavesNothing()
+    {
+        var history = new RecordingHistory();
+        var options = Microsoft.Extensions.Options.Options.Create(new CodeRAGOptions { DeepSearch = { RequestTimeoutSeconds = 1 } });
+        var service = new CodeChatService(new RecordingKnowledge(), history, new Projects("app-a"), new NeverRespondingLlm(), new NoAudit(), options);
+
+        var error = await Assert.ThrowsAsync<TimeoutException>(() =>
+            service.AskAsync("user", "app-a", new CodeAskRequest { Question = "q", Mode = "deep" }, CancellationToken.None));
+
+        Assert.Contains("1 seconds", error.Message);
+        Assert.Null(history.LastAnswer);
+    }
+
+    private sealed class NeverRespondingLlm : ILLMService
+    {
+        public Task<string> GetResponseAsync(string prompt) => new TaskCompletionSource<string>().Task;
+    }
+
+    [Theory]
     [InlineData("Show the scheduler workflow", "## Process flow")]
     [InlineData("Draw scheduler dependencies", "## Application relationships")]
     public async Task Ask_GraphRequest_RendersReferencedEdges_AndPersistsSafeMarkdown(string question, string heading)
@@ -229,6 +264,12 @@ public class CodeChatScopeTests
         public string? LastQuery { get; private set; }
         public int Calls { get; private set; }
         public IReadOnlyList<string>? LastProjectIds { get; private set; }
+        public bool LastDeep { get; private set; }
+        public Task<CodeRetrievalResult> RetrieveAsync(string query, IReadOnlyList<string> projectIds, bool deep, CancellationToken token)
+        {
+            LastDeep = deep;
+            return RetrieveAsync(query, projectIds, token);
+        }
         public Task<CodeRetrievalResult> ForRequestAsync(string query, TicketRequest request, CancellationToken token, CodeQueryEmbedding? reusable = null) => throw new NotSupportedException();
         public Task<CodeRetrievalResult> ForBackgroundPollingAsync(string query, TicketRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<CodeRetrievalResult> RetrieveAsync(string query, IReadOnlyList<string> projectIds, CancellationToken token)

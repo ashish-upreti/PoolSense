@@ -19,7 +19,7 @@ public interface ICodeChatService
 
 /// <summary>Answers free-form questions about the indexed repositories of one or more applications and persists the conversation.</summary>
 public sealed class CodeChatService(ICodeKnowledgeService knowledge, ICodeChatHistoryStore history, IProjectRepository projects,
-    ILLMService llm, IUserActivityAuditLogger audit) : ICodeChatService
+    ILLMService llm, IUserActivityAuditLogger audit, Microsoft.Extensions.Options.IOptions<CodeRAGOptions>? options = null) : ICodeChatService
 {
     private const int MaxHistoryTurns = 8;
     private const int MaxNamedApplications = 20;
@@ -29,18 +29,32 @@ public sealed class CodeChatService(ICodeKnowledgeService knowledge, ICodeChatHi
 
     public async Task<CodeAskResponse> AskAsync(string user, CodeChatScope scope, CodeAskRequest request, CancellationToken token)
     {
+        if (!request.IsDeep) return await AskCoreAsync(user, scope, request, token, token);
+        // The limit covers search and answer generation together; a finished answer is still saved after it passes.
+        var seconds = (options?.Value.DeepSearch ?? new()).RequestTimeoutSeconds;
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(token);
+        limit.CancelAfter(TimeSpan.FromSeconds(seconds));
+        try { return await AskCoreAsync(user, scope, request, token, limit.Token); }
+        catch (OperationCanceledException) when (limit.IsCancellationRequested && !token.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Deep Search did not finish within {seconds} seconds. Ask a narrower question, reduce the application scope, or use Quick Search.");
+        }
+    }
+
+    private async Task<CodeAskResponse> AskCoreAsync(string user, CodeChatScope scope, CodeAskRequest request, CancellationToken token, CancellationToken workToken)
+    {
         var question = request.Question.Trim();
         if (question.Length == 0) throw new ArgumentException("A question is required.");
         var timings = new CodeTimings("chat");
         IReadOnlyList<ProjectConfig> selected;
         using (timings.Measure("scope"))
-            selected = await ResolveAsync(scope, token);
+            selected = await ResolveAsync(scope, workToken);
         var projectIds = selected.Select(project => project.ProjectId).ToArray();
 
         var retrievalQuery = CodeQueryPlan.Contextualize(question, request.History);
         CodeRetrievalResult retrieval;
         using (timings.Measure("retrieval"))
-            retrieval = await knowledge.RetrieveAsync(retrievalQuery, projectIds, token);
+            retrieval = await knowledge.RetrieveAsync(retrievalQuery, projectIds, request.IsDeep, workToken);
 
         string answer;
         if (retrieval.Status == "not-connected")
@@ -70,9 +84,33 @@ public sealed class CodeChatService(ICodeKnowledgeService knowledge, ICodeChatHi
                     Prior conversation is context only; use only the current source registry for graph evidence.
                     """;
             }
+            if (request.IsDeep)
+            {
+                prompt += """
+
+                    Search depth (system metadata, not evidence): deep. More evidence than usual is supplied; work through all of it.
+                    Give a detailed, structured explanation with short headings: entry points, call paths, the data and configuration involved,
+                    error handling, and how the parts relate. Cite each material claim with its exact source link.
+                    End with a "What remains uncertain" section listing what the evidence does not establish.
+                    Do not invent runtime behavior or dependencies.
+                    """;
+                prompt += plan.IsGraph
+                    ? """
+
+                    Make processGraph as complete as the evidence supports, within its hard limits: the whole graph is discarded
+                    above 12 nodes, 20 edges or 5 gaps, when a node label exceeds 72 characters, when a gap is anything other
+                    than one plain-text string, or when any node or edge lacks a current source ID. Merge minor steps and
+                    shorten labels rather than exceed a limit; put the detail and further uncertainties in the answer text instead.
+                    """
+                    : plan.Needed ? "" : """
+
+                    Include one Mermaid flowchart of the main code path or relationships that the evidence establishes,
+                    following the rich-format rules above. Omit it only when the evidence establishes no relationships.
+                    """;
+            }
             if (notice.Length > 0) prompt += $"\nCurrent code-search coverage (system metadata, not evidence): {notice}";
             using (timings.Measure("generation"))
-                answer = (await llm.GetResponseAsync(prompt)).Trim();
+                answer = (request.IsDeep ? await llm.GetResponseAsync(prompt, workToken) : await llm.GetResponseAsync(prompt)).Trim();
             if (plan.IsGraph) answer = BuildGraphAnswer(answer, plan, retrieval.Documents);
             if (notice.Length > 0) answer = $"> {notice}\n\n{answer}";
         }
@@ -81,10 +119,11 @@ public sealed class CodeChatService(ICodeKnowledgeService knowledge, ICodeChatHi
         using (timings.Measure("history"))
             sessionId = await history.AppendExchangeAsync(user, request.SessionId, scope, question, answer, retrieval.Documents, token);
         var scopeDescription = scope.IsAll ? "all" : string.Join(',', scope.ProjectIds);
-        await audit.LogAsync("AskCodeChat", "CodeChatSession", sessionId, $"Scope={scopeDescription}; Citations={retrieval.Documents.Count}; Status={retrieval.Status}", cancellationToken: token);
+        await audit.LogAsync("AskCodeChat", "CodeChatSession", sessionId, $"Scope={scopeDescription}; Mode={(request.IsDeep ? "deep" : "quick")}; Citations={retrieval.Documents.Count}; Status={retrieval.Status}", cancellationToken: token);
         return new(scope.ProjectId ?? "", sessionId, question, answer, DateTimeOffset.UtcNow, retrieval.Status, retrieval.Documents)
         {
             CodeSearchCoverage = retrieval.Coverage,
+            SearchMode = request.IsDeep ? "deep" : "quick",
             ProjectIds = scope.ProjectIds,
             TimingsMs = timings.Snapshot()
         };

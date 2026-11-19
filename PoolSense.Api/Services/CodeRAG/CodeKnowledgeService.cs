@@ -13,6 +13,9 @@ public interface ICodeKnowledgeService
     Task<CodeRetrievalResult> ForRequestAsync(string query, TicketRequest request, CancellationToken token, CodeQueryEmbedding? reusable = null);
     Task<CodeRetrievalResult> ForBackgroundPollingAsync(string query, TicketRequest request, CancellationToken token);
     Task<CodeRetrievalResult> RetrieveAsync(string query, IReadOnlyList<string> projectIds, CancellationToken token);
+    /// <summary>Deep retrieval searches every repository in scope with the larger CodeRAG:DeepSearch limits.</summary>
+    Task<CodeRetrievalResult> RetrieveAsync(string query, IReadOnlyList<string> projectIds, bool deep, CancellationToken token) =>
+        RetrieveAsync(query, projectIds, token);
 }
 
 public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRepository projects, IGitHubCodeClient github, IManagedGitHubAccess access,
@@ -74,8 +77,11 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
     public Task<CodeRetrievalResult> RetrieveAsync(string query, IReadOnlyList<string> projectIds, CancellationToken token) =>
         RetrieveCoreAsync(query, projectIds, null, token, backgroundPolling: false);
 
+    public Task<CodeRetrievalResult> RetrieveAsync(string query, IReadOnlyList<string> projectIds, bool deep, CancellationToken token) =>
+        RetrieveCoreAsync(query, projectIds, null, token, backgroundPolling: false, deep);
+
     private async Task<CodeRetrievalResult> RetrieveCoreAsync(string query, IReadOnlyList<string> projectIds, CodeQueryEmbedding? reusable,
-        CancellationToken token, bool backgroundPolling)
+        CancellationToken token, bool backgroundPolling, bool deep = false)
     {
         token.ThrowIfCancellationRequested();
         var user = backgroundPolling ? SharedGitHubConnection.ServiceIdentity : CodeUser.Name(context.HttpContext?.User);
@@ -83,14 +89,23 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         var timings = new CodeTimings("retrieval");
         var plan = CodeQueryPlan.Create(query);
         var queryTerms = CodeCandidateSelection.Terms(query);
+        // Deep search drops the symbol-query caps and repository shortlist; its limits never fall below the quick ones.
+        var depth = settings.DeepSearch;
+        var deadlineSeconds = deep ? Math.Max(settings.SearchDeadlineSeconds, depth.DeadlineSeconds) : settings.SearchDeadlineSeconds;
+        var candidateLimit = deep ? Math.Max(settings.GlobalCandidateLimit, depth.GlobalCandidateLimit) : settings.GlobalCandidateLimit;
+        var candidatesPerRepository = deep ? Math.Max(settings.CandidatesPerRepository, depth.CandidatesPerRepository) : plan.Candidates(settings.CandidatesPerRepository);
+        var maxSpans = deep ? Math.Max(settings.MaxEvidenceSpans, depth.MaxEvidenceSpans) : plan.Spans(settings.MaxEvidenceSpans);
+        var maxCharacters = deep ? Math.Max(settings.ContextCharacters, depth.ContextCharacters) : plan.Characters(settings.ContextCharacters);
+        var routing = settings.RepositoryRoutingEnabled && !deep;
+        var symbolOnly = plan.IsSymbol && !deep;
         if (!settings.Enabled) return new("disabled", []);
         if (user.Length == 0) return new("not-authenticated", []);
         if (projectIds.Count == 0) return new("not-scoped", []);
         token.ThrowIfCancellationRequested();
         if (context.HttpContext is { Response.HasStarted: false } httpContext) httpContext.Response.Headers.CacheControl = "no-store";
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(settings.SearchDeadlineSeconds));
-        var candidates = new CodeCandidateBuffer(query, settings.GlobalCandidateLimit);
+        deadline.CancelAfter(TimeSpan.FromSeconds(deadlineSeconds));
+        var candidates = new CodeCandidateBuffer(query, candidateLimit);
         var authorized = new ConcurrentDictionary<string, CodeRepository>();
         var authorizationChecks = new ConcurrentDictionary<string, byte>();
         var searched = new ConcurrentDictionary<string, byte>();
@@ -98,6 +113,7 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         var semanticStates = new ConcurrentDictionary<string, byte>();
         var semanticCoverage = new ConcurrentDictionary<string, CodeSemanticCoverage>();
         var knowledgeStates = new ConcurrentDictionary<string, byte>();
+        var corrections = new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
         var warnings = new ConcurrentDictionary<string, byte>();
         var failed = 0;
         var notReady = 0;
@@ -118,7 +134,7 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
-            logger?.LogWarning("Code search deadline reached while loading the repository catalog (limit {DeadlineSeconds}s).", settings.SearchDeadlineSeconds);
+            logger?.LogWarning("Code search deadline reached while loading the repository catalog (limit {DeadlineSeconds}s).", deadlineSeconds);
             return new("timed-out", [])
             {
                 Coverage = new() { DeadlineExceeded = true, AuthorizationComplete = false, TimingsMs = timings.Snapshot(), QueryKind = plan.Kind }
@@ -211,7 +227,7 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                     if (okf.Errors.Count > 0)
                         warnings.TryAdd("Some project knowledge is incomplete, stale or invalid; current indexed source remains authoritative.", 0);
                 }
-                if (allowDeferral && settings.RepositoryRoutingEnabled)
+                if (allowDeferral && routing)
                 {
                     prepared[repository.Id] = (okf, knownVectorCount);
                     routingScores[repository.Id] = 2d * queryTerms.Count(term => repository.FullName.Contains(term, StringComparison.OrdinalIgnoreCase))
@@ -226,9 +242,11 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                 // SQLite supports this cross-thread interrupt; dispose registration BEFORE the connection.
                 using var interrupt = ct.Register(() => { if (database.Handle is { } handle) SQLitePCL.raw.sqlite3_interrupt(handle); });
                 IReadOnlyList<Symbol> spans;
+                var retriever = new Retriever();
                 using (timings.Measure("lexicalGraph"))
-                    spans = new Retriever().Retrieve(query, database, files.Source(repository), plan.Candidates(settings.CandidatesPerRepository),
+                    spans = retriever.Retrieve(query, database, files.Source(repository), candidatesPerRepository,
                         Retriever.MaxContextChars, token: ct);
+                foreach (var (word, corrected) in retriever.Corrections) corrections.TryAdd(word, corrected);
                 var relations = plan.IsWorkflow ? ReadRelationships(database, files.Source(repository), spans, ct) : [];
                 for (var index = 0; index < spans.Count; index++) candidates.Add(new(repository, spans[index], LexicalRank: index + 1)
                 {
@@ -241,7 +259,7 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                     if (knownVectorCount != 0 && File.Exists(Path.Combine(files.Folder(repository), CodeSemanticIndex.ArtifactName)))
                     {
                         semanticEligible.TryAdd(repository.Id, 0);
-                        if (!plan.IsSymbol) _ = semanticQuery.Value;
+                        if (!symbolOnly) _ = semanticQuery.Value;
                     }
                     else semanticStates.TryAdd(knownVectorCount == 0 ? "empty-index" : "missing-index", 0);
                 }
@@ -265,7 +283,7 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         try
         {
             await Parallel.ForEachAsync(repositories, parallel, (repository, ct) => SearchRepository(repository, true, true, ct));
-            if (settings.RepositoryRoutingEnabled)
+            if (routing)
             {
                 var shortlist = deferred.Where(repository => routingScores.GetValueOrDefault(repository.Id) > 0)
                     .OrderByDescending(repository => routingScores[repository.Id])
@@ -285,7 +303,7 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                 await Parallel.ForEachAsync(remaining, parallel,
                     (repository, ct) => SearchRepository(repository, false, false, ct));
             }
-            if (plan.IsSymbol && !semanticEligible.IsEmpty && !candidates.Any(plan.MatchesIdentifier))
+            if (symbolOnly && !semanticEligible.IsEmpty && !candidates.Any(plan.MatchesIdentifier))
                 _ = semanticQuery.Value;
             if (semanticQuery.IsValueCreated)
             {
@@ -383,27 +401,33 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
         var valid = candidates.Where(candidate => StillScoped(candidate.Repository)
             && current[candidate.Repository.Id].Generation == candidate.Repository.Generation).ToArray();
         if (valid.Length < candidates.Count) warnings.TryAdd("Repository snapshots changed during search; obsolete candidates were excluded.", 0);
+        // Rank evidence with the spellings the repository indexes actually contain.
+        var selectionQuery = corrections.IsEmpty ? query
+            : System.Text.RegularExpressions.Regex.Replace(query, "[A-Za-z_][A-Za-z_0-9]*", word => corrections.GetValueOrDefault(word.Value, word.Value));
         IReadOnlyList<CodeEvidence> documents;
         using (timings.Measure("selection"))
-            documents = CodeCandidateSelection.Select(query, valid, plan.Spans(settings.MaxEvidenceSpans), plan.Characters(settings.ContextCharacters));
+            documents = CodeCandidateSelection.Select(selectionQuery, valid, maxSpans, maxCharacters);
         var available = authorized.Values.Where(StillScoped).ToArray();
         var incomplete = timedOut || failed > 0 || notReady > 0 || available.Any(repository => !searched.ContainsKey(repository.Id))
             || valid.Length < candidates.Count;
-        if (available.Any(repository => !searched.ContainsKey(repository.Id)) && settings.RepositoryRoutingEnabled)
+        if (available.Any(repository => !searched.ContainsKey(repository.Id)) && routing)
             warnings.TryAdd("Only shortlisted authorized repositories were searched; broader repositories remain eligible.", 0);
         var status = incomplete ? documents.Count > 0 ? "partial" : timedOut ? "timed-out" : notReady > 0 ? "not-ready" : "failed"
             : documents.Count > 0 ? stale > 0 ? "stale" : "ready"
             : available.Length == 0 ? "no-accessible-repositories" : "no-accessible-matches";
-        if (semantic?.Enabled == true && semanticStates.Keys.Any(state => state is not ("disabled" or "ready" or "reused" or "not-used")))
+        var vectorCoverage = available.Where(repository => searched.ContainsKey(repository.Id) && semanticCoverage.ContainsKey(repository.Id))
+            .Select(repository => semanticCoverage[repository.Id]).ToArray();
+        var semanticTargetReached = vectorCoverage.Length > 0 &&
+            vectorCoverage.Length == available.Count(repository => searched.ContainsKey(repository.Id)) && vectorCoverage.All(coverage => coverage.TargetReached);
+        var semanticStatus = semantic?.Enabled == true ? string.Join(", ", semanticStates.Keys.Order()) is { Length: > 0 } states ? states : "not-used" : "disabled";
+        if (CodeRetrievalMessages.SemanticLimited(semanticStatus, semanticTargetReached))
             warnings.TryAdd("Semantic index coverage is limited; lexical and graph evidence remains available.", 0);
         if (candidates.Limited) warnings.TryAdd("The global candidate budget was reached; top-ranked evidence is shown, not every matching source span.", 0);
         token.ThrowIfCancellationRequested();
-        var vectorCoverage = available.Where(repository => searched.ContainsKey(repository.Id) && semanticCoverage.ContainsKey(repository.Id))
-            .Select(repository => semanticCoverage[repository.Id]).ToArray();
         if (timedOut)
             logger?.LogWarning(
                 "Code search deadline reached (limit {DeadlineSeconds}s, searched {SearchedRepositories}/{AuthorizedRepositories}, access complete {AuthorizationComplete}). Stage timings ms: {StageTimingsMs}",
-                settings.SearchDeadlineSeconds, available.Count(repository => searched.ContainsKey(repository.Id)), available.Length,
+                deadlineSeconds, available.Count(repository => searched.ContainsKey(repository.Id)), available.Length,
                 authorizationComplete, System.Text.Json.JsonSerializer.Serialize(timings.Snapshot()));
         return new(status, documents)
         {
@@ -415,12 +439,11 @@ public sealed class CodeKnowledgeService(ICodeRepositoryStore store, IProjectRep
                 SearchedRepositories = available.Count(repository => searched.ContainsKey(repository.Id)),
                 FailedRepositories = failed, AuthorizationComplete = authorizationComplete,
                 DeadlineExceeded = timedOut, ExpandedFallback = expanded,
-                SemanticStatus = semantic?.Enabled == true ? string.Join(", ", semanticStates.Keys.Order()) is { Length: > 0 } states ? states : "not-used" : "disabled",
+                SemanticStatus = semanticStatus,
                 SemanticIndexedChunks = vectorCoverage.Sum(coverage => coverage.IndexedChunks),
                 SemanticEligibleChunks = vectorCoverage.Sum(coverage => coverage.EligibleChunks),
                 SemanticTargetChunks = vectorCoverage.Sum(coverage => coverage.TargetChunks),
-                SemanticTargetReached = vectorCoverage.Length > 0 &&
-                    vectorCoverage.Length == available.Count(repository => searched.ContainsKey(repository.Id)) && vectorCoverage.All(coverage => coverage.TargetReached),
+                SemanticTargetReached = semanticTargetReached,
                 KnowledgeStatus = knowledgeStates.Count == 0 ? "not-available" : string.Join(", ", knowledgeStates.Keys.Order()),
                 OldestIndexedAt = available.Where(repository => repository.LastIndexedAt is not null).Select(repository => repository.LastIndexedAt).Min(),
                 Warnings = warnings.Keys.Order().ToArray()

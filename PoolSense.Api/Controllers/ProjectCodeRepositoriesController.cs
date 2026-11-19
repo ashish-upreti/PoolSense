@@ -29,6 +29,7 @@ public sealed class CodeApiFilter(IOptions<CodeRAGOptions> options, ILogger<Code
         {
             CodeAccessException access => (403, access.Message),
             KeyNotFoundException => (404, "Repository or project not found."),
+            TimeoutException timeout => (504, timeout.Message),
             ArgumentException argument => (400, argument.Message),
             InvalidOperationException => (409, "Repository changed or is busy. Reload and retry."),
             SqlException sql when sql.Number is 2601 or 2627 => (409, "Repository is already configured."),

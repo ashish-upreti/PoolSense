@@ -1,10 +1,10 @@
 import { CommonModule } from '@angular/common'
 import { ChangeDetectorRef, Component, ElementRef, Input, OnChanges, OnDestroy, SimpleChanges, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { createElement, GitBranch, Plus, RefreshCw, Pencil, Trash2 } from 'lucide'
+import { createElement, GitBranch, Plus, Pencil, Trash2 } from 'lucide'
 import { ApiService, CodeRepository } from './api.service'
 
-const repositoryIcons = { branch: GitBranch, add: Plus, refresh: RefreshCw, edit: Pencil, remove: Trash2 }
+const repositoryIcons = { branch: GitBranch, add: Plus, edit: Pencil, remove: Trash2 }
 
 type RepositoryDraft = {
   key: string
@@ -35,10 +35,8 @@ export class RepositoryIconComponent implements OnChanges {
       <header>
         <h3><app-repo-icon name="branch"></app-repo-icon> Git repositories</h3>
         <div class="actions">
-          <span *ngIf="accessAvailable" class="login" title="GitHub access is managed by the administrator">Managed access · {{ login }}</span>
           <span *ngIf="accessConfigured && !accessAvailable" class="login">Managed access unavailable</span>
           <span *ngIf="!accessConfigured" class="login">Managed access not configured</span>
-          <button type="button" title="Reload managed GitHub access" aria-label="Reload managed GitHub access" (click)="load()" [disabled]="disabled"><app-repo-icon name="refresh"></app-repo-icon></button>
         </div>
       </header>
       <p *ngIf="error" role="alert" class="error">{{ error }}</p>

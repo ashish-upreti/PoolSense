@@ -242,9 +242,15 @@ export class RichResponseComponent implements OnChanges {
   ngOnChanges() {
     this.error = ''
     try {
-      this.blocks = richBlocks(this.content || '').map(block => block.kind === 'markdown'
-        ? { ...block, html: this.sanitizer.bypassSecurityTrustHtml(sanitizeMarkdown(block.source)) }
-        : block)
+      // Unchanged blocks keep their identity, so content that grows does not re-render finished diagrams.
+      const previous = this.blocks
+      this.blocks = richBlocks(this.content || '').map((block, index) => {
+        const existing = previous[index]
+        if (existing && existing.kind === block.kind && existing.language === block.language && existing.source === block.source) return existing
+        return block.kind === 'markdown'
+          ? { ...block, html: this.sanitizer.bypassSecurityTrustHtml(sanitizeMarkdown(block.source)) }
+          : block
+      })
     } catch (error) {
       this.blocks = []
       this.error = error instanceof Error ? error.message : 'Unable to render response.'

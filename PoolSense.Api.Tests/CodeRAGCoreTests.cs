@@ -33,6 +33,29 @@ public sealed class CodeRAGCoreTests : IDisposable
         Assert.Contains(new Retriever().Retrieve("NewClientOperation", refreshed, directory), symbol => symbol.FilePath == "client.ts");
     }
 
+    [Theory]
+    [InlineData("How are indexing and retrieval related?")]
+    [InlineData("How indexing and retreival is related/")]
+    public async Task PlainWords_MatchOtherWordForms_AndMisspellingsAreCorrectedFromTheIndex(string question)
+    {
+        Directory.CreateDirectory(Path.Combine(directory, "Indexing"));
+        Directory.CreateDirectory(Path.Combine(directory, "Search"));
+        await File.WriteAllTextAsync(Path.Combine(directory, "Indexing", "RepositoryIndexer.cs"),
+            "namespace Demo.Indexing { public class RepositoryIndexer { public void IndexAsync() {} } }");
+        await File.WriteAllTextAsync(Path.Combine(directory, "Search", "Retriever.cs"),
+            "namespace Demo.Search { public class Retriever { public void RetrieveAsync() {} } }");
+        await File.WriteAllTextAsync(Path.Combine(directory, "Search", "SearchOptions.cs"),
+            "namespace Demo.Search { public class SearchOptions { /* Retrieval limits. */ public int Limit { get; set; } } }");
+        var database = Path.Combine(directory, "index.sqlite3");
+        await new RepositoryIndexer().IndexAsync(directory, database);
+
+        using var db = GraphStore.Open(database, true);
+        var files = new Retriever().Retrieve(question, db, directory).Select(symbol => symbol.FilePath.Replace('\\', '/')).ToArray();
+
+        Assert.Contains("Search/Retriever.cs", files);
+        Assert.Contains("Indexing/RepositoryIndexer.cs", files);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory)) Directory.Delete(directory, true);

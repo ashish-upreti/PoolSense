@@ -454,7 +454,10 @@ missing/least-covered repositories are prioritized, with at most two jobs and fo
 starts per scheduler cycle. Provider failures keep normal retry backoff rather
 than a paid hot loop. A reached configured target is **not** full-corpus coverage.
 Coverage responses/history expose known indexed/eligible/target counts and whether
-the configured targets are reached. Source/profile changes validate reuse again.
+the configured targets are reached. The "semantic retrieval is limited" notice on
+answers and the matching coverage warning appear only while a repository is below
+its target or semantic retrieval is degraded; a reached target is the steady state
+and is reported through the coverage counts alone. Source/profile changes validate reuse again.
 
 Checkpoint vectors are retained in the private repository `semantic-resume`
 directory, never queried directly. They survive ordinary generation pruning and
@@ -482,6 +485,14 @@ repository refresh action to prepare artifacts incrementally.
     "MaxEvidenceSpans": 12,
     "RepositoryRoutingEnabled": false,
     "RepositoryShortlistSize": 3,
+    "DeepSearch": {
+      "DeadlineSeconds": 60,
+      "RequestTimeoutSeconds": 120,
+      "CandidatesPerRepository": 40,
+      "GlobalCandidateLimit": 512,
+      "MaxEvidenceSpans": 24,
+      "ContextCharacters": 48000
+    },
     "BackgroundConcurrency": 2,
     "BackgroundBatchSize": 4,
     "BackgroundCheckSeconds": 10,
@@ -622,11 +633,30 @@ to production databases.
 
 - Short dependent follow-ups include the previous user question before a single
   retrieval pass. Assistant hypotheses are not promoted into search evidence.
+- Plain English words in a question are searched by stem, so "retrieval" also
+  matches `Retriever` and `RetrieveAsync`, and "indexing" matches `indexer`.
+  Identifiers (mixed case, digits, underscores) stay exact. A word with no indexed
+  match is replaced by the most common indexed word one edit away (two for words
+  of eight or more letters), so "retreival" is searched as "retrieval". Corrections
+  come from each repository's own index vocabulary and are also used when ranking
+  evidence across repositories. No reindex is needed.
 - Queries are classified as `symbol`, `concept` or `workflow`. Exact identifiers
   use indexed symbol-name lookup and skip query embeddings when an exact match is
   found. Symbol queries cap candidates at 12 per repository, evidence at 6 spans
   and context at 12,000 characters (or lower configured limits). Concept/workflow
   queries retain the configured budgets and optional semantic fallback.
+- Repository chat accepts `mode`: `quick` (default) or `deep`. Deep search uses the
+  `CodeRAG:DeepSearch` limits, ignores the symbol-query caps, always searches every
+  repository in scope (no routing shortlist) and uses semantic retrieval when an
+  index exists. Each deep evidence limit applies only when larger than its quick-search
+  counterpart. `DeepSearch.DeadlineSeconds` (default 60, at most 300) bounds the search
+  stage; `DeepSearch.RequestTimeoutSeconds` (default 120, 10-300) bounds the whole
+  request including answer generation. A request over that limit returns 504 with an
+  explanatory message and saves nothing. Deep answers use the same model request as
+  quick answers (no `max_tokens`, which the configured model rejects) with added
+  instructions for a detailed explanation, a diagram and an uncertainty section.
+  Quick responses keep the existing retrieval and generation path. Ticket triage and
+  background polling always use quick search.
 - With `RepositoryRoutingEnabled` enabled, authorized repository/knowledge scores
   determine a stable shortlist, independent of request completion order. Workflow
   questions and insufficient term coverage broaden the search. Routing defaults
