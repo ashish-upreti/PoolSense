@@ -10,6 +10,8 @@ New to RAG? Read [How PoolSense CodeRAG Works](CodeRAG-Technical-Guide.md) for a
 
 ## Watch the walkthrough
 
+In PoolSense, open **What’s new** in the sidebar to watch the walkthrough with optional English captions.
+
 [![PoolSense walkthrough video poster](docs/media/poolsense-walkthrough-poster.jpg)](docs/media/poolsense-walkthrough.mp4)
 
 **A four-minute product tour**: incident triage, evidence and follow-ups, saved conversation history, Application Configuration, scoped Code Repositories, filtered Pool Recommendations, and Application Feedback with its All time insights view. Narration and captions are included — captions: [poolsense-walkthrough-captions.vtt](docs/media/poolsense-walkthrough-captions.vtt). Narration is locally generated synthetic speech. All on-screen data is illustrative demo data, not production records; GitHub and API responses in the recording are mocked.

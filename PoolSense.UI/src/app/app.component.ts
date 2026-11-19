@@ -92,7 +92,9 @@ type FeedbackState = {
   selectedTicketId: string
 }
 
-type AppSection = 'main' | 'poolRecommendations' | 'projectConfig' | 'codeRepositories' | 'applicationFeedback'
+type AppSection = 'main' | 'poolRecommendations' | 'projectConfig' | 'codeRepositories' | 'applicationFeedback' | 'whatsNew'
+
+const whatsNewSeenKey = 'poolsense.whats-new.v3.0-coderag.seen'
 
 type GitHubAccessStatus = { configured: boolean; available: boolean; login: string | null; message: string }
 
@@ -317,6 +319,15 @@ export class AppComponent implements OnInit, OnDestroy {
   selectedGroupIds: string[] = []
   scopeAddSelectValue = ''
   activeSection: AppSection = 'main'
+  hasNewRelease = localStorage.getItem(whatsNewSeenKey) !== 'true'
+  isWalkthroughLoaded = false
+  hasWalkthroughError = false
+  @ViewChild('whatsNewHeading') set whatsNewHeading(heading: ElementRef<HTMLElement> | undefined) {
+    heading?.nativeElement.focus()
+  }
+  @ViewChild('walkthroughVideo') set walkthroughVideo(video: ElementRef<HTMLVideoElement> | undefined) {
+    video?.nativeElement.focus()
+  }
   isSidebarCollapsed = true
   isDark = localStorage.getItem('theme') === 'dark'
   projects: ProjectConfig[] = []
@@ -1183,7 +1194,16 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   setActiveSection(section: AppSection) {
+    if (section !== 'whatsNew' && this.activeSection === 'whatsNew') {
+      this.isWalkthroughLoaded = false
+      this.hasWalkthroughError = false
+    }
+
     this.activeSection = section
+    if (section === 'whatsNew') {
+      this.dismissWhatsNewBadge()
+    }
+
     if (section === 'main') {
       if (/^\/Pool\//i.test(window.location.pathname)) {
         window.history.pushState({}, '', '/')
@@ -1213,6 +1233,25 @@ export class AppComponent implements OnInit, OnDestroy {
       this.startCodeRepoPolling()
     } else {
       this.stopCodeRepoPolling()
+    }
+  }
+
+  dismissWhatsNewBadge() {
+    if (!this.hasNewRelease) return
+    this.hasNewRelease = false
+    try {
+      localStorage.setItem(whatsNewSeenKey, 'true')
+    } catch (error) {
+      console.warn('Could not save the What’s new badge preference.', error)
+    }
+  }
+
+  openMainChatHistory() {
+    this.setActiveSection('main')
+    if (this.isNarrowViewport) {
+      this.isChatHistoryDrawerOpen = true
+    } else {
+      this.isChatHistoryCollapsed = false
     }
   }
 
