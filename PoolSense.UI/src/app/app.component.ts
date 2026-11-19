@@ -94,12 +94,6 @@ type FeedbackState = {
 
 type AppSection = 'main' | 'poolRecommendations' | 'projectConfig' | 'codeRepositories' | 'applicationFeedback'
 
-type TelemetryDatum = {
-  name: string
-  value: number
-  color: string
-}
-
 type GitHubAccessStatus = { configured: boolean; available: boolean; login: string | null; message: string }
 
 type CodeChatMessage = {
@@ -519,27 +513,6 @@ export class AppComponent implements OnInit, OnDestroy {
 
   get confidence() {
     return this.insights ? Math.round(this.insights.confidence * 100) : 0
-  }
-
-  get telemetry(): TelemetryDatum[] {
-    if (!this.insights) {
-      return []
-    }
-
-    const avgSimilarity =
-      this.insights.similarIncidents.length > 0
-        ? Math.round(
-            (this.insights.similarIncidents.reduce((sum, incident) => sum + incident.similarity, 0) /
-              this.insights.similarIncidents.length) *
-              100,
-          )
-        : 0
-
-    return [
-      { name: 'Confidence', value: this.confidence, color: '#6366f1' },
-      { name: 'Incidents', value: avgSimilarity, color: '#818cf8' },
-      { name: 'Pattern fit', value: Math.min(this.insights.failurePatternFrequency * 10, 100), color: '#a5b4fc' },
-    ]
   }
 
   get patterns() {
