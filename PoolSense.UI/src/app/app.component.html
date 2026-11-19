@@ -101,25 +101,6 @@
           </span>
         </button>
 
-        <div class="whats-new-nav">
-          <button #whatsNewNav type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'whatsNew'" (click)="setActiveSection('whatsNew')" [attr.aria-pressed]="activeSection === 'whatsNew'" [attr.aria-label]="hasNewRelease ? 'What’s new (New)' : 'What’s new'" [attr.title]="isSidebarCollapsed ? 'What’s new' : null">
-            <span class="sidebar-nav-icon whats-new-nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 2l2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2z"></path>
-              </svg>
-              <span *ngIf="isSidebarCollapsed && hasNewRelease" class="whats-new-dot"></span>
-            </span>
-            <span *ngIf="!isSidebarCollapsed" class="sidebar-nav-title whats-new-nav-title">
-              What’s new <span *ngIf="hasNewRelease" class="whats-new-badge" aria-hidden="true">New</span>
-            </span>
-          </button>
-          <button *ngIf="hasNewRelease" type="button" class="whats-new-dismiss" aria-label="Dismiss What’s new badge" title="Dismiss New badge" (click)="dismissWhatsNewBadge(); whatsNewNav.focus()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-              <path d="M6 6l12 12M18 6L6 18"></path>
-            </svg>
-          </button>
-        </div>
-
         <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'poolRecommendations'" (click)="setActiveSection('poolRecommendations')" [attr.aria-pressed]="activeSection === 'poolRecommendations'" aria-label="Open Pool Recommendations" [attr.title]="isSidebarCollapsed ? 'Pool Recommendations' : null">
           <span class="sidebar-nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -190,6 +171,25 @@
             <span class="sidebar-nav-copy">Capture overall product feedback with submitter details for tracking in PoolSense.</span>
           </span>
         </button>
+
+        <div class="whats-new-nav">
+          <button #whatsNewNav type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'whatsNew'" (click)="setActiveSection('whatsNew')" [attr.aria-pressed]="activeSection === 'whatsNew'" [attr.aria-label]="hasNewRelease ? 'What’s new (New)' : 'What’s new'" [attr.title]="isSidebarCollapsed ? 'What’s new' : null">
+            <span class="sidebar-nav-icon whats-new-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2l2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2z"></path>
+              </svg>
+              <span *ngIf="isSidebarCollapsed && hasNewRelease" class="whats-new-dot"></span>
+            </span>
+            <span *ngIf="!isSidebarCollapsed" class="sidebar-nav-title whats-new-nav-title">
+              What’s new <span *ngIf="hasNewRelease" class="whats-new-badge" aria-hidden="true">New</span>
+            </span>
+          </button>
+          <button *ngIf="hasNewRelease" type="button" class="whats-new-dismiss" aria-label="Dismiss What’s new badge" title="Dismiss New badge" (click)="dismissWhatsNewBadge(); whatsNewNav.focus()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18"></path>
+            </svg>
+          </button>
+        </div>
       </nav>
 
       <div *ngIf="!isSidebarCollapsed" class="sidebar-summary">
