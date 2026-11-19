@@ -23,6 +23,11 @@
                 "glob": "**/*",
                 "input": "public",
                 "output": "/"
+              },
+              {
+                "glob": "poolsense-walkthrough{.mp4,-poster.jpg,-captions.vtt}",
+                "input": "../docs/media",
+                "output": "/media/"
               }
             ],
             "styles": ["src/index.css", "src/App.css"],

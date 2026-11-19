@@ -311,7 +311,9 @@ try
     if (Directory.Exists(app.Environment.WebRootPath))
     {
         app.UseDefaultFiles();
-        app.UseStaticFiles();
+        var contentTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+        contentTypes.Mappings[".vtt"] = "text/vtt";
+        app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes });
     }
 
     app.UseAuthentication();

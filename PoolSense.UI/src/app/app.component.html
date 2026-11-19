@@ -101,6 +101,25 @@
           </span>
         </button>
 
+        <div class="whats-new-nav">
+          <button #whatsNewNav type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'whatsNew'" (click)="setActiveSection('whatsNew')" [attr.aria-pressed]="activeSection === 'whatsNew'" [attr.aria-label]="hasNewRelease ? 'What’s new (New)' : 'What’s new'" [attr.title]="isSidebarCollapsed ? 'What’s new' : null">
+            <span class="sidebar-nav-icon whats-new-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2l2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2z"></path>
+              </svg>
+              <span *ngIf="isSidebarCollapsed && hasNewRelease" class="whats-new-dot"></span>
+            </span>
+            <span *ngIf="!isSidebarCollapsed" class="sidebar-nav-title whats-new-nav-title">
+              What’s new <span *ngIf="hasNewRelease" class="whats-new-badge" aria-hidden="true">New</span>
+            </span>
+          </button>
+          <button *ngIf="hasNewRelease" type="button" class="whats-new-dismiss" aria-label="Dismiss What’s new badge" title="Dismiss New badge" (click)="dismissWhatsNewBadge(); whatsNewNav.focus()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18"></path>
+            </svg>
+          </button>
+        </div>
+
         <button type="button" class="sidebar-nav-item" [class.sidebar-nav-item-active]="activeSection === 'poolRecommendations'" (click)="setActiveSection('poolRecommendations')" [attr.aria-pressed]="activeSection === 'poolRecommendations'" aria-label="Open Pool Recommendations" [attr.title]="isSidebarCollapsed ? 'Pool Recommendations' : null">
           <span class="sidebar-nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -1080,6 +1099,55 @@
     </ng-container>
 
     <ng-template #nonMainView>
+      <section *ngIf="activeSection === 'whatsNew'; else existingNonMainView" class="workspace-panel project-config-screen whats-new-screen" aria-labelledby="whats-new-title">
+        <header class="project-config-screen-header">
+          <div>
+            <p class="panel-kicker">Release highlights</p>
+            <h2 #whatsNewHeading id="whats-new-title" tabindex="-1">What’s new in PoolSense</h2>
+          </div>
+        </header>
+
+        <div class="whats-new-grid">
+          <article class="whats-new-card">
+            <h3>Code Repositories</h3>
+            <p>Ask questions about indexed source code across all applications or just the ones you select. Code citations show which files support the answer.</p>
+            <button type="button" class="feedback-button feedback-button-secondary" (click)="setActiveSection('codeRepositories')">Open Code Repositories</button>
+          </article>
+          <article class="whats-new-card">
+            <h3>Code evidence in main search</h3>
+            <p>When relevant indexed code is available, PoolSense can cite it alongside Pool incident history and Wiki documents.</p>
+            <button type="button" class="feedback-button feedback-button-secondary" (click)="setActiveSection('main')">Go to main search</button>
+          </article>
+          <article class="whats-new-card">
+            <h3>Saved chat history</h3>
+            <p>Reopen a saved conversation and ask follow-up questions without starting over.</p>
+            <button type="button" class="feedback-button feedback-button-secondary" (click)="openMainChatHistory()">Open chat history</button>
+          </article>
+          <article class="whats-new-card">
+            <h3>Diagrams in answers</h3>
+            <p>Supported answers can include diagrams that show how steps or components fit together.</p>
+          </article>
+        </div>
+
+        <article class="whats-new-card whats-new-tour">
+          <h3 id="walkthrough-title">Watch the 4-minute walkthrough</h3>
+          <p>Product tour with illustrative demo data. English captions are available.</p>
+          <video *ngIf="isWalkthroughLoaded; else walkthroughPoster" #walkthroughVideo
+            src="media/poolsense-walkthrough.mp4" poster="media/poolsense-walkthrough-poster.jpg"
+            controls preload="metadata" aria-labelledby="walkthrough-title" (error)="hasWalkthroughError = true">
+            <track kind="captions" src="media/poolsense-walkthrough-captions.vtt" srclang="en" label="English" default>
+            Your browser does not support embedded video.
+          </video>
+          <ng-template #walkthroughPoster>
+            <img src="media/poolsense-walkthrough-poster.jpg" alt="" width="1280" height="720" loading="lazy">
+            <button type="button" class="feedback-button feedback-button-secondary" (click)="isWalkthroughLoaded = true">Load walkthrough video</button>
+          </ng-template>
+          <p *ngIf="hasWalkthroughError" role="status">The walkthrough video could not load.</p>
+        </article>
+      </section>
+    </ng-template>
+
+    <ng-template #existingNonMainView>
       <ng-container *ngIf="activeSection === 'poolRecommendations'; else nonPoolRecommendationView">
       <section class="workspace-panel project-config-screen pool-recommendations-screen">
         <div class="project-config-screen-header">
