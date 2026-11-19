@@ -6,6 +6,8 @@ PoolSense combines pool ticket history, project-scoped NYRA Wiki documents, and 
 
 See [GitHub Code Knowledge setup](CodeKnowledge.md) for PAT configuration, database setup, hourly refresh, security boundaries, and verification steps.
 
+New to RAG? Read [How PoolSense CodeRAG Works](CodeRAG-Technical-Guide.md) for a plain-language technical walkthrough with an end-to-end example.
+
 ## Watch the walkthrough
 
 [![PoolSense walkthrough video poster](docs/media/poolsense-walkthrough-poster.jpg)](docs/media/poolsense-walkthrough.mp4)

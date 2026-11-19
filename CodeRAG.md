@@ -1,5 +1,7 @@
 # CodeRAG: This Quarter's Focus
 
+For a beginner-friendly explanation of the implementation, see [How PoolSense CodeRAG Works](CodeRAG-Technical-Guide.md).
+
 PoolSense is expanding beyond historical pool tickets and Wiki knowledge to help teams connect an incident to the code behind it. This quarter's focus is on two ways to use project code as evidence: in pool troubleshooting and in a dedicated DiggingIn experience.
 
 ## 1. CodeRAG for Pool Troubleshooting
