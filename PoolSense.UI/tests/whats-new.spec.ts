@@ -21,7 +21,9 @@ async function openWorkspace(page: Page) {
 test('opens from collapsed navigation by keyboard, clears New across reload, and links to workspace destinations', async ({ page }) => {
   await openWorkspace(page)
   const nav = page.getByRole('navigation', { name: 'Workspace sections' })
+  await expect(nav.locator('.sidebar-nav-item').last()).toHaveAccessibleName('What’s new (New)')
   await page.getByRole('button', { name: 'Expand navigation sidebar' }).click()
+  await expect(nav.locator('.sidebar-nav-item').last()).toHaveAccessibleName('What’s new (New)')
   await expect(nav.getByText('New', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Collapse navigation sidebar' }).click()
   const entry = nav.getByRole('button', { name: navName })
@@ -62,6 +64,25 @@ test('explicitly dismisses the badge without leaving main search and remembers i
   await expect(entry).toHaveAccessibleName('What’s new')
   await expect(dismiss).toHaveCount(0)
 })
+
+for (const theme of ['light', 'dark']) {
+  test(`keeps the release icon distinctive after viewing updates in ${theme} mode`, async ({ page }) => {
+    await openWorkspace(page)
+    await page.evaluate(theme => { document.documentElement.dataset['theme'] = theme }, theme)
+    const entry = page.getByRole('button', { name: navName })
+    const icon = entry.locator('.whats-new-nav-icon')
+    const iconColor = await icon.evaluate(element => getComputedStyle(element).color)
+    const ordinaryIcon = page.getByRole('button', { name: 'Open Pool Recommendations', exact: true }).locator('.sidebar-nav-icon')
+    expect(iconColor).not.toBe(await ordinaryIcon.evaluate(element => getComputedStyle(element).color))
+    await expect(entry.locator('.whats-new-dot')).toBeVisible()
+
+    await entry.click()
+    await expect(entry.locator('.whats-new-dot')).toHaveCount(0)
+    await expect(icon).toHaveCSS('color', iconColor)
+    await page.getByRole('button', { name: 'Go to main search' }).click()
+    await expect(icon).toHaveCSS('color', iconColor)
+  })
+}
 
 for (const width of [1440, 960]) {
   test(`opens chat history at ${width}px instead of toggling it closed`, async ({ page }) => {

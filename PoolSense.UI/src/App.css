@@ -247,6 +247,7 @@
 }
 
 .whats-new-nav {
+  --whats-new-icon-color: #c4b5fd;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -264,14 +265,21 @@
   gap: 0.3rem;
 }
 
-.whats-new-nav-icon {
+[data-theme='light'] .whats-new-nav {
+  --whats-new-icon-color: #6d28d9;
+}
+
+.whats-new-nav .whats-new-nav-icon {
   position: relative;
+  border-color: rgba(139, 92, 246, 0.3);
+  background: rgba(139, 92, 246, 0.14);
+  color: var(--whats-new-icon-color);
 }
 
 .whats-new-badge,
 .whats-new-dot {
-  background: var(--heading-text);
-  color: var(--bubble-bg);
+  background: #fbbf24;
+  color: #422006;
 }
 
 .whats-new-badge {
@@ -286,6 +294,7 @@
   right: 0;
   width: 0.6rem;
   height: 0.6rem;
+  box-shadow: 0 0 0 2px var(--bubble-bg);
   border-radius: 50%;
 }
 
