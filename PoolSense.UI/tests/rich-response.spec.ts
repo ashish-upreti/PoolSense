@@ -229,6 +229,135 @@ test('restored main history on narrow layout renders source safely in both theme
   expect(errors).toEqual([])
 })
 
+for (const width of [1440, 1100, 390]) {
+  test(`reduces application and rich-response typography by five percent at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.addInitScript(() => {
+      const context = CanvasRenderingContext2D.prototype
+      const originalFillText = context.fillText
+      context.fillText = function (text, x, y, maxWidth) {
+        const fonts = ((window as unknown as { __poolsenseChartFonts?: string[] }).__poolsenseChartFonts ??= [])
+        fonts.push(this.font)
+        if (maxWidth === undefined) return originalFillText.call(this, text, x, y)
+        return originalFillText.call(this, text, x, y, maxWidth)
+      }
+    })
+    const source = [
+      '## Typography sample',
+      '| Label | Value |',
+      '|---|---|',
+      '| Status | Ready |',
+      fence('typescript', 'const result = "sample";'),
+      fence('chart', chart('bar')),
+      fence('mermaid', diagrams[0]),
+    ].join('\n\n')
+    const errors = await fixture(page, source)
+    await page.goto(process.env['POOLSENSE_UI_TEST_URL'] ?? 'http://localhost:4200')
+    await page.getByRole('button', { name: 'Open code repositories', exact: true }).click()
+    await page.locator('#code-chat-question').fill('Show typography')
+    await page.locator('.code-rag-composer').getByRole('button', { name: 'Send', exact: true }).click()
+    const transcript = page.locator('.code-rag-transcript')
+    await expect(transcript.locator('.rich-diagram svg')).toHaveCount(1, { timeout: 60000 })
+    await expect(transcript.locator('.rich-chart:not([hidden]) canvas')).toHaveCount(1)
+    await expect(transcript.locator('.rich-response h2')).toHaveText('Typography sample')
+
+    const measurements = await page.evaluate(() => {
+      const selectors = [
+        ':root',
+        '.sidebar-nav-item',
+        '#code-chat-question',
+        '.code-rag-composer button',
+        '.code-rag-history-item-meta',
+        '.code-rag-transcript .rich-response h2',
+        '.code-rag-transcript .rich-response table',
+        '.code-rag-transcript app-rich-block pre code',
+        '.code-rag-transcript .rich-toolbar button',
+        '#font-scale-probe h1',
+        '#font-scale-probe h2',
+        '#font-scale-probe .application-feedback-hero-content h2',
+      ]
+      const probe = document.createElement('div')
+      probe.id = 'font-scale-probe'
+      probe.style.cssText = 'position:fixed;visibility:hidden;inset:0 auto auto 0;'
+      probe.innerHTML = '<h1>Heading</h1><h2>Heading</h2><div class="application-feedback-hero-content"><h2>Heading</h2></div>'
+      document.body.append(probe)
+      const responsiveHeadings = [
+        probe.querySelector('h1')!,
+        probe.querySelector('h2')!,
+        probe.querySelector('.application-feedback-hero-content h2')!,
+      ]
+      const readSizes = () => selectors.map(selector => {
+        const element = document.querySelector(selector)
+        return element ? Number.parseFloat(getComputedStyle(element).fontSize) : NaN
+      })
+      const result = ['dark', 'light'].map(theme => {
+        document.documentElement.dataset['theme'] = theme
+        document.documentElement.style.setProperty('--app-font-scale', '110%')
+        responsiveHeadings[0].style.fontSize = 'clamp(2.35rem, calc(4.4vw / var(--app-ui-scale)), 3.75rem)'
+        responsiveHeadings[1].style.fontSize = 'clamp(1.35rem, calc(2.2vw / var(--app-ui-scale)), 1.9rem)'
+        responsiveHeadings[2].style.fontSize = 'clamp(1.72rem, calc(2vw / var(--app-ui-scale)), 2.28rem)'
+        const baseline = readSizes()
+        responsiveHeadings.forEach(heading => heading.style.removeProperty('font-size'))
+        document.documentElement.style.setProperty('--app-font-scale', '104.5%')
+        const reduced = readSizes()
+        return { baseline, reduced }
+      })
+      probe.remove()
+      return { selectors, result }
+    })
+    for (const { baseline, reduced } of measurements.result) {
+      expect(baseline.every(Number.isFinite)).toBe(true)
+      for (let index = 0; index < baseline.length; index++) {
+        expect(reduced[index] / baseline[index], `${measurements.selectors[index]} (${baseline[index]} -> ${reduced[index]})`).toBeCloseTo(.95, 2)
+      }
+    }
+
+    const chartFonts = await page.evaluate(() =>
+      (window as unknown as { __poolsenseChartFonts?: string[] }).__poolsenseChartFonts ?? [])
+    expect(chartFonts.some(font => font.includes('12.54px'))).toBe(true)
+    expect(chartFonts.some(font => font.includes('16.72px'))).toBe(true)
+    const diagramFonts = await transcript.locator('.rich-diagram svg text').evaluateAll(elements =>
+      elements.map(element => Number.parseFloat(getComputedStyle(element).fontSize)))
+    expect(diagramFonts.some(font => Math.abs(font / 17.6 - .95) < .01)).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+    expect(errors).toEqual([])
+  })
+}
+
+test('login heading, labels, fields, helper text, and button reduce by five percent', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await fixture(page)
+  await page.route('**/api/auth/session', route =>
+    route.fulfill({ status: 401, json: { success: false, message: 'Unauthenticated test fixture.' } }))
+  await page.goto(process.env['POOLSENSE_UI_TEST_URL'] ?? 'http://localhost:4200')
+  const login = page.locator('.auth-card')
+  await expect(login).toBeVisible()
+  const measurements = await page.evaluate(() => {
+    const selectors = [
+      ':root',
+      '.auth-card h1',
+      '.auth-card .panel-kicker',
+      '.auth-card .field-label',
+      '.auth-card input.field-input',
+      '.auth-card .helper-text',
+      '.auth-card button[type=submit]',
+    ]
+    const readSizes = () => selectors.map(selector => {
+      const element = document.querySelector(selector)
+      return element ? Number.parseFloat(getComputedStyle(element).fontSize) : NaN
+    })
+    document.documentElement.style.setProperty('--app-font-scale', '110%')
+    const baseline = readSizes()
+    document.documentElement.style.setProperty('--app-font-scale', '104.5%')
+    const reduced = readSizes()
+    return { baseline, reduced }
+  })
+  expect(measurements.baseline.every(Number.isFinite)).toBe(true)
+  for (let index = 0; index < measurements.baseline.length; index++) {
+    expect(measurements.reduced[index] / measurements.baseline[index]).toBeCloseTo(.95, 2)
+  }
+})
+
 test('repository live and restored chat use the same visual renderer', async ({ page }, testInfo) => {
   test.setTimeout(120000)
   const source = '## Repository flow (conceptual)\n\n' + fence('mermaid', diagrams[0]) + '\n\n' + fence('chart', chart('bar'))

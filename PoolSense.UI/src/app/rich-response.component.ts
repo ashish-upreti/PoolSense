@@ -101,6 +101,8 @@ export class RichBlockComponent implements AfterViewInit, OnChanges, OnDestroy {
         const { Chart, registerables } = await (chartModule ??= import('chart.js'))
         if (!current()) return
         Chart.register(...registerables)
+        const fontScale = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-font-scale')) / 100
+        const chartFont = { family: 'Inter, Segoe UI, sans-serif', size: 12 * fontScale }
         this.chartSpec = spec
         const ink = dark ? '#cbd5e1' : '#334155'
         const configuration: ChartConfiguration = {
@@ -118,10 +120,15 @@ export class RichBlockComponent implements AfterViewInit, OnChanges, OnDestroy {
           },
           options: {
             responsive: true, maintainAspectRatio: false, animation: false,
-            plugins: { legend: { labels: { color: ink, usePointStyle: true } }, title: { display: true, text: spec.title, color: ink } },
+            font: chartFont,
+            plugins: {
+              legend: { labels: { color: ink, usePointStyle: true, font: chartFont } },
+              title: { display: true, text: spec.title, color: ink, font: { ...chartFont, size: 16 * fontScale } },
+              tooltip: { titleFont: chartFont, bodyFont: chartFont, footerFont: chartFont },
+            },
             scales: spec.type === 'pie' ? {} : {
-              x: { ticks: { color: ink }, grid: { color: dark ? '#334155' : '#e2e8f0' } },
-              y: { beginAtZero: true, ticks: { color: ink }, grid: { color: dark ? '#334155' : '#e2e8f0' } },
+              x: { ticks: { color: ink, font: chartFont }, grid: { color: dark ? '#334155' : '#e2e8f0' } },
+              y: { beginAtZero: true, ticks: { color: ink, font: chartFont }, grid: { color: dark ? '#334155' : '#e2e8f0' } },
             },
           },
         }
@@ -140,10 +147,11 @@ export class RichBlockComponent implements AfterViewInit, OnChanges, OnDestroy {
             : ['#e0e7ff', '#cffafe', '#f3e8ff', '#d1fae5', '#fce7f3', '#fef3c7']
           const scales = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`cScale${index}`, palette[index % palette.length]]))
           const scaleLabels = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`cScaleLabel${index}`, ink]))
+          const fontScale = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-font-scale')) / 100
           mermaid.initialize({
             startOnLoad: false, securityLevel: 'strict', theme: 'base',
             themeVariables: {
-              darkMode: dark, fontFamily: 'Inter, Segoe UI, sans-serif',
+              darkMode: dark, fontFamily: 'Inter, Segoe UI, sans-serif', fontSize: `${16 * fontScale}px`,
               primaryColor: palette[0], secondaryColor: palette[1], tertiaryColor: palette[2],
               primaryTextColor: ink, secondaryTextColor: ink, tertiaryTextColor: ink, textColor: ink,
               lineColor: dark ? '#a5b4fc' : '#4f46e5', primaryBorderColor: dark ? '#a5b4fc' : '#6366f1',

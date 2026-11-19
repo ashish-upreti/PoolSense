@@ -3866,7 +3866,7 @@
 
   .application-feedback-hero-content h2 {
     margin: 0;
-    font-size: clamp(1.72rem, calc(2vw / var(--app-ui-scale)), 2.28rem);
+    font-size: clamp(1.72rem, calc(1.9vw / var(--app-ui-scale)), 2.28rem);
     line-height: 1.15;
   }
 

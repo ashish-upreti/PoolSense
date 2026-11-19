@@ -96,6 +96,18 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await addRepository.click()
     await rows.nth(1).getByLabel('Repository URL').fill(secondUrl)
     await rows.nth(1).getByLabel('Branch', { exact: true }).fill('release')
+    const repositoryTypography = await component.evaluate(element => ({
+      root: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+      heading: Number.parseFloat(getComputedStyle(element.querySelector('h3')!).fontSize),
+      access: Number.parseFloat(getComputedStyle(element.querySelector('.login')!).fontSize),
+      label: Number.parseFloat(getComputedStyle(element.querySelector('label')!).fontSize),
+      status: Number.parseFloat(getComputedStyle(element.querySelector('.repo-status')!).fontSize),
+    }))
+    expect(repositoryTypography.root).toBeCloseTo(16.72, 1)
+    expect(repositoryTypography.heading / repositoryTypography.root).toBeCloseTo(.9375, 2)
+    expect(repositoryTypography.access / repositoryTypography.root).toBeCloseTo(.8125, 2)
+    expect(repositoryTypography.label / repositoryTypography.root).toBeCloseTo(.8125, 2)
+    expect(repositoryTypography.status / repositoryTypography.root).toBeCloseTo(.75, 2)
     await expect(component.getByText('Unsaved', { exact: true })).toHaveCount(2)
     await expect(rows).toHaveCount(2)
     await expect(rows.nth(0).getByLabel('Repository URL')).toHaveValue(firstUrl)
