@@ -1005,63 +1005,6 @@
             </ng-container>
           </div>
 
-          <div class="telemetry-block">
-            <div class="card-heading-row">
-              <div>
-                <p class="panel-kicker">System Insights</p>
-                <h3>Telemetry snapshot</h3>
-              </div>
-              <span class="section-count data-mono">LIVE</span>
-            </div>
-
-            <div class="telemetry-chart telemetry-cards" aria-label="Telemetry snapshot">
-              <div class="telemetry-card-item">
-                <div class="telemetry-card-icon" [style.background]="telemetry[0].color">
-                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                  </svg>
-                </div>
-                <div class="telemetry-card-content">
-                  <p class="telemetry-card-label">{{ telemetry[0].name }}</p>
-                  <p class="data-mono telemetry-card-value">{{ telemetry[0].value }}%</p>
-                  <div class="telemetry-card-bar">
-                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[0].value" [style.background]="telemetry[0].color"></span>
-                  </div>
-                </div>
-              </div>
-              <div class="telemetry-card-item">
-                <div class="telemetry-card-icon" [style.background]="telemetry[1].color">
-                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 17"></polyline>
-                    <polyline points="17 6 23 6 23 12"></polyline>
-                  </svg>
-                </div>
-                <div class="telemetry-card-content">
-                  <p class="telemetry-card-label">{{ telemetry[1].name }}</p>
-                  <p class="data-mono telemetry-card-value">{{ telemetry[1].value }}%</p>
-                  <div class="telemetry-card-bar">
-                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[1].value" [style.background]="telemetry[1].color"></span>
-                  </div>
-                </div>
-              </div>
-              <div class="telemetry-card-item">
-                <div class="telemetry-card-icon" [style.background]="telemetry[2].color">
-                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="1"></circle>
-                    <path d="M12 8v-4m0 16v-4m-4-4h-4m16 0h-4m-8.485-7.07l-2.828 2.828m11.314 0l2.828-2.828m-14.314 14.314l-2.828-2.828m11.314 0l2.828 2.828"></path>
-                    <circle cx="12" cy="12" r="8"></circle>
-                  </svg>
-                </div>
-                <div class="telemetry-card-content">
-                  <p class="telemetry-card-label">{{ telemetry[2].name }}</p>
-                  <p class="data-mono telemetry-card-value">{{ telemetry[2].value }}%</p>
-                  <div class="telemetry-card-bar">
-                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[2].value" [style.background]="telemetry[2].color"></span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </section>
         <section class="insight-card evidence-panel">
           <div class="evidence-panel-header">
