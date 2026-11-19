@@ -939,64 +939,51 @@
 
           <div class="confidence-track" aria-hidden="true"><span class="confidence-fill" [style.width.%]="confidence"></span></div>
 
-          <ng-container *ngIf="(insights.failurePattern.system && insights.failurePattern.system !== 'Unknown system') || (insights.failurePattern.component && insights.failurePattern.component !== 'Unknown component') || (insights.failurePattern.resolutionCategory && insights.failurePattern.resolutionCategory !== 'Unclassified') || (insights.failurePattern.ticketId && insights.failurePattern.ticketId !== 'Not linked'); else patternNotClassified">
-            <div class="system-grid">
-              <div class="system-grid-item" [class.system-grid-item-placeholder]="!insights.failurePattern.system || insights.failurePattern.system === 'Unknown system'">
-                <div class="system-grid-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
-                  </svg>
-                </div>
-                <div>
-                  <p class="system-label">System</p>
-                  <p class="data-mono">{{ insights.failurePattern.system || 'Unknown system' }}</p>
-                </div>
+          <div class="system-grid">
+            <div class="system-grid-item">
+              <div class="system-grid-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
               </div>
-              <div class="system-grid-item" [class.system-grid-item-placeholder]="!insights.failurePattern.component || insights.failurePattern.component === 'Unknown component'">
-                <div class="system-grid-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="1"></circle>
-                    <circle cx="19" cy="12" r="1"></circle>
-                    <circle cx="5" cy="12" r="1"></circle>
-                    <path d="M12 5v14M19 9v6M5 9v6"></path>
-                  </svg>
-                </div>
-                <div>
-                  <p class="system-label">Component</p>
-                  <p class="data-mono">{{ insights.failurePattern.component || 'Unknown component' }}</p>
-                </div>
-              </div>
-              <div class="system-grid-item" [class.system-grid-item-placeholder]="!insights.failurePattern.resolutionCategory || insights.failurePattern.resolutionCategory === 'Unclassified'">
-                <div class="system-grid-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <line x1="9" y1="9" x2="15" y2="9"></line>
-                    <line x1="9" y1="15" x2="15" y2="15"></line>
-                  </svg>
-                </div>
-                <div>
-                  <p class="system-label">Resolution Category</p>
-                  <p>{{ insights.failurePattern.resolutionCategory || 'Unclassified' }}</p>
-                </div>
-              </div>
-              <div class="system-grid-item" [class.system-grid-item-placeholder]="!insights.failurePattern.ticketId || insights.failurePattern.ticketId === 'Not linked'">
-                <div class="system-grid-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
-                  </svg>
-                </div>
-                <div>
-                  <p class="system-label">Pattern Ticket</p>
-                  <p class="data-mono">{{ insights.failurePattern.ticketId || 'Not linked' }}</p>
-                </div>
-              </div>
+              <p class="system-label">System</p>
+              <p class="data-mono">{{ insights.failurePattern.system || 'Unknown system' }}</p>
             </div>
-          </ng-container>
-          <ng-template #patternNotClassified>
-            <p class="insight-placeholder-line">System, component and pattern not classified yet</p>
-          </ng-template>
+            <div class="system-grid-item">
+              <div class="system-grid-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="1"></circle>
+                  <circle cx="19" cy="12" r="1"></circle>
+                  <circle cx="5" cy="12" r="1"></circle>
+                  <path d="M12 5v14M19 9v6M5 9v6"></path>
+                </svg>
+              </div>
+              <p class="system-label">Component</p>
+              <p class="data-mono">{{ insights.failurePattern.component || 'Unknown component' }}</p>
+            </div>
+            <div class="system-grid-item">
+              <div class="system-grid-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="9" y1="9" x2="15" y2="9"></line>
+                  <line x1="9" y1="15" x2="15" y2="15"></line>
+                </svg>
+              </div>
+              <p class="system-label">Resolution Category</p>
+              <p>{{ insights.failurePattern.resolutionCategory || 'Unclassified' }}</p>
+            </div>
+            <div class="system-grid-item">
+              <div class="system-grid-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                </svg>
+              </div>
+              <p class="system-label">Pattern Ticket</p>
+              <p class="data-mono">{{ insights.failurePattern.ticketId || 'Not linked' }}</p>
+            </div>
+          </div>
 
           <div class="reasoning-block">
             <div class="reasoning-header">
@@ -1008,11 +995,74 @@
               </div>
               <p class="system-label">Reasoning</p>
             </div>
-            <app-rich-response [content]="insights.reasoning || 'No reasoning details available.'"></app-rich-response>
+            <ng-container *ngIf="getReasoningSegments(insights.reasoning) as reasoningSegments">
+              <ul *ngIf="reasoningSegments.length > 1; else singleReasoningSegment" class="reasoning-list">
+                <li *ngFor="let segment of reasoningSegments">{{ segment }}</li>
+              </ul>
+              <ng-template #singleReasoningSegment>
+                <p class="reasoning-single">{{ reasoningSegments[0] }}</p>
+              </ng-template>
+            </ng-container>
           </div>
 
-        </section>
+          <div class="telemetry-block">
+            <div class="card-heading-row">
+              <div>
+                <p class="panel-kicker">System Insights</p>
+                <h3>Telemetry snapshot</h3>
+              </div>
+              <span class="section-count data-mono">LIVE</span>
+            </div>
 
+            <div class="telemetry-chart telemetry-cards" aria-label="Telemetry snapshot">
+              <div class="telemetry-card-item">
+                <div class="telemetry-card-icon" [style.background]="telemetry[0].color">
+                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  </svg>
+                </div>
+                <div class="telemetry-card-content">
+                  <p class="telemetry-card-label">{{ telemetry[0].name }}</p>
+                  <p class="data-mono telemetry-card-value">{{ telemetry[0].value }}%</p>
+                  <div class="telemetry-card-bar">
+                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[0].value" [style.background]="telemetry[0].color"></span>
+                  </div>
+                </div>
+              </div>
+              <div class="telemetry-card-item">
+                <div class="telemetry-card-icon" [style.background]="telemetry[1].color">
+                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 17"></polyline>
+                    <polyline points="17 6 23 6 23 12"></polyline>
+                  </svg>
+                </div>
+                <div class="telemetry-card-content">
+                  <p class="telemetry-card-label">{{ telemetry[1].name }}</p>
+                  <p class="data-mono telemetry-card-value">{{ telemetry[1].value }}%</p>
+                  <div class="telemetry-card-bar">
+                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[1].value" [style.background]="telemetry[1].color"></span>
+                  </div>
+                </div>
+              </div>
+              <div class="telemetry-card-item">
+                <div class="telemetry-card-icon" [style.background]="telemetry[2].color">
+                  <svg class="telemetry-card-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="1"></circle>
+                    <path d="M12 8v-4m0 16v-4m-4-4h-4m16 0h-4m-8.485-7.07l-2.828 2.828m11.314 0l2.828-2.828m-14.314 14.314l-2.828-2.828m11.314 0l2.828 2.828"></path>
+                    <circle cx="12" cy="12" r="8"></circle>
+                  </svg>
+                </div>
+                <div class="telemetry-card-content">
+                  <p class="telemetry-card-label">{{ telemetry[2].name }}</p>
+                  <p class="data-mono telemetry-card-value">{{ telemetry[2].value }}%</p>
+                  <div class="telemetry-card-bar">
+                    <span class="telemetry-card-bar-fill" [style.width.%]="telemetry[2].value" [style.background]="telemetry[2].color"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
         <section class="insight-card evidence-panel">
           <div class="evidence-panel-header">
             <p class="panel-kicker">Evidence &amp; Supporting Documents</p>
@@ -1616,7 +1666,7 @@
                 <p *ngIf="!isCodeChatHistoryLoading && codeChatHistory.length === 0" class="helper-text">Saved conversations for this application scope will appear here.</p>
                 <ul class="code-rag-history-list">
                   <li *ngFor="let session of codeChatHistory; trackBy: trackCodeChatSession">
-                    <button type="button" class="code-rag-history-item" [class.code-rag-history-item-active]="session.id === codeChatSessionId" (click)="openCodeChatSession(session.id)" [disabled]="isCodeChatAsking" [attr.title]="session.title">
+                    <button type="button" class="code-rag-history-item" [class.code-rag-history-item-active]="session.id === codeChatSessionId" (click)="openCodeChatSession(session.id)" [attr.title]="session.title">
                       <span class="code-rag-history-item-title">{{ session.title }}</span>
                       <span class="code-rag-history-item-meta">{{ session.updatedAt | date: 'MMM d, HH:mm' }} · {{ session.messageCount }} msg</span>
                     </button>
@@ -1626,7 +1676,7 @@
               </aside>
 
               <div class="code-rag-chat-main">
-                <div #codeChatTranscript class="code-rag-transcript" aria-live="polite">
+                <div #codeChatTranscript class="code-rag-transcript" aria-live="polite" [attr.aria-busy]="isCodeChatTyping">
                   <div *ngIf="codeChatMessages.length === 0 && !isCodeChatAsking" class="project-empty code-rag-chat-empty">
                     <p class="empty-copy">{{ hasReadyCodeRepository ? 'Ask about a class, method, API, or workflow in the indexed repositories. Follow-up questions keep the conversation context.' : 'Add a repository to an application in scope from Application Configuration and wait for it to be indexed before asking questions.' }}</p>
                   </div>
@@ -1639,7 +1689,7 @@
 
                     <article *ngIf="message.role === 'assistant'" class="message-bubble message-bubble-assistant" [class.code-rag-message-error]="message.isError">
                       <div class="message-bubble-header code-rag-message-header">
-                        <p class="message-label">CodeRAG <span class="code-rag-message-time">{{ message.generatedAt | date: 'shortTime' }}</span></p>
+                        <p class="message-label">CodeRAG <span class="code-rag-message-time">{{ message.generatedAt | date: 'shortTime' }}</span><span *ngIf="message.searchMode === 'deep'" class="code-rag-mode-badge">Deep search</span></p>
                         <span *ngIf="codeAnswerDurationLabel(message) as durationLabel" class="answer-duration" [attr.title]="completedDurationTitle">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="9"></circle>
@@ -1654,9 +1704,9 @@
                     </article>
                   </ng-container>
 
-                  <article *ngIf="isCodeChatAsking" class="message-bubble message-bubble-assistant code-rag-message-pending">
+                  <article *ngIf="isActiveCodeChatPending" class="message-bubble message-bubble-assistant code-rag-message-pending">
                     <p class="message-label">CodeRAG</p>
-                    <p class="message-body">Searching indexed source and preparing an answer...</p>
+                    <p class="message-body">{{ codeChatPendingMode === 'deep' ? 'Deep search is reading more source and writing a detailed answer. This usually takes about a minute...' : 'Searching indexed source and preparing an answer...' }}</p>
                   </article>
                 </div>
 
@@ -1664,10 +1714,18 @@
                   <label class="sr-only" for="code-chat-question">Ask the repository</label>
                   <textarea id="code-chat-question" class="field-input code-rag-question" name="codeChatQuestion" [(ngModel)]="codeChatQuestion" (keydown)="handleCodeChatKeydown($event)" maxlength="4000" rows="2"                   placeholder="Ask the repository... (Enter to send, Shift+Enter for a new line)" [disabled]="isCodeChatAsking || !hasCodeRepoScope"></textarea>
                   <div class="composer-footer">
-                    <p class="helper-text">{{ codeChatQuestion.length }}/4000</p>
-                                      <button type="submit" class="send-button" [disabled]="isCodeChatAsking || !hasCodeRepoScope || !codeChatQuestion.trim()">
-                      <span>{{ isCodeChatAsking ? 'Thinking...' : 'Send' }}</span>
-                    </button>
+                    <p class="helper-text">{{ codeChatQuestion.length }}/4000 · {{ codeSearchModeDescription }}</p>
+                    <div class="code-rag-composer-actions">
+                      <div class="code-rag-mode" role="radiogroup" aria-label="Search mode">
+                        <label *ngFor="let option of codeSearchModes" class="code-rag-mode-option" [class.code-rag-mode-option-active]="codeSearchMode === option.value" [attr.title]="option.description">
+                          <input type="radio" class="sr-only" name="codeSearchMode" [value]="option.value" [checked]="codeSearchMode === option.value" (change)="codeSearchMode = option.value" [disabled]="isCodeChatAsking || isCodeChatTyping">
+                          {{ option.label }}
+                        </label>
+                      </div>
+                      <button type="submit" class="send-button" [disabled]="isCodeChatAsking || isCodeChatTyping || !hasCodeRepoScope || !codeChatQuestion.trim()">
+                        <span>{{ isCodeChatAsking ? 'Thinking...' : 'Send' }}</span>
+                      </button>
+                    </div>
                   </div>
                 </form>
               </div>

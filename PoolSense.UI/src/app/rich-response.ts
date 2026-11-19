@@ -61,7 +61,9 @@ export function validateMermaid(source: string): void {
   if (source.length > 8000 || source.split(/[;\n]/).length > 100) throw new Error('Diagram exceeds the 8,000 character / 100 statement limit.')
   if ((source.match(/\[[^\]]*\]|\([^)]*\)|\{[^}]*\}/g) || []).length > 100) throw new Error('Diagram exceeds the 100 labelled node limit.')
   if (!/^\s*(flowchart|graph|sequenceDiagram|pie|timeline|mindmap)\b/.test(source)) throw new Error('Unsupported diagram. Use flowchart, sequenceDiagram, pie, timeline or mindmap.')
-  if (/%%|(?:^|[\s;])(?:click|style|classDef|linkStyle)\b|<[/!a-z]|javascript:|https?:|data:|@\{|image\s*:/i.test(source)) {
+  const outsideQuotes = source.replace(/"([^"\\]|\\.)*"/g, '""')
+  if (/%%|(?:^|[\s;])(?:click|style|classDef|linkStyle)\b|<[/!a-z]|@\{/.test(outsideQuotes) ||
+      /javascript:|https?:|data:|image\s*:|<\s*\/?\s*(?:a|body|embed|html|iframe|img|link|meta|object|script|style|svg)\b/i.test(source)) {
     throw new Error('Unsafe diagram: directives, links, HTML, external resources and custom styling are not allowed.')
   }
   if ((source.match(/-->|---|==>|-.->|->>|-->>/g) || []).length > 150) throw new Error('Diagram exceeds the 150 edge limit.')

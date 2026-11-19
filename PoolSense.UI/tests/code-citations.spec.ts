@@ -162,6 +162,29 @@ test('repository panels stay stationary at their shared edge and leave room for 
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(390)
 })
 
+test('repository history remains selectable while its request is running', async ({ page }) => {
+  const errors = await setup(page)
+  let releaseRequest!: () => void
+  const requestGate = new Promise<void>(resolve => { releaseRequest = resolve })
+  await page.route(url => url.pathname.endsWith('/code-chat/ask'), async route => {
+    await requestGate
+    await route.fulfill({ json: { projectId: 'test', sessionId: 'new', question: 'Explain publication', answer: linked, citations: documents, generatedAt: now, searchMode: 'quick' } })
+  })
+  await page.goto('http://localhost:4200')
+  await page.getByRole('button', { name: 'Open code repositories', exact: true }).click()
+  await page.locator('#code-chat-question').fill('Explain publication')
+  await page.locator('.code-rag-composer').getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.locator('.code-rag-message-pending')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Saved code prose', exact: false }).click()
+  await expect(page.locator('.code-rag-transcript')).toContainText('Evidence considered')
+  await expect(page.locator('.code-rag-message-pending')).toHaveCount(0)
+  releaseRequest()
+  await expect(page.locator('.code-rag-history-item')).toBeEnabled()
+  await expect(page.locator('.code-rag-transcript')).toContainText('FilePath')
+  expect(errors).toEqual([])
+})
+
 test('repository live and restored answers expose shared source links without expanding excerpts', async ({ page }) => {
   const errors = await setup(page)
   await page.goto('http://localhost:4200')
