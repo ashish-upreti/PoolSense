@@ -50,6 +50,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1
 # Explicitly restore the selected target before building it.
 .\scripts\build.ps1 -Target Api -Restore
 
+# Build and verify a fresh Release IIS package, including the production UI.
+.\scripts\publish.ps1
+
 # Run API tests, optionally with a VSTest filter.
 .\scripts\test.ps1
 .\scripts\test.ps1 -Filter "FullyQualifiedName~NyraConfigurationTests"
@@ -75,3 +78,9 @@ Start the UI in another terminal with `.\scripts\run-ui.ps1`. The current Code K
 ```
 
 `Api` remains the default test target. `-Filter`, `-Configuration`, and `-NoBuild` apply only to API tests; `-InstallUi` and `-InstallBrowsers` apply only to UI tests. Solution builds include the CodeRAG project and the Angular frontend.
+
+## Publishing
+
+Run `.\scripts\publish.ps1` to rebuild the production UI and publish a framework-dependent Release API package to a new `artifacts\publish\PoolSense-yyyyMMdd-HHmmss` folder. It verifies the .NET 10 assemblies, IIS configuration, and SHA-256 hashes of all UI assets before reporting success. It stops on failures and never reuses an existing package folder.
+
+The script does not install dependencies, deploy to a server, change the runtime environment, or restart IIS. If UI dependencies are missing, run `npm ci` in `PoolSense.UI` and retry. Existing API appsettings are included according to the project's publish rules; treat packages as sensitive if they contain credentials. Preserve server-specific appsettings, IIS environment variables, and persistent storage during deployment. A failed or incomplete package must not be deployed.

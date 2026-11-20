@@ -395,6 +395,8 @@ export class AppComponent implements OnInit, OnDestroy {
   poolTroubleshootEntries: PoolTroubleshootEntry[] = []
   isPoolTroubleshootLoading = false
   poolTroubleshootError = ''
+  poolTroubleshootHistoryNotice = ''
+  private poolTroubleshootChatSessionId: string | null = null
   poolTroubleshootProgressEvents: TicketWorkflowProgress[] = []
   poolRecommendationReports = createDefaultPoolRecommendationResponse()
   poolRecommendationFilters = {
@@ -892,6 +894,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.poolTroubleshootQuestion = ''
     this.poolTroubleshootEntries = []
     this.poolTroubleshootError = ''
+    this.poolTroubleshootHistoryNotice = ''
+    this.poolTroubleshootChatSessionId = null
     this.isPoolTroubleshootLoading = false
     this.poolTroubleshootProgressEvents = []
     this.poolRecommendationReports = createDefaultPoolRecommendationResponse()
@@ -1719,6 +1723,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.poolTroubleshootQuestion = ''
     this.poolTroubleshootEntries = []
     this.poolTroubleshootError = ''
+    this.poolTroubleshootHistoryNotice = ''
+    this.poolTroubleshootChatSessionId = null
     this.isPoolTroubleshootLoading = false
     this.poolTroubleshootProgressEvents = []
     this.messages = []
@@ -2306,7 +2312,11 @@ export class AppComponent implements OnInit, OnDestroy {
     }
 
     this.poolTroubleshootError = ''
+    this.poolTroubleshootHistoryNotice = ''
     this.isPoolTroubleshootLoading = true
+    const epoch = this.chatAuthEpoch
+    const version = this.poolReportReadVersion
+    const valid = () => epoch === this.chatAuthEpoch && version === this.poolReportReadVersion
     this.poolTroubleshootProgressEvents = [
       {
         stage: 'request',
@@ -2320,16 +2330,23 @@ export class AppComponent implements OnInit, OnDestroy {
 
     try {
       const response = await this.api.troubleshootPoolWithProgress(poolId, question, (progress) => {
-        this.upsertPoolTroubleshootProgress(progress)
-      })
+        if (valid()) this.upsertPoolTroubleshootProgress(progress)
+      }, this.poolTroubleshootChatSessionId ?? undefined)
+      if (epoch !== this.chatAuthEpoch) return
+      if (response.chatSessionId) void this.loadChatHistory()
+      if (!valid()) return
+      this.poolTroubleshootChatSessionId = response.chatSessionId || this.poolTroubleshootChatSessionId
+      this.poolTroubleshootHistoryNotice = response.historyPersistenceError || ''
       this.poolTroubleshootEntries = [createPoolTroubleshootEntry(response, this.poolTroubleshootStatusSteps), ...this.poolTroubleshootEntries]
       this.mergeTroubleshootNyraEvidence(response)
       this.poolTroubleshootQuestion = ''
     } catch (requestError) {
-      this.poolTroubleshootError = requestError instanceof Error ? requestError.message : 'Unable to troubleshoot this pool.'
+      if (valid()) this.poolTroubleshootError = requestError instanceof Error ? requestError.message : 'Unable to troubleshoot this pool.'
     } finally {
-      this.isPoolTroubleshootLoading = false
-      this.poolTroubleshootProgressEvents = []
+      if (valid()) {
+        this.isPoolTroubleshootLoading = false
+        this.poolTroubleshootProgressEvents = []
+      }
     }
   }
 
@@ -2514,6 +2531,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.poolTroubleshootQuestion = ''
     this.poolTroubleshootEntries = []
     this.poolTroubleshootError = ''
+    this.poolTroubleshootHistoryNotice = ''
+    this.poolTroubleshootChatSessionId = null
+    this.isPoolTroubleshootLoading = false
     this.poolTroubleshootProgressEvents = []
     this.isPoolReportLoading = true
 

@@ -2,11 +2,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using PoolSense.Api.Controllers;
+using PoolSense.Api.Data;
 using PoolSense.Api.Models;
 using PoolSense.Api.Orchestration;
 using PoolSense.Api.Services;
 using PoolSense.Application.Models;
 using System.Security.Claims;
+using System.Text.Json;
 using Xunit;
 
 namespace PoolSense.Api.Tests;
@@ -265,6 +267,126 @@ public sealed class PoolChatHistoryTests
         Assert.Empty(await store.SessionsAsync("alice", CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Troubleshoot_SavesRecommendationAndFollowupsInOneNewMainConversation(bool streaming)
+    {
+        var store = new StubPoolChatHistoryStore();
+        var controller = CreatePoolReportController(store);
+        var response = await TroubleshootAsync(controller, new() { Question = "  What should I validate?  " }, streaming);
+        var session = Assert.Single(store.Users["alice"]);
+        Assert.Equal(session.Id, response.ChatSessionId);
+        Assert.Empty(response.HistoryPersistenceError);
+        Assert.Equal("Pool P-100", session.Title);
+        Assert.Equal(["g1"], session.GroupIds);
+        Assert.Equal(4, session.Messages.Count);
+        Assert.Equal("Pool P-100", session.Messages[0].Content);
+        Assert.Equal("Original recommendation", session.Messages[1].Content);
+        Assert.Equal("Original detailed analysis", session.Messages[1].Result!.DetailedAnalysisMarkdown);
+        Assert.Equal("What should I validate?", session.Messages[2].Content);
+        Assert.Equal("Validate the mapping.", session.Messages[3].Content);
+        Assert.Equal("Fresh wiki", Assert.Single(session.Messages[3].Result!.NyraDocuments).Title);
+
+        var next = await TroubleshootAsync(CreatePoolReportController(store),
+            new() { Question = "Explain validation", ChatSessionId = response.ChatSessionId }, streaming);
+        Assert.Equal(response.ChatSessionId, next.ChatSessionId);
+        Assert.Single(store.Users["alice"]);
+        Assert.Equal(6, session.Messages.Count);
+
+        var orchestrator = new StubOrchestrator();
+        await CreateResolutionController(store, "alice", orchestrator).Post(new TicketRequest
+        {
+            Title = "Continue investigating", Description = "Continue investigating",
+            ChatSessionId = response.ChatSessionId, SelectedGroupIds = ["g1"]
+        }, CancellationToken.None);
+        Assert.Contains(orchestrator.LastContext!.Turns, turn => turn.Content.Contains("Original recommendation"));
+        Assert.Contains(orchestrator.LastContext.Turns, turn => turn.Content.Contains("Validate the mapping."));
+        Assert.Equal(8, session.Messages.Count);
+
+        var reopened = await TroubleshootAsync(CreatePoolReportController(store), new() { Question = "New investigation" }, streaming);
+        Assert.NotEqual(response.ChatSessionId, reopened.ChatSessionId);
+        Assert.Equal(2, store.Users["alice"].Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Troubleshoot_SaveFailureReturnsAnswerAndVisibleWarning(bool streaming)
+    {
+        var store = new StubPoolChatHistoryStore { ThrowOnAppend = new InvalidOperationException("History down") };
+        var response = await TroubleshootAsync(CreatePoolReportController(store), new() { Question = "Validate" }, streaming);
+        Assert.Equal("Validate the mapping.", response.Answer);
+        Assert.Empty(response.ChatSessionId);
+        Assert.Contains("could not be saved", response.HistoryPersistenceError);
+        Assert.Empty(store.Users);
+    }
+
+    [Theory]
+    [InlineData("bob", "g1")]
+    [InlineData("alice", "other-group")]
+    public async Task Troubleshoot_DoesNotAppendToForeignOrDifferentScopeSession(string owner, string group)
+    {
+        var store = new StubPoolChatHistoryStore();
+        var previousId = await store.AppendExchangeAsync(owner, null, "Existing conversation", [group],
+            new TicketWorkflowResult { SuggestedResolution = "Previous answer" }, CancellationToken.None);
+        var response = await TroubleshootAsync(CreatePoolReportController(store),
+            new() { Question = "Validate", ChatSessionId = previousId }, false);
+        Assert.NotEqual(previousId, response.ChatSessionId);
+        Assert.Equal(2, store.Users[owner].Single(session => session.Id == previousId).Messages.Count);
+        Assert.Equal(4, store.Users["alice"].Single(session => session.Id == response.ChatSessionId).Messages.Count);
+    }
+
+    private static PoolReportController CreatePoolReportController(IPoolChatHistoryStore store) =>
+        new(new StubReportRepository(), new StubTroubleshootLlm(), new StubTroubleshootEvidence(), store,
+            NullLogger<PoolReportController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = CreateHttpContext("alice") }
+        };
+
+    private static async Task<PoolTroubleshootResponse> TroubleshootAsync(PoolReportController controller, PoolTroubleshootRequest request, bool streaming)
+    {
+        if (!streaming)
+            return Assert.IsType<PoolTroubleshootResponse>(Assert.IsType<OkObjectResult>((await controller.Troubleshoot("P-100", request, CancellationToken.None)).Result).Value);
+
+        Assert.IsType<EmptyResult>(await controller.TroubleshootWithProgress("P-100", request, CancellationToken.None));
+        controller.Response.Body.Position = 0;
+        var stream = await new StreamReader(controller.Response.Body).ReadToEndAsync();
+        using var lastEvent = JsonDocument.Parse(stream.Split('\n', StringSplitOptions.RemoveEmptyEntries).Last());
+        Assert.Equal("result", lastEvent.RootElement.GetProperty("type").GetString());
+        return lastEvent.RootElement.GetProperty("result").Deserialize<PoolTroubleshootResponse>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+    }
+
+    private sealed class StubReportRepository : IProcessedSourceEventRepository
+    {
+        public Task<ProcessedSourceEventRecord?> GetLatestReportAsync(string sourceEventId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ProcessedSourceEventRecord?>(new()
+            {
+                SourceEventId = sourceEventId, ProjectId = "g1",
+                WorkflowResult = new() { SuggestedResolution = "Original recommendation", DetailedAnalysisMarkdown = "Original detailed analysis" }
+            });
+        public Task<ProcessedSourceEventRecord?> GetLatestRecordAsync(string sourceEventId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> HasBeenProcessedAsync(string sourceEventId, string processingKind, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> CountProcessedAsync(IReadOnlyCollection<string> sourceEventIds, string processingKind, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<PoolRecommendationReportListResult> GetRecommendationReportsAsync(PoolRecommendationReportQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task MarkProcessedAsync(ProcessedSourceEventRecord record, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class StubTroubleshootLlm : ILLMService
+    {
+        public Task<string> GetResponseAsync(string prompt) => Task.FromResult("Validate the mapping.");
+    }
+
+    private sealed class StubTroubleshootEvidence : IPoolTroubleshootEvidenceService
+    {
+        public Task<PoolTroubleshootEvidence> RetrieveAsync(string query, string application, string projectId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PoolTroubleshootEvidence
+            {
+                NyraKnowledgeBaseUsed = true, NyraKnowledgeBaseNames = ["Operations"],
+                NyraDocuments = [new() { Title = "Fresh wiki" }]
+            });
+    }
+
     private static ResolutionController CreateResolutionController(IPoolChatHistoryStore store, string? username, StubOrchestrator? orchestrator = null) =>
         new(orchestrator ?? new StubOrchestrator(), store, NullLogger<ResolutionController>.Instance)
         {
@@ -377,7 +499,7 @@ public sealed class PoolChatHistoryTests
         }
 
         public Task<string> AppendExchangeAsync(string user, string? sessionId, string question, IReadOnlyList<string>? selectedGroupIds,
-            TicketWorkflowResult result, CancellationToken token)
+            TicketWorkflowResult result, CancellationToken token, PoolChatInitialExchange? initialExchange = null)
         {
             if (ThrowOnAppend is not null)
             {
@@ -403,11 +525,17 @@ public sealed class PoolChatHistoryTests
                 list.Add(new StoredSession
                 {
                     Id = owned,
-                    Title = question.Length <= 80 ? question : question[..77] + "...",
+                    Title = initialExchange?.Question ?? (question.Length <= 80 ? question : question[..77] + "..."),
                     GroupIds = selectedGroupIds?.ToList() ?? [],
                     CreatedAt = now,
                     UpdatedAt = now,
                 });
+                if (initialExchange is not null)
+                {
+                    var created = list.Last();
+                    created.Messages.Add(new("user", initialExchange.Question, null, now));
+                    created.Messages.Add(new("assistant", initialExchange.Result.SuggestedResolution, initialExchange.Result, now));
+                }
             }
             else
             {

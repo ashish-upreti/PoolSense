@@ -12,6 +12,9 @@ public sealed record PoolChatStoredMessage(string Role, string Content, TicketWo
 /// <summary>Full owned conversation returned when reopening a saved session.</summary>
 public sealed record PoolChatSession(PoolChatSessionSummary Session, IReadOnlyList<PoolChatStoredMessage> Messages);
 
+/// <summary>Original context saved atomically when the first exchange creates a conversation.</summary>
+public sealed record PoolChatInitialExchange(string Question, TicketWorkflowResult Result);
+
 /// <summary>Optional fields for renaming or pinning a session; omitted fields are left unchanged.</summary>
 public sealed record PoolChatSessionPatchRequest
 {
