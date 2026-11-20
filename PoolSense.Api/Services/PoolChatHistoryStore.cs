@@ -10,7 +10,7 @@ public interface IPoolChatHistoryStore
     Task EnsureSchemaAsync(CancellationToken token);
     Task<IReadOnlyList<PoolChatSessionSummary>> SessionsAsync(string user, CancellationToken token);
     Task<PoolChatSession?> SessionAsync(string user, string sessionId, CancellationToken token, int? latestMessageLimit = null);
-    Task<string> AppendExchangeAsync(string user, string? sessionId, string question, IReadOnlyList<string>? selectedGroupIds, TicketWorkflowResult result, CancellationToken token);
+    Task<string> AppendExchangeAsync(string user, string? sessionId, string question, IReadOnlyList<string>? selectedGroupIds, TicketWorkflowResult result, CancellationToken token, PoolChatInitialExchange? initialExchange = null);
     Task<bool> UpdateSessionAsync(string user, string sessionId, string? title, bool? isPinned, CancellationToken token);
     Task<bool> DeleteSessionAsync(string user, string sessionId, CancellationToken token);
 }
@@ -176,7 +176,7 @@ public sealed class PoolChatHistoryStore(IPoolSenseSqlConnectionFactory factory)
     }
 
     public async Task<string> AppendExchangeAsync(string user, string? sessionId, string question, IReadOnlyList<string>? selectedGroupIds,
-        TicketWorkflowResult result, CancellationToken token)
+        TicketWorkflowResult result, CancellationToken token, PoolChatInitialExchange? initialExchange = null)
     {
         await EnsureSchemaAsync(token);
         await using var connection = await OpenAsync(token);
@@ -201,10 +201,16 @@ public sealed class PoolChatHistoryStore(IPoolSenseSqlConnectionFactory factory)
                 """, connection, transaction);
             insert.Parameters.AddWithValue("@id", owned);
             insert.Parameters.AddWithValue("@user", user);
-            insert.Parameters.AddWithValue("@title", MakeTitle(question));
+            insert.Parameters.AddWithValue("@title", MakeTitle(initialExchange?.Question ?? question));
             insert.Parameters.AddWithValue("@groups", (object?)SerializeGroupIds(selectedGroupIds) ?? DBNull.Value);
             insert.Parameters.AddWithValue("@now", now);
             await insert.ExecuteNonQueryAsync(token);
+            if (initialExchange is not null)
+            {
+                await InsertMessageAsync(connection, transaction, owned, "user", initialExchange.Question, null, now, token);
+                await InsertMessageAsync(connection, transaction, owned, "assistant", initialExchange.Result.SuggestedResolution,
+                    JsonSerializer.Serialize(initialExchange.Result, JsonOptions), now, token);
+            }
         }
         else
         {

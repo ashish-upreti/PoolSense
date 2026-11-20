@@ -416,6 +416,7 @@
         </ng-container>
 
         <p *ngIf="poolTroubleshootError" class="error-banner">{{ poolTroubleshootError }}</p>
+        <p *ngIf="poolTroubleshootHistoryNotice" class="warn-banner" role="status">{{ poolTroubleshootHistoryNotice }}</p>
         <article *ngIf="isPoolTroubleshootLoading" class="message-bubble message-bubble-loading loading-status-card pool-troubleshoot-loading">
           <div class="loading-status-content">
             <span class="loading-status-icon" aria-hidden="true">

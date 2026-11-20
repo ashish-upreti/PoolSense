@@ -556,26 +556,13 @@ Install the Hosting Bundle after IIS, or repair it if IIS was installed later. S
 
 ### Build A Fresh Package
 
-From the repository root, build the production frontend **before** publishing the API. The API publish target copies existing Angular output; it does not run the frontend build itself.
+From the repository root, run the [publish script](scripts/publish.ps1). It builds the production frontend **before** publishing the Release API, then verifies the package. The API publish target alone copies existing Angular output; it does not run the frontend build itself.
 
 ```powershell
-$ErrorActionPreference = 'Stop'
-Push-Location .\PoolSense.UI
-try {
-    npm run build -- --configuration production
-    if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
-}
-finally {
-    Pop-Location
-}
-
-$output = Join-Path (Get-Location) ('artifacts\publish\PoolSense-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-dotnet publish .\PoolSense.Api\PoolSense.Api.csproj --configuration Release --self-contained false --output $output
-if ($LASTEXITCODE -ne 0) { throw 'API publish failed.' }
-Write-Output $output
+.\scripts\publish.ps1
 ```
 
-If frontend dependencies are missing, run `npm ci` in [PoolSense.UI](PoolSense.UI) and retry. The framework-dependent package includes the API, dependent assemblies, generated IIS configuration, and production UI assets.
+The script creates a fresh `artifacts\publish\PoolSense-yyyyMMdd-HHmmss` folder and prints its path. It does not deploy to IIS or change the runtime environment. If frontend dependencies are missing, run `npm ci` in [PoolSense.UI](PoolSense.UI) and retry. The framework-dependent package includes the API, dependent assemblies, generated IIS configuration, and production UI assets. Treat packages as sensitive when local appsettings contain credentials; preserve server-specific configuration during deployment.
 
 ### Install And Configure
 
@@ -657,6 +644,7 @@ Use the `Pool Recommendations` section in the left navigation rail to review sav
 5. Open a report to navigate to `/Pool/{sourceEventId}`.
 6. If the report is still pending or processing, retry the same link later.
 7. When the report is ready, ask follow-up troubleshooting questions. Answers are generated from the saved recommendation, reasoning, failure pattern, fresh similar incidents, and fresh NYRA Wiki documents when the report's mapped project has KB names configured.
+8. The first troubleshooting answer creates a new conversation in the main PoolSense history, including the original recommendation. Further questions in that opened report append to the same conversation. Reopen it from history to continue in the main search UI. Opening a report again starts a separate conversation on its first troubleshooting answer. If history cannot be saved, the answer remains visible with a warning.
 
 ### Application Configuration Workspace
 

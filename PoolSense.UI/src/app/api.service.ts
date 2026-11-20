@@ -264,6 +264,8 @@ export interface PoolRecommendationReportFilters {
 }
 
 export interface PoolTroubleshootResponse {
+  chatSessionId?: string
+  historyPersistenceError?: string
   codeSearchCoverage?: CodeSearchCoverage
   codeDocuments?: CodeEvidence[]
   codeKnowledgeStatus?: string
@@ -843,14 +845,14 @@ export class ApiService {
     return (await response.json()) as PoolRecommendationReportListResponse
   }
 
-  async troubleshootPool(poolId: string, question: string): Promise<PoolTroubleshootResponse> {
+  async troubleshootPool(poolId: string, question: string, chatSessionId?: string): Promise<PoolTroubleshootResponse> {
     const response = await fetch(this.apiUrl(`/pool/${encodeURIComponent(poolId)}/troubleshoot`), {
       method: 'POST',
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, chatSessionId }),
     })
 
     if (!response.ok) {
@@ -864,6 +866,7 @@ export class ApiService {
     poolId: string,
     question: string,
     onProgress: (progress: TicketWorkflowProgress) => void,
+    chatSessionId?: string,
   ): Promise<PoolTroubleshootResponse> {
     const response = await fetch(this.apiUrl(`/pool/${encodeURIComponent(poolId)}/troubleshoot-progress`), {
       method: 'POST',
@@ -871,7 +874,7 @@ export class ApiService {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, chatSessionId }),
     })
 
     if (!response.ok) {
@@ -879,7 +882,7 @@ export class ApiService {
     }
 
     if (!response.body) {
-      return await this.troubleshootPool(poolId, question)
+      return await this.troubleshootPool(poolId, question, chatSessionId)
     }
 
     const reader = response.body.getReader()

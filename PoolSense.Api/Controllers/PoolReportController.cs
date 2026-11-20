@@ -18,17 +18,20 @@ public sealed class PoolReportController : ControllerBase
     private readonly IProcessedSourceEventRepository _processedSourceEventRepository;
     private readonly ILLMService _llmService;
     private readonly IPoolTroubleshootEvidenceService _evidenceService;
+    private readonly IPoolChatHistoryStore _chatHistoryStore;
     private readonly ILogger<PoolReportController> _logger;
 
     public PoolReportController(
         IProcessedSourceEventRepository processedSourceEventRepository,
         ILLMService llmService,
         IPoolTroubleshootEvidenceService evidenceService,
+        IPoolChatHistoryStore chatHistoryStore,
         ILogger<PoolReportController> logger)
     {
         _processedSourceEventRepository = processedSourceEventRepository;
         _llmService = llmService;
         _evidenceService = evidenceService;
+        _chatHistoryStore = chatHistoryStore;
         _logger = logger;
     }
 
@@ -123,7 +126,7 @@ public sealed class PoolReportController : ControllerBase
             return NotFound($"No PoolSense report was found for pool {sourceEventId}.");
         }
 
-        return Ok(await CreateTroubleshootResponseAsync(report, request.Question.Trim(), cancellationToken));
+        return Ok(await CreateTroubleshootResponseAsync(report, request.Question.Trim(), request.ChatSessionId, cancellationToken));
     }
 
     [HttpPost("{sourceEventId}/troubleshoot-progress")]
@@ -172,6 +175,7 @@ public sealed class PoolReportController : ControllerBase
             var response = await CreateTroubleshootResponseAsync(
                 report,
                 request.Question.Trim(),
+                request.ChatSessionId,
                 cancellationToken,
                 async (progress, token) => await WriteStreamEventAsync("progress", progress, token));
 
@@ -196,6 +200,7 @@ public sealed class PoolReportController : ControllerBase
     private async Task<PoolTroubleshootResponse> CreateTroubleshootResponseAsync(
         ProcessedSourceEventRecord report,
         string question,
+        string? chatSessionId,
         CancellationToken cancellationToken,
         Func<TicketWorkflowProgress, CancellationToken, Task>? progressCallback = null)
     {
@@ -241,7 +246,7 @@ public sealed class PoolReportController : ControllerBase
             3,
             cancellationToken);
 
-        return new PoolTroubleshootResponse
+        var response = new PoolTroubleshootResponse
         {
             SourceEventId = report.SourceEventId,
             Question = question,
@@ -256,6 +261,64 @@ public sealed class PoolReportController : ControllerBase
             CodeKnowledgeStatus = evidence.Code.Status,
             CodeSearchCoverage = evidence.Code.Coverage
         };
+        await PersistChatHistoryAsync(report, response, evidence, chatSessionId, cancellationToken);
+        return response;
+    }
+
+    private async Task PersistChatHistoryAsync(
+        ProcessedSourceEventRecord report,
+        PoolTroubleshootResponse response,
+        PoolTroubleshootEvidence evidence,
+        string? chatSessionId,
+        CancellationToken cancellationToken)
+    {
+        var user = CodeUser.Name(User);
+        if (user.Length == 0) return;
+
+        try
+        {
+            IReadOnlyList<string> scope = string.IsNullOrWhiteSpace(report.ProjectId) ? [] : [report.ProjectId];
+            if (!string.IsNullOrWhiteSpace(chatSessionId))
+            {
+                var session = await _chatHistoryStore.SessionAsync(user, chatSessionId.Trim(), cancellationToken, latestMessageLimit: 1);
+                chatSessionId = session is not null && TicketConversationContextBuilder.SameScope(session.Session.SelectedGroupIds, scope)
+                    ? session.Session.Id : null;
+            }
+
+            var original = report.WorkflowResult!;
+            var result = new TicketWorkflowResult
+            {
+                SuggestedRootCause = original.SuggestedRootCause,
+                SuggestedResolution = response.Answer,
+                DetailedAnalysisMarkdown = response.Answer,
+                Confidence = original.Confidence,
+                Reasoning = original.Reasoning,
+                FailurePattern = original.FailurePattern,
+                FailurePatternFrequency = original.FailurePatternFrequency,
+                SimilarIncidents = evidence.SimilarIncidents.Select(incident => new SimilarIncidentResult
+                {
+                    TicketId = incident.TicketId,
+                    Problem = incident.Problem,
+                    RootCause = incident.RootCause,
+                    Resolution = incident.Resolution,
+                    Similarity = incident.Similarity
+                }).ToList(),
+                NyraDocuments = response.NyraDocuments,
+                NyraKnowledgeBaseUsed = response.NyraKnowledgeBaseUsed,
+                NyraKnowledgeBaseNames = response.NyraKnowledgeBaseNames,
+                CodeDocuments = response.CodeDocuments,
+                CodeKnowledgeStatus = response.CodeKnowledgeStatus,
+                CodeSearchCoverage = response.CodeSearchCoverage
+            };
+            response.ChatSessionId = await _chatHistoryStore.AppendExchangeAsync(
+                user, chatSessionId, response.Question, scope, result, cancellationToken,
+                new PoolChatInitialExchange($"Pool {report.SourceEventId}", original));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Failed to persist troubleshooting history for pool {SourceEventId} and user {User}.", report.SourceEventId, user);
+            response.HistoryPersistenceError = "The answer was generated but could not be saved to your chat history.";
+        }
     }
 
     private async Task WriteStreamEventAsync(string type, object payload, CancellationToken cancellationToken)
@@ -414,10 +477,13 @@ public static class PoolReportStatus
 public sealed class PoolTroubleshootRequest
 {
     public string Question { get; set; } = string.Empty;
+    public string? ChatSessionId { get; set; }
 }
 
 public sealed class PoolTroubleshootResponse
 {
+    public string ChatSessionId { get; set; } = string.Empty;
+    public string HistoryPersistenceError { get; set; } = string.Empty;
     public IReadOnlyList<CodeEvidence> CodeDocuments { get; set; } = [];
     public string CodeKnowledgeStatus { get; set; } = "not-available";
     public CodeSearchCoverage? CodeSearchCoverage { get; set; }
