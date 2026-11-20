@@ -9,7 +9,8 @@ public interface ICodeChatHistoryStore
 {
     Task<IReadOnlyList<CodeChatSessionSummary>> SessionsAsync(string user, CodeChatScope scope, CancellationToken token);
     Task<CodeChatSession?> SessionAsync(string user, string sessionId, CancellationToken token);
-    Task<string> AppendExchangeAsync(string user, string? sessionId, CodeChatScope scope, string question, string answer, IReadOnlyList<CodeEvidence> citations, CancellationToken token);
+    Task<string> AppendExchangeAsync(string user, string? sessionId, CodeChatScope scope, string question, string answer,
+        IReadOnlyList<CodeEvidence> citations, CancellationToken token, double? processingDurationMs = null, string? searchMode = null);
     Task<bool> DeleteSessionAsync(string user, string sessionId, CancellationToken token);
 }
 
@@ -72,14 +73,18 @@ public sealed class CodeChatHistoryStore(IPoolSenseSqlConnectionFactory factory)
         var list = new List<CodeChatStoredMessage>();
         while (await messageReader.ReadAsync(token))
         {
-            var citations = messageReader.IsDBNull(2) ? [] : JsonSerializer.Deserialize<List<CodeEvidence>>(messageReader.GetString(2), JsonOptions) ?? [];
-            list.Add(new(messageReader.GetString(0), messageReader.GetString(1), citations, messageReader.GetDateTimeOffset(3)));
+            var (citations, processingDurationMs, searchMode) = ParseAssistantPayload(messageReader.IsDBNull(2) ? null : messageReader.GetString(2));
+            list.Add(new(messageReader.GetString(0), messageReader.GetString(1), citations, messageReader.GetDateTimeOffset(3))
+            {
+                ProcessingDurationMs = processingDurationMs,
+                SearchMode = searchMode,
+            });
         }
         return new(summary with { MessageCount = list.Count }, list);
     }
 
     public async Task<string> AppendExchangeAsync(string user, string? sessionId, CodeChatScope scope, string question, string answer,
-        IReadOnlyList<CodeEvidence> citations, CancellationToken token)
+        IReadOnlyList<CodeEvidence> citations, CancellationToken token, double? processingDurationMs = null, string? searchMode = null)
     {
         await using var connection = await OpenAsync(token);
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
@@ -123,7 +128,8 @@ public sealed class CodeChatHistoryStore(IPoolSenseSqlConnectionFactory factory)
         }
 
         await InsertMessageAsync(connection, transaction, owned, "user", question, null, now, token);
-        await InsertMessageAsync(connection, transaction, owned, "assistant", answer, JsonSerializer.Serialize(citations, JsonOptions), now, token);
+        await InsertMessageAsync(connection, transaction, owned, "assistant", answer,
+            SerializeAssistantPayload(citations, processingDurationMs, searchMode), now, token);
         await transaction.CommitAsync(token);
         return owned;
     }
@@ -166,6 +172,33 @@ public sealed class CodeChatHistoryStore(IPoolSenseSqlConnectionFactory factory)
         {
             ProjectIds = scope.ProjectIds
         };
+    }
+
+    private sealed record StoredMessageMetadata(List<CodeEvidence>? Citations, double? ProcessingDurationMs, string? SearchMode);
+
+    internal static string SerializeAssistantPayload(IReadOnlyList<CodeEvidence> citations, double? processingDurationMs, string? searchMode)
+    {
+        var validDuration = processingDurationMs is >= 0 and var ms && double.IsFinite(ms) ? ms : (double?)null;
+        var validMode = searchMode is "deep" or "quick" ? searchMode : null;
+        if (validDuration is null && validMode is null)
+            return JsonSerializer.Serialize(citations, JsonOptions);
+        return JsonSerializer.Serialize(new StoredMessageMetadata([.. citations], validDuration, validMode), JsonOptions);
+    }
+
+    internal static (IReadOnlyList<CodeEvidence> Citations, double? ProcessingDurationMs, string? SearchMode) ParseAssistantPayload(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return ([], null, null);
+        var trimmed = json.AsSpan().TrimStart();
+        if (trimmed.StartsWith("[", StringComparison.Ordinal))
+            return (JsonSerializer.Deserialize<List<CodeEvidence>>(json, JsonOptions) ?? [], null, null);
+        if (trimmed.StartsWith("{", StringComparison.Ordinal))
+        {
+            var meta = JsonSerializer.Deserialize<StoredMessageMetadata>(json, JsonOptions);
+            var validDuration = meta?.ProcessingDurationMs is >= 0 and var ms && double.IsFinite(ms) ? ms : (double?)null;
+            var validMode = meta?.SearchMode is "deep" or "quick" ? meta.SearchMode : null;
+            return (meta?.Citations ?? [], validDuration, validMode);
+        }
+        return ([], null, null);
     }
 
     private static string MakeTitle(string question)

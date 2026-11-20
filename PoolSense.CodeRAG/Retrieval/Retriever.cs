@@ -12,6 +12,17 @@ public sealed class Retriever
     public const int MaxContextChars = 96_000;
     private static readonly HashSet<string> StopWords = new(
         "a an the in on of to for from with and or is are was be does do how what where when why can could would should please give show explain describe me my this that it its code codebase repository repo through about".Split(' '));
+    private static readonly HashSet<string> FlowKeywords = new(StringComparer.OrdinalIgnoreCase)
+        { "flow", "workflow", "journey", "architecture", "diagram", "graph", "connection", "connections", "dependencies", "relationships", "integration" };
+    private static readonly HashSet<string> IgnoredCalls = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ArgumentNullException", "ConfigureAwait", "CreateLinkedTokenSource", "CreateScope", "Deserialize",
+        "FirstOrDefault", "FromResult", "GetHashCode", "GetRequiredService", "GetService", "GetValueOrDefault",
+        "IsCancellationRequested", "IsNullOrEmpty", "IsNullOrWhiteSpace", "LogCritical", "LogDebug", "LogError",
+        "LogInformation", "LogTrace", "LogWarning", "OrderBy", "OrderByDescending", "SelectMany", "Serialize",
+        "SingleOrDefault", "ThrowIfCancellationRequested", "ThrowIfNull", "ToArray", "ToDictionary", "ToList",
+        "ToLowerInvariant", "ToString", "ToUpperInvariant", "TryGetProperty", "TryGetValue", "WhenAll"
+    };
     private static string[] Words(string text) => Regex.Matches(text, @"[A-Za-z_][A-Za-z_0-9]{1,}").Select(m => m.Value).ToArray();
     private static string Fts(string text, IReadOnlyDictionary<string, string[]>? rewrite = null) => string.Join(" OR ", Words(text)
         .Where(w => !StopWords.Contains(w.ToLowerInvariant()))
@@ -99,8 +110,29 @@ public sealed class Retriever
         }
         return previous[b.Length];
     }
-    private static string Layer(Symbol s) => Path.GetExtension(s.FilePath).ToLowerInvariant() is ".ts" or ".tsx" or ".js" or ".jsx"
-        ? "frontend" : Path.GetExtension(s.FilePath).ToLowerInvariant();
+    private static string Layer(Symbol s) => Path.GetExtension(s.FilePath).ToLowerInvariant() switch
+    {
+        ".ts" or ".tsx" or ".js" or ".jsx" => "frontend",
+        ".html" => "template",
+        ".md" => "docs",
+        ".css" or ".scss" => "style",
+        ".json" or ".yml" or ".yaml" or ".ps1" or ".sh" or ".csproj" or ".sln" => "config",
+        _ => "backend"
+    };
+    private static bool IsTestPath(string filePath)
+    {
+        var normalized = filePath.Replace('\\', '/');
+        return Regex.IsMatch(normalized, @"(?:^|/)(?:tests?|specs?|__tests__)/|(?:Tests?|\.(?:spec|test))\.[A-Za-z0-9]+$", RegexOptions.IgnoreCase);
+    }
+    private static string[] ExtractCalledMethods(IEnumerable<Symbol> spans, int maxNames) => spans
+        .SelectMany(s => Regex.Matches(s.Source, @"\b([A-Za-z_]\w{6,})\s*(?:<[^>(\r\n]{1,80}>)?\s*\(").Select(m => m.Groups[1].Value))
+        .Where(n => Regex.IsMatch(n, "[a-z][A-Z]") && !IgnoredCalls.Contains(n))
+        .GroupBy(n => n, StringComparer.Ordinal)
+        .OrderByDescending(g => g.Count())
+        .ThenBy(g => g.Key, StringComparer.Ordinal)
+        .Take(maxNames)
+        .Select(g => g.Key)
+        .ToArray();
     public static string Render(IEnumerable<Symbol> symbols) => string.Join("\n\n", symbols.Select(s =>
     {
         var relation = s.Relation.Length > 0 ? $" | related by {s.Relation}" : "";
@@ -140,8 +172,9 @@ public sealed class Retriever
         var corrections = new Dictionary<string, string>(StringComparer.Ordinal);
         var forms = SearchForms(db, terms, corrections);
         Corrections = corrections;
-        var flow = terms.Any(w => new[] { "flow", "workflow", "journey", "architecture", "diagram", "graph", "connection", "connections", "dependencies", "relationships", "integration" }.Contains(w.ToLowerInvariant())) ||
+        var flow = terms.Any(FlowKeywords.Contains) ||
             Regex.IsMatch(question, @"\bend[\s-]+to[\s-]+end\b", RegexOptions.IgnoreCase);
+        var mentionsTests = Regex.IsMatch(question, @"\b(tests?|testing|specs?|xunit|playwright|unit|e2e)\b", RegexOptions.IgnoreCase);
         var candidates = new Dictionary<string, Symbol>();
         var scores = new Dictionary<string, double>();
         List<Symbol> Search(string text, double weight = 1, bool chunks = false, string actions = "", string[]? extensions = null)
@@ -171,26 +204,49 @@ public sealed class Retriever
             return found;
         }
         progress?.Invoke("Searching indexed source, identifiers and documentation.");
-        var seeds = Search(string.Join(' ', terms), 3, flow);
-        if (!flow)
+        var seeds = Search(string.Join(' ', terms), 3, chunks: false);
+        if (flow)
+            seeds = seeds.Concat(Search(string.Join(' ', terms), 1.5, chunks: true)).DistinctBy(s => s.Id).ToList();
+        var identifiers = terms.Where(term => !StopWords.Contains(term.ToLowerInvariant()) && !FlowKeywords.Contains(term))
+            .Distinct(StringComparer.Ordinal).Take(40).ToArray();
+        if (identifiers.Length > 0)
         {
-            var identifiers = terms.Where(term => !StopWords.Contains(term.ToLowerInvariant())).Distinct(StringComparer.Ordinal).Take(40).ToArray();
-            if (identifiers.Length > 0)
+            var placeholders = string.Join(',', identifiers.Select((_, index) => $"@p{index + 1}"));
+            var exact = Query(db, $"""
+                SELECT * FROM symbols WHERE repo_root=@p0 AND source<>'' AND name IN ({placeholders})
+                ORDER BY CASE kind WHEN 'Member' THEN 0 WHEN 'Class' THEN 1 ELSE 2 END,file_path,start_line,id LIMIT 20
+                """, ReadSymbol, [key, .. identifiers.Cast<object?>()]);
+            foreach (var symbol in exact)
             {
-                var placeholders = string.Join(',', identifiers.Select((_, index) => $"@p{index + 1}"));
-                var exact = Query(db, $"""
-                    SELECT * FROM symbols WHERE repo_root=@p0 AND source<>'' AND name IN ({placeholders})
-                    ORDER BY file_path,start_line,id LIMIT 20
-                    """, ReadSymbol, [key, .. identifiers.Cast<object?>()]);
-                foreach (var symbol in exact)
-                {
-                    candidates.TryAdd(symbol.Id, symbol);
-                    scores[symbol.Id] = scores.GetValueOrDefault(symbol.Id) + .5;
-                }
-                seeds = exact.Concat(seeds).DistinctBy(symbol => symbol.Id).ToList();
+                candidates.TryAdd(symbol.Id, symbol);
+                scores[symbol.Id] = scores.GetValueOrDefault(symbol.Id) + .5;
             }
+            seeds = exact.Concat(seeds).DistinctBy(symbol => symbol.Id).ToList();
         }
         if (seeds.Count == 0 && !flow) return [];
+        List<Symbol> ExpandCalledMembers(IEnumerable<Symbol> fromSpans, double memberWeight, int maxNames)
+        {
+            var names = ExtractCalledMethods(fromSpans, maxNames);
+            if (names.Length == 0) return [];
+            Search(string.Join(' ', names), .7);
+            if (!flow) return [];
+            var placeholders = string.Join(',', names.Select((_, index) => $"@p{index + 1}"));
+            var members = Query(db, $"""
+                SELECT s.* FROM symbols s LEFT JOIN symbols p ON p.id=s.parent_id
+                WHERE s.repo_root=@p0 AND s.kind='Member' AND s.source<>'' AND s.name IN ({placeholders})
+                ORDER BY CASE WHEN coalesce(p.kind,'')='Interface' THEN 1 ELSE 0 END,
+                         CASE WHEN s.file_path LIKE '%Tests.cs' OR s.file_path LIKE '%.spec.ts' THEN 1 ELSE 0 END,
+                         length(s.source) DESC,s.file_path,s.start_line LIMIT 24
+                """, r => ReadSymbol(r) with { Relation = "CALLS (member)" }, [key, .. names.Cast<object?>()]);
+            for (var i = 0; i < members.Count; i++)
+            {
+                var member = members[i];
+                if (candidates.TryAdd(member.Id, member) || string.IsNullOrEmpty(candidates[member.Id].Relation))
+                    candidates[member.Id] = member;
+                scores[member.Id] = Math.Max(scores.GetValueOrDefault(member.Id), memberWeight / (1 + .08 * i));
+            }
+            return members;
+        }
         var anchors = new List<Symbol>();
         if (flow)
         {
@@ -220,24 +276,36 @@ public sealed class Retriever
                 var words = Words(route).Where(w => !StopWords.Contains(w.ToLowerInvariant())).ToArray();
                 if (words.Length < 2) continue;
                 var controllers = Query(db, """
-                    SELECT * FROM symbols WHERE repo_root=@p0 AND kind='SourceChunk'
-                    AND (file_path LIKE @p1 OR file_path LIKE @p2) ORDER BY file_path,start_line LIMIT 2
+                    SELECT * FROM symbols WHERE repo_root=@p0 AND kind IN ('Member','Class','SourceChunk')
+                    AND (file_path LIKE @p1 OR file_path LIKE @p2)
+                    ORDER BY CASE kind WHEN 'Member' THEN 0 WHEN 'Class' THEN 1 ELSE 2 END,file_path,start_line LIMIT 4
                     """, ReadSymbol, key, $"%/{words[0]}Controller.cs", $"{words[0]}Controller.cs");
-                if (controllers.Count > 0) anchors.AddRange(controllers.Select(s => s with { Relation = "API route convention" }));
+                if (controllers.Count > 0)
+                {
+                    foreach (var ctrl in controllers)
+                    {
+                        var tagged = ctrl with { Relation = "API route convention" };
+                        candidates.TryAdd(tagged.Id, tagged);
+                        scores[tagged.Id] = Math.Max(scores.GetValueOrDefault(tagged.Id), 1.25);
+                    }
+                    anchors.AddRange(controllers.Take(2).Select(s => s with { Relation = "API route convention" }));
+                }
                 else
                 {
                     var found = Search(words[0], 1, true, string.Join(' ', words.Skip(1)), [".cs"]);
                     if (found.Count > 0) anchors.Add(found[0]);
                 }
             }
+            ExpandCalledMembers(anchors.Concat(seeds.Where(s => !IsTestPath(s.FilePath))).DistinctBy(s => s.Id).Take(12), 1.15, 20);
         }
         else
         {
-            var names = seeds.Take(5).SelectMany(s => Regex.Matches(s.Source, @"\b([A-Za-z_]\w{7,})\s*\(").Select(m => m.Groups[1].Value))
-                .Where(n => Regex.IsMatch(n, "[a-z][A-Z]")).GroupBy(n => n).OrderByDescending(g => g.Count()).Take(16).Select(g => g.Key);
-            Search(string.Join(' ', names), .7);
+            ExpandCalledMembers(seeds.Take(5), .7, 16);
         }
-        var frontier = seeds.Take(8).Select(s => s.Id).ToArray();
+        var frontier = (flow
+            ? candidates.Values.Where(s => s.Kind != "SourceChunk" && (mentionsTests || !IsTestPath(s.FilePath)))
+                .OrderByDescending(s => scores.GetValueOrDefault(s.Id)).Take(14)
+            : seeds.Take(8)).Select(s => s.Id).Distinct(StringComparer.Ordinal).ToArray();
         for (var depth = 0; depth < 2 && frontier.Length > 0; depth++)
         {
             token.ThrowIfCancellationRequested();
@@ -251,7 +319,7 @@ public sealed class Retriever
                     WHERE repo_root=@p0 AND to_id IN ({ids}) AND from_id NOT IN ({ids})
                 ) e JOIN symbols s ON s.id=e.symbol_id
                 WHERE s.source<>'' AND s.kind<>'SourceChunk'
-                ORDER BY CASE e.kind WHEN 'CALLS' THEN 0 ELSE 1 END,s.file_path,s.start_line LIMIT 32
+                ORDER BY CASE e.kind WHEN 'CALLS' THEN 0 WHEN 'IMPLEMENTS' THEN 1 ELSE 2 END,s.file_path,s.start_line LIMIT 32
                 """, r => ReadSymbol(r) with
             {
                 Relation = r.GetString(r.GetOrdinal("relation")) +
@@ -260,19 +328,59 @@ public sealed class Retriever
             var next = new List<string>();
             for (var i = 0; i < rows.Count; i++)
                 if (candidates.TryAdd(rows[i].Id, rows[i]))
-                { scores[rows[i].Id] = .8 / (20 + i); next.Add(rows[i].Id); }
+                { scores[rows[i].Id] = (flow ? 1.1 : .8) / (20 + i); next.Add(rows[i].Id); }
             frontier = next.ToArray();
         }
-        var ranked = candidates.Values.OrderByDescending(s => scores[s.Id]).ThenBy(s => s.FilePath, StringComparer.Ordinal)
+        if (flow)
+        {
+            // Large orchestrator/worker methods (> 6,000 chars) are truncated per span; include their continuation chunks
+            // and expand downstream service calls invoked later in those methods.
+            var largeMembers = candidates.Values
+                .Where(s => s.Kind == "Member" && s.Source.Length > 6000 && (mentionsTests || !IsTestPath(s.FilePath)))
+                .OrderByDescending(s => scores.GetValueOrDefault(s.Id))
+                .Take(3)
+                .ToArray();
+            var continuations = new List<Symbol>();
+            foreach (var member in largeMembers)
+            {
+                var approxCoveredLines = SourceText.Lines(member.Source[..6000]).Length;
+                var resumeFrom = member.StartLine + Math.Max(1, approxCoveredLines - 12);
+                var extraChunks = Query(db, """
+                    SELECT * FROM symbols WHERE repo_root=@p0 AND file_path=@p1 AND kind='SourceChunk'
+                    AND end_line>@p2 AND start_line<=@p3 ORDER BY start_line LIMIT 3
+                    """, r => ReadSymbol(r) with { Relation = "Method continuation" },
+                    key, member.FilePath, resumeFrom, member.EndLine);
+                for (var i = 0; i < extraChunks.Count; i++)
+                {
+                    var chunk = extraChunks[i];
+                    candidates[chunk.Id] = chunk;
+                    scores[chunk.Id] = Math.Max(scores.GetValueOrDefault(chunk.Id), Math.Max(.9, scores.GetValueOrDefault(member.Id) - .05 * (i + 1)));
+                    continuations.Add(chunk);
+                }
+            }
+            if (continuations.Count > 0)
+                ExpandCalledMembers(continuations, .95, 16);
+        }
+        if (!mentionsTests)
+            foreach (var id in candidates.Keys.ToArray())
+                if (IsTestPath(candidates[id].FilePath))
+                    scores[id] = scores.GetValueOrDefault(id) * .55;
+        var ranked = candidates.Values.OrderByDescending(s => scores.GetValueOrDefault(s.Id)).ThenBy(s => s.FilePath, StringComparer.Ordinal)
             .ThenBy(s => s.StartLine).ThenBy(s => s.Id, StringComparer.Ordinal).ToList();
         if (flow)
         {
-            var layers = ranked.Where(s => Layer(s) is not ".css" and not ".scss").GroupBy(Layer).Select(g => new Queue<Symbol>(g)).ToArray();
-            ranked = anchors.DistinctBy(s => s.Id).ToList();
-            var seen = ranked.Select(s => s.Id).ToHashSet();
-            while (layers.Any(l => l.Count > 0))
-                foreach (var layer in layers)
-                    if (layer.TryDequeue(out var item) && seen.Add(item.Id)) ranked.Add(item);
+            var filtered = ranked.Where(s => Layer(s) != "style").ToList();
+            ranked = anchors.Where(s => mentionsTests || !IsTestPath(s.FilePath)).DistinctBy(s => s.Id).ToList();
+            var seen = ranked.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+            var wantsFrontend = terms.Any(t => new[] { "ui", "frontend", "angular", "component", "page", "screen", "journey", "browser", "chat" }.Contains(t.ToLowerInvariant()));
+            if (wantsFrontend)
+            {
+                foreach (var bucket in new[] { "frontend", "template", "docs" })
+                    foreach (var item in filtered.Where(s => Layer(s) == bucket).Take(2))
+                        if (seen.Add(item.Id)) ranked.Add(item);
+            }
+            foreach (var item in filtered)
+                if (seen.Add(item.Id)) ranked.Add(item);
         }
         var context = new List<Symbol>();
         foreach (var candidate in ranked)

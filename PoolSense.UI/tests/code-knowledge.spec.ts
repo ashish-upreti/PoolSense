@@ -244,4 +244,126 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await expect(addRepository).toBeVisible()
     expect(errors).toEqual([])
   })
+
+  test(`repository status message tones and edit section scroll at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    const projects = Array.from({ length: 8 }, (_, index) => ({
+      id: index + 1,
+      projectId: `project-${index + 1}`,
+      projectName: `Application ${index + 1}`,
+      knowledgeLookbackYears: 2,
+      similaritySearchLimit: 5,
+      sendEmail: false,
+      poolingEnabled: true,
+      emailRecipients: '',
+      applicationFilter: `APP-${index + 1}`,
+      nyraKbNames: '',
+      createdAt: '',
+    }))
+    const repositories: CodeRepository[] = [
+      {
+        id: 'repo-bounded',
+        projectId: 'project-8',
+        url: 'https://github.com/example/bounded-repo',
+        branch: 'main',
+        enabled: true,
+        status: 'ready',
+        message: 'Index ready; project knowledge covers a bounded source selection.',
+        indexedCommit: 'a'.repeat(40),
+        fileCount: 42,
+        symbolCount: 180,
+        lastCheckedAt: null,
+        lastIndexedAt: null,
+      },
+      {
+        id: 'repo-retained',
+        projectId: 'project-8',
+        url: 'https://github.com/example/retained-repo',
+        branch: 'main',
+        enabled: true,
+        status: 'error',
+        message: 'Refresh failed; the last successful index is retained.',
+        indexedCommit: 'b'.repeat(40),
+        fileCount: 19,
+        symbolCount: 74,
+        lastCheckedAt: null,
+        lastIndexedAt: null,
+      },
+      {
+        id: 'repo-failed',
+        projectId: 'project-8',
+        url: 'https://github.com/example/failed-repo',
+        branch: 'main',
+        enabled: true,
+        status: 'error',
+        message: 'Indexing timed out.',
+        indexedCommit: '',
+        fileCount: 0,
+        symbolCount: 0,
+        lastCheckedAt: null,
+        lastIndexedAt: null,
+      },
+    ]
+
+    await page.route('**/api/**', async route => {
+      const path = new URL(route.request().url()).pathname
+      if (path === '/api/auth/session') {
+        await route.fulfill({ json: { success: true, user: { username: 'alice', displayName: 'Alice', isAdmin: true, email: 'alice@example.test' } } })
+      } else if (path === '/api/projects/groups') {
+        await route.fulfill({ json: projects.map(entry => ({ groupId: entry.projectId, displayName: entry.projectName })) })
+      } else if (path === '/api/projects') {
+        await route.fulfill({ json: projects })
+      } else if (path === '/api/settings/ticket-automation') {
+        await route.fulfill({ json: { pollingEnabled: false, pollIntervalSeconds: 60, poolSenseEmail: false, similaritySearchLimit: 5, newStatusName: 'New', closedStatusName: 'Closed', email: { recipient: '', fromAddress: '', deliveryMode: 'Smtp', smtpHost: '', port: 25, timeoutMs: 30000, databaseMailProfile: '' } } })
+      } else if (path === '/api/settings/deployment') {
+        await route.fulfill({ json: { environmentLabel: 'Test', environmentName: 'Test', machineName: 'Test', poolSenseDatabaseName: 'Test', ticketSourceDatabaseName: 'Test' } })
+      } else if (path === '/api/github/access') {
+        await route.fulfill({ json: { configured: true, available: true, login: 'managed-github', message: '' } })
+      } else if (path === '/api/projects/project-8/repositories') {
+        await route.fulfill({ json: repositories })
+      } else {
+        await route.fulfill({ json: [] })
+      }
+    })
+
+    await page.goto('http://localhost:4200')
+    await page.getByRole('button', { name: 'Open application configuration', exact: true }).click()
+
+    const lastCard = page.locator('.application-card').filter({ hasText: 'Application 8' })
+    await lastCard.scrollIntoViewIfNeeded()
+    const configCard = page.locator('form.application-config-card')
+    const topBefore = await configCard.evaluate(el => el.getBoundingClientRect().top)
+    expect(topBefore).toBeLessThan(0)
+
+    await lastCard.getByRole('button', { name: 'Edit', exact: true }).click()
+    await expect(configCard).toHaveClass(/application-config-card-editing/)
+    await expect(page.locator('input[name="projectName"]')).toBeFocused()
+    await expect.poll(async () => {
+      const top = await configCard.evaluate(el => el.getBoundingClientRect().top)
+      return top >= -4 && top < viewport.height * 0.45
+    }).toBe(true)
+
+    const component = page.locator('app-code-repositories')
+    const rows = component.locator('.repository')
+    await expect(rows).toHaveCount(3)
+
+    const boundedMsg = rows.nth(0).locator('.repo-message')
+    const retainedMsg = rows.nth(1).locator('.repo-message')
+    const failedMsg = rows.nth(2).locator('.repo-message')
+
+    await expect(boundedMsg).toHaveText('Index ready; project knowledge covers a bounded source selection.')
+    await expect(boundedMsg).toHaveClass(/\bhint\b/)
+    await expect(boundedMsg).not.toHaveClass(/\berror\b/)
+
+    await expect(retainedMsg).toHaveText('Refresh failed; the last successful index is retained.')
+    await expect(retainedMsg).toHaveClass(/\bwarning\b/)
+    await expect(retainedMsg).not.toHaveClass(/\berror\b/)
+    await expect(rows.nth(1)).toContainText('Last index retained')
+
+    await expect(failedMsg).toHaveText('Indexing timed out.')
+    await expect(failedMsg).toHaveClass(/\berror\b/)
+
+    await rows.nth(0).getByLabel('Branch', { exact: true }).fill('develop')
+    await expect(boundedMsg).toHaveCount(0)
+  })
 }

@@ -97,6 +97,8 @@ export interface CodeChatStoredMessage {
   content: string
   citations: CodeEvidence[]
   createdAt: string
+  processingDurationMs?: number | null
+  searchMode?: CodeSearchMode | null
 }
 
 export interface CodeChatSession {

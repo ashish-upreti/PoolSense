@@ -34,7 +34,7 @@ public sealed record CodeQueryPlan(string Query, string Kind, string? Identifier
 
     public bool MatchesIdentifier(CodeSearchCandidate candidate) => Identifier is not null &&
         candidate.Symbol.Name.Equals(Identifier, StringComparison.Ordinal);
-    public int Candidates(int configured) => IsSymbol ? Math.Min(configured, 12) : configured;
-    public int Spans(int configured) => IsSymbol ? Math.Min(configured, 6) : configured;
-    public int Characters(int configured) => IsSymbol ? Math.Min(configured, 12000) : configured;
+    public int Candidates(int configured) => IsSymbol ? Math.Min(configured, 12) : IsWorkflow && configured >= 20 ? Math.Max(configured, 32) : configured;
+    public int Spans(int configured) => IsSymbol ? Math.Min(configured, 6) : IsWorkflow && configured >= 12 ? Math.Max(configured, 18) : configured;
+    public int Characters(int configured) => IsSymbol ? Math.Min(configured, 12000) : IsWorkflow && configured >= 24000 ? Math.Max(configured, 36000) : configured;
 }

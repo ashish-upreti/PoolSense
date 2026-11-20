@@ -1343,7 +1343,7 @@
         <p *ngIf="projectError" class="project-feedback-banner">{{ projectError }}</p>
         <p *ngIf="projectNotice" class="project-feedback-banner project-feedback-banner-success">{{ projectNotice }}</p>
 
-        <section class="project-studio">
+        <section #projectStudio class="project-studio">
           <form class="project-form-card application-master-card" (ngSubmit)="handleTicketAutomationSubmit()">
             <div class="card-heading-row project-toolbar application-master-toolbar">
               <span class="application-master-icon" aria-hidden="true">
@@ -1396,7 +1396,7 @@
           </form>
 
           <div class="project-studio-grid">
-            <form class="project-form-card application-config-card" (ngSubmit)="handleProjectSubmit()">
+            <form #applicationConfigCard class="project-form-card application-config-card" [class.application-config-card-editing]="!!editingProjectId" (ngSubmit)="handleProjectSubmit()">
               <div class="card-heading-row project-toolbar application-config-toolbar">
                 <span class="application-config-heading-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -1416,7 +1416,7 @@
               <div class="project-form-grid application-config-grid">
                 <label class="field-group field-group-full">
                   <span class="field-label">Application name</span>
-                  <input class="field-input" type="text" name="projectName" [(ngModel)]="projectForm.projectName" placeholder="FSCO-Fab" [disabled]="isProjectSaving" />
+                  <input #projectNameInput class="field-input" type="text" name="projectName" [(ngModel)]="projectForm.projectName" placeholder="FSCO-Fab" [disabled]="isProjectSaving" />
                 </label>
 
                 <label class="field-group field-group-full">
@@ -1543,7 +1543,7 @@
               <div *ngIf="!isProjectLoading && projects.length === 0" class="project-empty"><p class="empty-copy">No applications are configured yet. Create the first application from the form.</p></div>
 
               <div *ngIf="!isProjectLoading && projects.length > 0" class="project-list application-list">
-                <article *ngFor="let project of projects" class="project-card application-card">
+                <article *ngFor="let project of projects" class="project-card application-card" [class.application-card-editing]="editingProjectId === project.projectId">
                   <div class="project-card-header application-card-header">
                     <div class="application-card-title-group">
                       <p class="project-card-title">{{ project.projectName }}</p>
@@ -1701,13 +1701,13 @@
                     <article *ngIf="message.role === 'assistant'" class="message-bubble message-bubble-assistant" [class.code-rag-message-error]="message.isError">
                       <div class="message-bubble-header code-rag-message-header">
                         <p class="message-label">CodeRAG <span class="code-rag-message-time">{{ message.generatedAt | date: 'shortTime' }}</span><span *ngIf="message.searchMode === 'deep'" class="code-rag-mode-badge">Deep search</span></p>
-                        <span *ngIf="codeAnswerDurationLabel(message) as durationLabel" class="answer-duration" [attr.title]="completedDurationTitle">
+                        <span *ngIf="codeAnswerDurationLabel(message) as durationLabel" class="answer-duration" [attr.title]="codeAnswerDurationTitle(message)">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="9"></circle>
                             <path d="M12 7v5l3 2"></path>
                           </svg>
                           <span class="answer-duration-text">{{ durationLabel }}</span>
-                          <span class="sr-only">{{ completedDurationTitle }}</span>
+                          <span class="sr-only">{{ codeAnswerDurationTitle(message) }}</span>
                         </span>
                       </div>
                       <app-rich-response class="message-body" [content]="message.text"></app-rich-response>

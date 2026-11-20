@@ -105,13 +105,35 @@ for (const [label, source] of [
 for (const [index, source] of diagrams.entries()) test(`accepts supported diagram ${index}`, () => { expect(() => validateMermaid(source)).not.toThrow() })
 for (const source of [
   'flowchart LR\n A-->B\n click A "https://evil.test"',
+  'flowchart LR\n A["https://evil.test/resource"]',
+  'flowchart LR\n A["javascript:alert(1)"]',
+  'flowchart LR\n A["data:image/svg+xml,<svg onload=alert(1)>"]',
+  'flowchart LR\n A["data: text/html;base64,PHNjcmlwdD4="]',
+  'flowchart LR\n A["data:,raw"]',
+  'flowchart LR\n A["<image href=x>"]',
   '%%{init: {"securityLevel":"loose"}}%%\nflowchart LR\n A-->B',
   'flowchart LR\n A["<img src=x onerror=alert(1)>"]',
   'flowchart LR\n' + 'A-->B\n'.repeat(101),
   'architecture-beta\nservice evil',
-]) test(`rejects unsafe/oversized diagram ${source.slice(0, 20)}`, () => {
+]) test(`rejects unsafe/oversized diagram ${source.replace(/\s+/g, ' ').slice(0, 42)}`, () => {
   expect(() => validateMermaid(source)).toThrow()
   expect(() => prepareMermaid(source)).toThrow()
+})
+test('accepts colon-punctuated prose labels such as data:, metadata:, image: and HTTP:', () => {
+  const source = `flowchart TD
+  A["Project roots"] --> B["Verify repository folders exist"]
+  B --> C["Index each root into a database"]
+  C --> D["Store searchable code data: symbols and edges"]
+  D --> E["Retriever searches the index for a question"]
+  C --> F["Track parsed files"]
+  C --> G["Track reused files during refresh"]`
+  expect(prepareMermaid(source)).toBe(source)
+
+  const proseLabels = `flowchart TD
+  A["Metadata: key/value"] --> B["Config Data:ConnectionString and Http:Timeout"]
+  B --> C["HTTP: 200 OK"]
+  C --> D["Build container image: alpine"]`
+  expect(prepareMermaid(proseLabels)).toBe(proseLabels)
 })
 test('route placeholders and parentheses are quoted only in plain flowchart rectangles', () => {
   const source = 'flowchart TD\n A[Submit question] --> B[POST /pool/{poolId}/troubleshoot (stream)]\n B --> C[Read response (NDJSON)]'
@@ -391,7 +413,13 @@ test('repository source-referenced graph renders without unsafe Mermaid warnings
   test.setTimeout(90000)
   const sourceUrl = 'https://github.com/org/repo/blob/abc123/src/Scheduler.cs#L1-L10'
   const source = '## Process flow\n\n' + fence('mermaid',
-    'flowchart TD\n  p_run["Run scheduler"]\n  p_save["Save work"]\n  p_run --> p_save\n') +
+    `flowchart TD
+  A["Project roots"] --> B["Verify repository folders exist"]
+  B --> C["Index each root into a database"]
+  C --> D["Store searchable code data: symbols and edges"]
+  D --> E["Retriever searches the index for a question"]
+  C --> F["Track parsed files"]
+  C --> G["Track reused files during refresh"]`) +
     `\n\nSource evidence: [src/Scheduler.cs:1-10](<${sourceUrl}>)\n\nThe scheduler saves work.`
   const block = richBlocks(source).find(block => block.kind === 'mermaid')!
   expect(() => validateMermaid(block.source)).not.toThrow()
@@ -402,7 +430,7 @@ test('repository source-referenced graph renders without unsafe Mermaid warnings
   await page.locator('.code-rag-composer').getByRole('button', { name: 'Send', exact: true }).click()
   const transcript = page.locator('.code-rag-transcript')
   await expect(transcript.locator('.rich-diagram svg')).toHaveCount(1, { timeout: 60000 })
-  await expect(transcript.locator('.rich-diagram svg')).toContainText('Run scheduler')
+  await expect(transcript.locator('.rich-diagram svg')).toContainText(/Store searchable code\s*data: symbols and edges/)
   await expect(transcript.locator('.rich-error')).toHaveCount(0)
   await expect(transcript.getByRole('link', { name: 'src/Scheduler.cs:1-10' })).toHaveAttribute('href', sourceUrl)
   await page.getByRole('button', { name: 'Saved rich code', exact: false }).click()
@@ -472,6 +500,24 @@ test('repository answers show how long they took, in minutes once past sixty sec
   await page.getByRole('button', { name: 'Saved rich code', exact: false }).click()
   await expect(page.locator('.code-rag-transcript .message-bubble-user')).toContainText('Explain architecture')
   await expect(duration).toHaveCount(0)
+  await expect(page.locator('.code-rag-transcript')).not.toContainText('Completed at')
+
+  await page.route('**/api/code-chat/history/saved-code', async route => {
+    await route.fulfill({
+      json: {
+        session: { id: 'saved-code', projectId: 'test-project', title: 'Saved rich code', createdAt: now, updatedAt: now, messageCount: 2 },
+        messages: [
+          { role: 'user', content: 'Explain architecture', citations: [], createdAt: now },
+          { role: 'assistant', content: 'Timed repository answer.', citations: [], createdAt: now, processingDurationMs: 8400, searchMode: 'deep' },
+        ],
+      },
+    })
+  })
+  await page.locator('.code-rag-history-new-button, button:has-text("New")').first().click()
+  await page.getByRole('button', { name: 'Saved rich code', exact: false }).click()
+  await expect(duration.locator('.answer-duration-text')).toHaveText('Generated in 8.4 s')
+  await expect(duration).toHaveAttribute('title', 'Server-measured generation time recorded when this answer was saved.')
+  await expect(page.locator('.code-rag-transcript .code-rag-mode-badge')).toHaveText('Deep search')
   expect(errors).toEqual([])
 })
 

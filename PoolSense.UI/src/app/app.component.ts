@@ -108,6 +108,7 @@ type CodeChatMessage = {
   codeKnowledgeStatus?: string
   codeSearchCoverage?: CodeSearchCoverage
   completedInMs?: number
+  processingDurationMs?: number
   searchMode?: CodeSearchMode
 }
 
@@ -333,7 +334,11 @@ export class AppComponent implements OnInit, OnDestroy {
   projects: ProjectConfig[] = []
   ingestionStatuses: IngestionStatus[] = []
   projectForm = createDefaultProjectForm()
+  @ViewChild('projectStudio') projectStudio?: ElementRef<HTMLElement>
+  @ViewChild('applicationConfigCard') applicationConfigCard?: ElementRef<HTMLElement>
+  @ViewChild('projectNameInput') projectNameInput?: ElementRef<HTMLInputElement>
   @ViewChild(CodeRepositoriesComponent) codeRepositories?: CodeRepositoriesComponent
+  private projectEditScrollTimer: number | null = null
   editingProjectId: string | null = null
   isProjectLoading = true
   isProjectSaving = false
@@ -365,7 +370,11 @@ export class AppComponent implements OnInit, OnDestroy {
   codeChatPendingMode: CodeSearchMode = 'quick'
   isCodeChatHistoryLoading = false
   private codeChatRevealTimer: number | null = null
+  private codeChatScrollTimer: number | null = null
+  private codeChatScrollObserver: ResizeObserver | null = null
+  private codeChatScrollCleanup: (() => void) | null = null
   private codeChatRequestSessionId: string | null = null
+  private readonly codeChatClientDurations = new Map<string, number[]>()
   applicationFeedbackForm = createDefaultApplicationFeedbackForm()
   applicationFeedbackError = ''
   applicationFeedbackNotice = ''
@@ -439,6 +448,11 @@ export class AppComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     this.invalidateChatRequests()
     this.stopCodeChatReveal()
+    this.stopCodeChatAutoScroll()
+    if (this.projectEditScrollTimer !== null) {
+      window.clearTimeout(this.projectEditScrollTimer)
+      this.projectEditScrollTimer = null
+    }
     this.narrowViewportQuery.removeEventListener('change', this.handleNarrowViewportChange)
   }
 
@@ -1363,14 +1377,26 @@ export class AppComponent implements OnInit, OnDestroy {
   async openCodeChatSession(sessionId: string) {
     if (sessionId === this.codeChatSessionId) return
     this.stopCodeChatReveal()
+    this.stopCodeChatAutoScroll()
     this.isCodeChatHistoryLoading = true
     this.codeChatError = ''
     try {
       const session = await this.api.getCodeChatSession(sessionId)
       this.codeChatSessionId = session.session.id
-      this.codeChatMessages = session.messages.map(message =>
-        this.createCodeChatMessage(message.role, message.content, message.citations, message.createdAt))
-      this.scrollCodeChatToBottom()
+      const clientDurations = this.codeChatClientDurations.get(session.session.id) ?? []
+      let assistantIndex = 0
+      this.codeChatMessages = session.messages.map(message => {
+        const base = this.createCodeChatMessage(message.role, message.content, message.citations, message.createdAt)
+        if (message.role !== 'assistant') return base
+        const completedInMs = clientDurations[assistantIndex++]
+        return {
+          ...base,
+          completedInMs,
+          processingDurationMs: message.processingDurationMs ?? undefined,
+          searchMode: message.searchMode === 'deep' || message.searchMode === 'quick' ? message.searchMode : undefined,
+        }
+      })
+      this.scrollCodeChatToLastResultStart()
     } catch (requestError) {
       this.codeChatError = requestError instanceof Error ? requestError.message : 'Unable to load this conversation.'
     } finally {
@@ -1383,6 +1409,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.isCodeChatAsking || this.isCodeChatTyping) return
     try {
       await this.api.deleteCodeChatSession(sessionId)
+      this.codeChatClientDurations.delete(sessionId)
       this.codeChatHistory = this.codeChatHistory.filter(session => session.id !== sessionId)
       if (this.codeChatSessionId === sessionId) this.resetCodeChat()
     } catch (requestError) {
@@ -1412,9 +1439,13 @@ export class AppComponent implements OnInit, OnDestroy {
     try {
       const response = await this.api.askCodeChat(this.codeRepoScopeIds, question, history, this.codeChatSessionId, mode)
       const completedInMs = performance.now() - requestStartedAt
-      const answerMessage = {
+      const clientDurations = this.codeChatClientDurations.get(response.sessionId) ?? []
+      clientDurations.push(completedInMs)
+      this.codeChatClientDurations.set(response.sessionId, clientDurations)
+      const answerMessage: CodeChatMessage = {
         ...this.createCodeChatMessage('assistant', '', response.citations, response.generatedAt, response.codeKnowledgeStatus, response.codeSearchCoverage),
-        completedInMs: completedInMs || response.timingsMs?.['total'],
+        completedInMs,
+        processingDurationMs: response.timingsMs?.['total'],
         searchMode: response.searchMode ?? mode,
       }
       if (this.codeChatSessionId === this.codeChatRequestSessionId) {
@@ -1427,11 +1458,11 @@ export class AppComponent implements OnInit, OnDestroy {
       if (this.codeChatSessionId === this.codeChatRequestSessionId) {
         const message = requestError instanceof Error ? requestError.message : 'Unable to answer from repository source.'
         this.codeChatMessages = [...this.codeChatMessages, { ...this.createCodeChatMessage('assistant', message), isError: true }]
+        this.scrollCodeChatToLastResultStart()
       }
     } finally {
       this.isCodeChatAsking = false
       this.codeChatRequestSessionId = null
-      this.scrollCodeChatToBottom()
     }
   }
 
@@ -1444,6 +1475,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   resetCodeChat() {
     this.stopCodeChatReveal()
+    this.stopCodeChatAutoScroll()
     this.codeChatMessages = []
     this.codeChatSessionId = null
     this.codeChatError = ''
@@ -1459,8 +1491,9 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private revealCodeChatAnswer(message: CodeChatMessage, answer: string) {
     this.stopCodeChatReveal()
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (!answer || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       message.text = answer
+      this.scrollCodeChatToLastResultStart()
       return
     }
     // Fenced blocks, links and table rows appear whole, so half-written Markdown never renders.
@@ -1478,9 +1511,13 @@ export class AppComponent implements OnInit, OnDestroy {
       if (range) position = range[1]
       if (/[\uD800-\uDBFF]/.test(answer[position - 1])) position++
       message.text = answer.slice(0, position)
-      this.scrollCodeChatToBottom()
-      if (position < answer.length) this.codeChatRevealTimer = window.setTimeout(reveal, 40)
-      else this.stopCodeChatReveal()
+      if (position < answer.length) {
+        this.scrollCodeChatFollowReveal()
+        this.codeChatRevealTimer = window.setTimeout(reveal, 40)
+      } else {
+        this.stopCodeChatReveal()
+        this.scrollCodeChatToLastResultStart()
+      }
     }
     reveal()
   }
@@ -1500,10 +1537,17 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   codeAnswerDurationLabel(message: CodeChatMessage): string | null {
-    const duration = formatAnswerDuration(message.completedInMs)
-    if (duration) return `Generated in ${duration}`
-    const completedAt = new Date(message.generatedAt)
-    return Number.isNaN(completedAt.valueOf()) ? 'Response completed' : `Completed at ${completedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+    if (message.role !== 'assistant' || message.isError) return null
+    const duration = formatAnswerDuration(message.completedInMs) ?? formatAnswerDuration(message.processingDurationMs)
+    return duration ? `Generated in ${duration}` : null
+  }
+
+  codeAnswerDurationTitle(message: CodeChatMessage): string | null {
+    if (message.role !== 'assistant' || message.isError) return null
+    if (formatAnswerDuration(message.completedInMs)) return this.completedDurationTitle
+    return formatAnswerDuration(message.processingDurationMs)
+      ? 'Server-measured generation time recorded when this answer was saved.'
+      : null
   }
 
   private createCodeChatMessage(role: 'user' | 'assistant', text: string, citations: CodeEvidence[] = [], generatedAt = new Date().toISOString(), codeKnowledgeStatus = '', codeSearchCoverage?: CodeSearchCoverage): CodeChatMessage {
@@ -1519,10 +1563,90 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private scrollCodeChatToBottom() {
-    setTimeout(() => {
+    this.stopCodeChatAutoScroll()
+    this.codeChatScrollTimer = window.setTimeout(() => {
+      this.codeChatScrollTimer = null
       const element = this.codeChatTranscript?.nativeElement
       if (element) element.scrollTop = element.scrollHeight
     })
+  }
+
+  private scrollCodeChatFollowReveal() {
+    this.stopCodeChatAutoScroll()
+    this.codeChatScrollTimer = window.setTimeout(() => {
+      this.codeChatScrollTimer = null
+      const transcript = this.codeChatTranscript?.nativeElement
+      if (!transcript) return
+      const results = transcript.querySelectorAll<HTMLElement>('.message-bubble-assistant')
+      const lastResult = results[results.length - 1]
+      if (!lastResult) return
+      const resultTop = this.offsetWithinContainer(transcript, lastResult)
+      const richResponse = lastResult.querySelector<HTMLElement>('app-rich-response')
+      const revealBottom = richResponse
+        ? this.offsetWithinContainer(transcript, richResponse) + richResponse.offsetHeight
+        : resultTop + lastResult.offsetHeight
+      transcript.scrollTop = revealBottom - resultTop <= transcript.clientHeight
+        ? resultTop
+        : revealBottom - transcript.clientHeight + 16
+    })
+  }
+
+  private scrollCodeChatToLastResultStart() {
+    this.stopCodeChatAutoScroll()
+    this.codeChatScrollTimer = window.setTimeout(() => {
+      this.codeChatScrollTimer = null
+      const transcript = this.codeChatTranscript?.nativeElement
+      if (!transcript) return
+      const results = transcript.querySelectorAll<HTMLElement>('.message-bubble-assistant')
+      const lastResult = results[results.length - 1]
+      if (!lastResult) {
+        transcript.scrollTop = transcript.scrollHeight
+        return
+      }
+      const alignToStart = () => {
+        const targetTop = this.offsetWithinContainer(transcript, lastResult)
+        transcript.scrollTop = targetTop
+        return Math.abs(transcript.scrollTop - targetTop) <= 2
+      }
+      if (alignToStart() || typeof ResizeObserver === 'undefined') return
+      const stopOnInteraction = () => this.stopCodeChatAutoScroll()
+      const events = ['wheel', 'pointerdown', 'touchstart', 'keydown'] as const
+      for (const eventName of events) {
+        transcript.addEventListener(eventName, stopOnInteraction, { passive: true, once: true })
+      }
+      const settleTimer = window.setTimeout(stopOnInteraction, 2000)
+      this.codeChatScrollCleanup = () => {
+        window.clearTimeout(settleTimer)
+        for (const eventName of events) {
+          transcript.removeEventListener(eventName, stopOnInteraction)
+        }
+      }
+      this.codeChatScrollObserver = new ResizeObserver(() => {
+        if (alignToStart()) this.stopCodeChatAutoScroll()
+      })
+      this.codeChatScrollObserver.observe(lastResult)
+    })
+  }
+
+  private offsetWithinContainer(container: HTMLElement, target: HTMLElement) {
+    let offset = 0
+    let current: HTMLElement | null = target
+    while (current && current !== container) {
+      offset += current.offsetTop
+      current = current.offsetParent as HTMLElement | null
+    }
+    return current === container ? offset : Math.max(0, target.offsetTop - container.offsetTop)
+  }
+
+  private stopCodeChatAutoScroll() {
+    if (this.codeChatScrollTimer !== null) {
+      window.clearTimeout(this.codeChatScrollTimer)
+      this.codeChatScrollTimer = null
+    }
+    this.codeChatScrollObserver?.disconnect()
+    this.codeChatScrollObserver = null
+    this.codeChatScrollCleanup?.()
+    this.codeChatScrollCleanup = null
   }
 
   toggleSidebar() {
@@ -1673,6 +1797,34 @@ export class AppComponent implements OnInit, OnDestroy {
     }
     this.projectNotice = `Editing ${project.projectName}.`
     this.projectError = ''
+    this.scrollToApplicationEditSection()
+  }
+
+  private scrollToApplicationEditSection() {
+    if (this.projectEditScrollTimer !== null) {
+      window.clearTimeout(this.projectEditScrollTimer)
+    }
+    this.projectEditScrollTimer = window.setTimeout(() => {
+      this.projectEditScrollTimer = null
+      const configCard = this.applicationConfigCard?.nativeElement
+      if (!configCard) return
+      const studio = this.projectStudio?.nativeElement
+      const behavior: ScrollBehavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+      if (studio && studio.scrollHeight > studio.clientHeight + 1) {
+        const targetTop = this.offsetWithinContainer(studio, configCard)
+        studio.scrollTo({ top: targetTop, behavior })
+        if (window.scrollY > 0) {
+          const studioRect = studio.getBoundingClientRect()
+          if (studioRect.top < 0) {
+            window.scrollTo({ top: Math.max(0, window.scrollY + studioRect.top - 12), behavior })
+          }
+        }
+      } else if (document.documentElement.scrollHeight > window.innerHeight + 1) {
+        const rect = configCard.getBoundingClientRect()
+        window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - 12), behavior })
+      }
+      this.projectNameInput?.nativeElement.focus({ preventScroll: true })
+    })
   }
 
   cancelProjectEdit() {

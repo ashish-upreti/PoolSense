@@ -57,13 +57,17 @@ export function sanitizeMarkdown(html: string): string {
   return document.body.innerHTML
 }
 
+const UNSAFE_MERMAID_URI = /\b(?:https?:[/\\]{2}|(?:javascript|vbscript):|data:(?:[a-z0-9.+-]+\/[a-z0-9.+-]+|\s*(?:[a-z0-9.+-]+\/[a-z0-9.+;=-]*,|[;,])))/i
+const UNSAFE_MERMAID_HTML_TAG = /<\s*\/?\s*(?:a|body|embed|foreignobject|html|iframe|image|img|link|meta|object|script|style|svg)\b/i
+
 export function validateMermaid(source: string): void {
   if (source.length > 8000 || source.split(/[;\n]/).length > 100) throw new Error('Diagram exceeds the 8,000 character / 100 statement limit.')
   if ((source.match(/\[[^\]]*\]|\([^)]*\)|\{[^}]*\}/g) || []).length > 100) throw new Error('Diagram exceeds the 100 labelled node limit.')
   if (!/^\s*(flowchart|graph|sequenceDiagram|pie|timeline|mindmap)\b/.test(source)) throw new Error('Unsupported diagram. Use flowchart, sequenceDiagram, pie, timeline or mindmap.')
   const outsideQuotes = source.replace(/"([^"\\]|\\.)*"/g, '""')
-  if (/%%|(?:^|[\s;])(?:click|style|classDef|linkStyle)\b|<[/!a-z]|@\{/.test(outsideQuotes) ||
-      /javascript:|https?:|data:|image\s*:|<\s*\/?\s*(?:a|body|embed|html|iframe|img|link|meta|object|script|style|svg)\b/i.test(source)) {
+  if (/%%|(?:^|[\s;])(?:click|style|classDef|linkStyle)\b|(?:^|[\s;{])image\s*:|<[/!a-zA-Z]|@\{/.test(outsideQuotes) ||
+      UNSAFE_MERMAID_URI.test(source) ||
+      UNSAFE_MERMAID_HTML_TAG.test(source)) {
     throw new Error('Unsafe diagram: directives, links, HTML, external resources and custom styling are not allowed.')
   }
   if ((source.match(/-->|---|==>|-.->|->>|-->>/g) || []).length > 150) throw new Error('Diagram exceeds the 150 edge limit.')

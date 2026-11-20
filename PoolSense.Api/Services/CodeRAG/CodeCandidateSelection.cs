@@ -45,8 +45,12 @@ public sealed class CodeCandidateBuffer(string query, int capacity) : IEnumerabl
             if (existing >= 0)
             {
                 var previous = items[existing];
+                var symbol = string.IsNullOrEmpty(previous.Symbol.Relation) && !string.IsNullOrEmpty(candidate.Symbol.Relation)
+                    ? previous.Symbol with { Relation = candidate.Symbol.Relation }
+                    : previous.Symbol;
                 items[existing] = previous with
                 {
+                    Symbol = symbol,
                     LexicalRank = PositiveMin(previous.LexicalRank, candidate.LexicalRank),
                     SemanticRank = PositiveMin(previous.SemanticRank, candidate.SemanticRank),
                     SemanticSimilarity = Math.Max(previous.SemanticSimilarity, candidate.SemanticSimilarity),
@@ -96,25 +100,40 @@ public static class CodeCandidateSelection
             || query.Contains(symbol.FilePath, StringComparison.OrdinalIgnoreCase);
         // Raw BM25 scores from independent databases are not compared. Fuse within-list ranks,
         // globally comparable query-term coverage and exact identifier/path matches.
-        return (exact ? 5 : 0) + (terms.Length == 0 ? 0 : 2d * matched / terms.Length)
+        var relationBoost = !string.IsNullOrEmpty(symbol.Relation) ? .35 : 0;
+        var raw = (exact ? 5 : 0) + (terms.Length == 0 ? 0 : 2d * matched / terms.Length)
+            + relationBoost
             + (candidate.LexicalRank > 0 ? 1d / (60 + candidate.LexicalRank) : 0)
             + (candidate.SemanticRank > 0 ? 1d / (60 + candidate.SemanticRank) + .2 * Math.Max(0, candidate.SemanticSimilarity) : 0)
             + (candidate.KnowledgeReference ? .02 + 1.5 * Math.Clamp(candidate.KnowledgeRelevance, 0, 1) : 0);
+        return IsTestFile(symbol.FilePath) && !MentionsTests(query) ? raw * .55 : raw;
     }
+
+    private static bool MentionsTests(string query) =>
+        Regex.IsMatch(query, @"\b(tests?|testing|specs?|xunit|playwright|unit|e2e)\b", RegexOptions.IgnoreCase);
+
+    private static bool IsTestFile(string filePath) =>
+        Regex.IsMatch(filePath.Replace('\\', '/'), @"(?:^|/)(?:tests?|specs?|__tests__)/|(?:Tests?|\.(?:spec|test))\.[A-Za-z0-9]+$", RegexOptions.IgnoreCase);
 
     public static IReadOnlyList<CodeEvidence> Select(string query, IEnumerable<CodeSearchCandidate> input, int maxSpans, int maxCharacters)
     {
         var terms = Terms(query);
         var ranked = input
             .GroupBy(candidate => (candidate.Repository.Id, candidate.Repository.Generation, candidate.Symbol.Id))
-            .Select(group => group.First() with
+            .Select(group =>
             {
-                LexicalRank = group.Where(item => item.LexicalRank > 0).Select(item => item.LexicalRank).DefaultIfEmpty().Min(),
-                SemanticRank = group.Where(item => item.SemanticRank > 0).Select(item => item.SemanticRank).DefaultIfEmpty().Min(),
-                SemanticSimilarity = group.Max(item => item.SemanticSimilarity),
-                KnowledgeReference = group.Any(item => item.KnowledgeReference),
-                KnowledgeRelevance = group.Max(item => item.KnowledgeRelevance),
-                Relationships = group.SelectMany(item => item.Relationships).Distinct().Take(8).ToArray()
+                var first = group.First();
+                var relation = group.Select(item => item.Symbol.Relation).FirstOrDefault(r => !string.IsNullOrEmpty(r)) ?? "";
+                return first with
+                {
+                    Symbol = string.IsNullOrEmpty(first.Symbol.Relation) && relation.Length > 0 ? first.Symbol with { Relation = relation } : first.Symbol,
+                    LexicalRank = group.Where(item => item.LexicalRank > 0).Select(item => item.LexicalRank).DefaultIfEmpty().Min(),
+                    SemanticRank = group.Where(item => item.SemanticRank > 0).Select(item => item.SemanticRank).DefaultIfEmpty().Min(),
+                    SemanticSimilarity = group.Max(item => item.SemanticSimilarity),
+                    KnowledgeReference = group.Any(item => item.KnowledgeReference),
+                    KnowledgeRelevance = group.Max(item => item.KnowledgeRelevance),
+                    Relationships = group.SelectMany(item => item.Relationships).Distinct().Take(8).ToArray()
+                };
             })
             .Select(candidate => (Candidate: candidate, Score: Relevance(query, candidate, terms))).ToList();
         var hasStrongSource = ranked.Any(item => item.Score >= 1);
@@ -132,15 +151,29 @@ public static class CodeCandidateSelection
                 .ThenBy(item => item.Candidate.Symbol.StartLine).First();
             candidates.Remove(next);
             var (repository, symbol, _, _, _, _) = next.Candidate;
-            if (selected.Any(item => item.RepositoryId == repository.Id && item.FilePath == symbol.FilePath &&
-                item.StartLine <= symbol.EndLine && item.EndLine >= symbol.StartLine)) continue;
             var source = SourceText.Redact(symbol.Source);
-            var lines = SourceText.Lines(source).ToArray();
+            var allLines = SourceText.Lines(source).ToArray();
+            if (allLines.Length == 0) continue;
+            var sliceStart = symbol.StartLine;
+            var actualEnd = symbol.StartLine + allLines.Length - 1;
+            var logicalEnd = Math.Max(symbol.EndLine, actualEnd);
+            var overlapping = selected.Where(item => item.RepositoryId == repository.Id && item.FilePath == symbol.FilePath &&
+                item.StartLine <= logicalEnd && item.EndLine >= symbol.StartLine).ToArray();
+            if (overlapping.Length > 0)
+            {
+                // Deduplicate enclosing parents and already-covered spans; only trim and retain forward continuations
+                // (such as a method body or continuation chunk extending past a 6,000-char or 70-line boundary).
+                if (overlapping.Any(item => item.StartLine > symbol.StartLine)) continue;
+                sliceStart = overlapping.Max(item => item.EndLine) + 1;
+                if (sliceStart > actualEnd) continue;
+            }
+            var lines = allLines[(sliceStart - symbol.StartLine)..];
+            if (lines.Count(line => !string.IsNullOrWhiteSpace(line)) == 0 || overlapping.Length > 0 && lines.Length < 2) continue;
             var kept = new StringBuilder();
             var count = 0;
             var path = string.Join('/', symbol.FilePath.Replace('\\', '/').Split('/').Select(Uri.EscapeDataString));
             var baseUrl = $"https://github.com/{repository.FullName}/blob/{repository.IndexedCommit}/{path}";
-            var relationships = next.Candidate.Relationships.Where(item => item.SiteLine >= symbol.StartLine && item.SiteLine <= symbol.EndLine).Take(4).ToArray();
+            var relationships = next.Candidate.Relationships.Where(item => item.SiteLine >= sliceStart && item.SiteLine <= actualEnd).Take(4).ToArray();
             var relationshipSize = relationships.Length == 0 ? 0 : JsonSerializer.Serialize(relationships).Length;
             var sourceBudget = Math.Min(6000, maxCharacters - used - baseUrl.Length - symbol.QualifiedName.Length - repository.FullName.Length - relationshipSize - 150);
             if (sourceBudget < 128) continue;
@@ -157,13 +190,13 @@ public static class CodeCandidateSelection
             source = kept.ToString();
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Regex.Replace(source, @"\s+", " "))));
             if (seenContents.Contains(hash)) continue;
-            var end = symbol.StartLine + count - 1;
-            var url = $"{baseUrl}#L{symbol.StartLine}-L{end}";
+            var end = sliceStart + count - 1;
+            var url = $"{baseUrl}#L{sliceStart}-L{end}";
             var size = source.Length + url.Length + symbol.QualifiedName.Length + repository.FullName.Length + relationshipSize + 100;
             if (used + size > maxCharacters) continue;
             seenContents.Add(hash);
             selected.Add(new(repository.Id, repository.ProjectId, repository.FullName, repository.Branch, repository.IndexedCommit,
-                symbol.FilePath, symbol.QualifiedName, symbol.StartLine, end, source, url)
+                symbol.FilePath, symbol.QualifiedName, sliceStart, end, source, url)
             {
                 Relationships = relationships.Where(item => item.SiteLine <= end).ToArray()
             });

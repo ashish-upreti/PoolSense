@@ -54,7 +54,7 @@ export class RepositoryIconComponent implements OnChanges {
           </div>
           <p *ngIf="hasBranches(repo)" class="hint">{{ repo.branches.length }} branch{{ repo.branches.length === 1 ? '' : 'es' }} found{{ repo.branchesTruncated ? ' (first 500 shown)' : '' }}; the default branch was preselected.</p>
           <div class="repo-status"><strong>{{ isChanged(repo) ? 'Unsaved' : repo.saved?.status }}</strong><ng-container *ngIf="repo.saved as saved"><span *ngIf="!isChanged(repo)">{{ statusLabel(saved) }}</span><code>{{ saved.branch }}&#64;{{ saved.indexedCommit.slice(0, 10) || 'not indexed' }}</code><span>{{ saved.fileCount }} files · {{ saved.symbolCount }} symbols</span></ng-container></div>
-          <p *ngIf="repo.saved?.message as message" class="error">{{ message }}</p>
+          <p *ngIf="!isChanged(repo) && repo.saved?.message as message" class="repo-message" [ngClass]="messageTone(repo.saved!)">{{ message }}</p>
         </article>
         <div class="list-footer">
           <button type="button" (click)="addRepository()" [disabled]="disabled"><app-repo-icon name="add"></app-repo-icon>Add repository</button>
@@ -81,11 +81,12 @@ export class RepositoryIconComponent implements OnChanges {
     select option { color: initial; }
     label.enabled { display: flex; align-items: center; min-height: 36px; }
     .repository { border-top: 1px solid #89929e44; margin-top: 16px; padding: 16px 0; display: grid; gap: 10px; }
-    .repo-status, .list-footer span, .hint { font-size: .75rem; overflow-wrap: anywhere; }
-    .hint { margin: 0; opacity: .8; }
+    .repo-status, .list-footer span, .hint, .repo-message { font-size: .75rem; overflow-wrap: anywhere; }
+    .hint { margin: 0; color: var(--muted, inherit); opacity: .92; }
+    .repo-message { margin: 0; }
     .list-footer { margin-top: 16px; }
-    .error { color: #ba493e; overflow-wrap: anywhere; }
-    .warning { color: #946200; overflow-wrap: anywhere; }
+    .error { color: var(--error-color, #ba493e); overflow-wrap: anywhere; }
+    .warning { color: var(--warning-color, #946200); overflow-wrap: anywhere; }
     a { color: inherit; }
     p { font-size: .8125rem; margin: 8px 0; }
     @container(max-width: 480px) { .repo-fields { grid-template-columns: minmax(0, 1fr) auto; } .repo-fields > label:not(.enabled), .repo-fields > .branches { grid-column: 1 / -1; } }
@@ -124,11 +125,18 @@ export class CodeRepositoriesComponent implements OnChanges, OnDestroy {
       case 'queued': return 'Queued for indexing'
       case 'indexing': return 'Indexing...'
       case 'ready': return 'Index ready'
-      case 'error': return 'Indexing failed'
+      case 'error': return saved.indexedCommit || /retained/i.test(saved.message) ? 'Last index retained' : 'Indexing failed'
       case 'access-required': return 'GitHub access required'
       case 'disabled': return 'Disabled'
       default: return ''
     }
+  }
+  messageTone(saved: CodeRepository): 'hint' | 'warning' | 'error' {
+    if (saved.status === 'access-required') return 'error'
+    if (saved.status === 'error') {
+      return saved.indexedCommit || /retained/i.test(saved.message) ? 'warning' : 'error'
+    }
+    return 'hint'
   }
   private draft(saved: CodeRepository): RepositoryDraft { return { key: saved.id, url: saved.url, branch: saved.branch, enabled: saved.enabled, saved, branches: [], branchesUrl: '', branchesTruncated: false, loadingBranches: false } }
   setUrl(repo: RepositoryDraft, value: string) {

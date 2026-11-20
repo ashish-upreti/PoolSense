@@ -286,12 +286,17 @@ public class CodeChatScopeTests
     {
         public CodeChatScope? LastScope { get; private set; }
         public string? LastAnswer { get; private set; }
+        public double? LastDurationMs { get; private set; }
+        public string? LastSearchMode { get; private set; }
         public Task<IReadOnlyList<CodeChatSessionSummary>> SessionsAsync(string user, CodeChatScope scope, CancellationToken token) => Task.FromResult<IReadOnlyList<CodeChatSessionSummary>>([]);
         public Task<CodeChatSession?> SessionAsync(string user, string sessionId, CancellationToken token) => Task.FromResult<CodeChatSession?>(null);
-        public Task<string> AppendExchangeAsync(string user, string? sessionId, CodeChatScope scope, string question, string answer, IReadOnlyList<CodeEvidence> citations, CancellationToken token)
+        public Task<string> AppendExchangeAsync(string user, string? sessionId, CodeChatScope scope, string question, string answer,
+            IReadOnlyList<CodeEvidence> citations, CancellationToken token, double? processingDurationMs = null, string? searchMode = null)
         {
             LastScope = scope;
             LastAnswer = answer;
+            LastDurationMs = processingDurationMs;
+            LastSearchMode = searchMode;
             return Task.FromResult("session-1");
         }
         public Task<bool> DeleteSessionAsync(string user, string sessionId, CancellationToken token) => Task.FromResult(true);
@@ -332,5 +337,29 @@ public class CodeChatScopeTests
         Assert.Equal(1, knowledge.Calls);
         Assert.Contains("retrieval", response.TimingsMs.Keys);
         Assert.Contains("generation", response.TimingsMs.Keys);
+    }
+
+    [Fact]
+    public async Task AskAsync_PersistsProcessingDurationAndMode_AndHistoryStoreParsesLegacyAndEnvelopePayloads()
+    {
+        var history = new RecordingHistory();
+        var service = new CodeChatService(new RecordingKnowledge(), history, new Projects("app-a"), new RecordingLlm(), new NoAudit());
+        await service.AskAsync("user", "app-a", new CodeAskRequest { Question = "How does Scheduler work?", Mode = "deep" }, default);
+
+        Assert.NotNull(history.LastDurationMs);
+        Assert.True(history.LastDurationMs >= 0);
+        Assert.Equal("deep", history.LastSearchMode);
+
+        var evidence = new CodeEvidence("repo", "app-a", "org/repo", "main", "abc123", "src/Scheduler.cs", "Scheduler", 1, 10, "class Scheduler {}", "https://github.com/org/repo/blob/abc123/src/Scheduler.cs#L1-L10");
+        var serialized = CodeChatHistoryStore.SerializeAssistantPayload([evidence], 8420.5, "deep");
+        var parsed = CodeChatHistoryStore.ParseAssistantPayload(serialized);
+        Assert.Single(parsed.Citations);
+        Assert.Equal(8420.5, parsed.ProcessingDurationMs);
+        Assert.Equal("deep", parsed.SearchMode);
+
+        var legacy = CodeChatHistoryStore.ParseAssistantPayload(System.Text.Json.JsonSerializer.Serialize(new[] { evidence }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+        Assert.Single(legacy.Citations);
+        Assert.Null(legacy.ProcessingDurationMs);
+        Assert.Null(legacy.SearchMode);
     }
 }

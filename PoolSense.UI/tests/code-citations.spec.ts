@@ -252,3 +252,78 @@ test('restored code references wrap on narrow screens in both themes', async ({ 
   }
   expect(errors).toEqual([])
 })
+
+test('repository search completion and history restore scroll to the start of the latest result', async ({ page }) => {
+  const errors = await setup(page)
+  const tallEvidence = Array.from({ length: 6 }, (_, index) => ({
+    ...documents[index % documents.length],
+    filePath: `Procedures/UspRunrateStep${index + 1}.sql`,
+    startLine: index * 50 + 1,
+    endLine: index * 50 + 45,
+    sourceUrl: `https://github.com/${repository}/blob/${commit}/Procedures/UspRunrateStep${index + 1}.sql#L${index * 50 + 1}-L${index * 50 + 45}`,
+  }))
+  const tallAnswer = (heading: string) => [
+    `## ${heading}`,
+    ...Array.from({ length: 14 }, (_, index) =>
+      `Paragraph ${index + 1}: Runrate calculation aggregates effective capacity across active equipment groups and normalizes weekly throughput targets.`),
+  ].join('\n\n')
+
+  let askCount = 0
+  await page.route(url => url.pathname.endsWith('/code-chat/ask'), async route => {
+    askCount++
+    const body = route.request().postDataJSON() as { question: string }
+    await route.fulfill({
+      json: {
+        projectId: 'test',
+        sessionId: 'new',
+        question: body.question,
+        answer: tallAnswer(`Answer ${askCount}`),
+        citations: tallEvidence,
+        generatedAt: now,
+        searchMode: 'quick',
+      },
+    })
+  })
+  await page.route(url => url.pathname.endsWith('/code-chat/history/code'), async route => {
+    await route.fulfill({
+      json: {
+        session: { id: 'code', projectId: 'test', title: 'Saved code prose', updatedAt: now, messageCount: 2 },
+        messages: [
+          { role: 'user', content: 'Runrate formula', citations: [], createdAt: now },
+          { role: 'assistant', content: tallAnswer('Restored answer'), citations: tallEvidence, createdAt: now },
+        ],
+      },
+    })
+  })
+
+  await page.goto('http://localhost:4200')
+  await page.getByRole('button', { name: 'Open code repositories', exact: true }).click()
+  const transcript = page.locator('.code-rag-transcript')
+
+  for (const [index, question] of ['Runrate formula', 'Follow-up runrate breakdown'].entries()) {
+    await page.locator('#code-chat-question').fill(question)
+    await page.locator('.code-rag-composer').getByRole('button', { name: 'Send', exact: true }).click()
+    await expect(transcript).toHaveAttribute('aria-busy', 'false', { timeout: 15000 })
+    await expect(transcript.locator('.rich-response h2').last()).toHaveText(`Answer ${index + 1}`)
+
+    await expect.poll(() => transcript.evaluate(element => {
+      const results = element.querySelectorAll<HTMLElement>('.message-bubble-assistant')
+      const last = results[results.length - 1]
+      return {
+        overflows: element.scrollHeight - last.offsetTop > element.clientHeight + 150,
+        alignedToStart: Math.abs(element.scrollTop - last.offsetTop) <= 2,
+        notAtBottom: element.scrollTop + element.clientHeight < element.scrollHeight - 100,
+      }
+    })).toEqual({ overflows: true, alignedToStart: true, notAtBottom: true })
+  }
+
+  await page.getByRole('button', { name: 'Saved code prose', exact: false }).click()
+  await expect(transcript.locator('.rich-response h2').last()).toHaveText('Restored answer')
+  await expect.poll(() => transcript.evaluate(element => {
+    const results = element.querySelectorAll<HTMLElement>('.message-bubble-assistant')
+    const last = results[results.length - 1]
+    return Math.abs(element.scrollTop - last.offsetTop)
+  })).toBeLessThanOrEqual(2)
+
+  expect(errors).toEqual([])
+})
