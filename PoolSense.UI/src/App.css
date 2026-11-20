@@ -2783,6 +2783,7 @@
   }
 
   .project-studio {
+    position: relative;
     min-height: 0;
     display: grid;
     gap: 1rem;
@@ -2814,6 +2815,12 @@
     padding: 1rem;
     border-radius: 14px;
     background: var(--bubble-bg);
+  }
+
+  .application-config-card-editing,
+  .application-card-editing {
+    border-color: var(--accent-outline);
+    box-shadow: 0 0 0 1px var(--accent-outline);
   }
 
   .application-config-toolbar {
@@ -5146,6 +5153,7 @@
 }
 
 .code-rag-transcript {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 1rem;

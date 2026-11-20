@@ -13,6 +13,7 @@ public sealed class CodeTimings(string operation)
     private readonly ConcurrentDictionary<string, double> stages = new(StringComparer.Ordinal);
 
     public IDisposable Measure(string stage) => new Measurement(this, stage);
+    public double ElapsedMilliseconds => Stopwatch.GetElapsedTime(started).TotalMilliseconds;
     public IReadOnlyDictionary<string, double> Snapshot() => new Dictionary<string, double>(stages, StringComparer.Ordinal)
     {
         ["total"] = Stopwatch.GetElapsedTime(started).TotalMilliseconds

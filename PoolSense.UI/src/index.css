@@ -29,6 +29,7 @@
   --track-bg: #0b1220;
   --error-bg: rgba(248, 113, 113, 0.12);
   --error-color: #fca5a5;
+  --warning-color: #fbbf24;
   --insight-divider: rgba(148, 163, 184, 0.12);
   --toggle-bg: #101522;
   --toggle-color: #e2e8f0;
@@ -78,6 +79,7 @@
   --track-bg: #e2e8f0;
   --error-bg: #fff1f2;
   --error-color: #be123c;
+  --warning-color: #946200;
   --insight-divider: rgba(148, 163, 184, 0.18);
   --toggle-bg: #f8fafc;
   --toggle-color: #0f172a;

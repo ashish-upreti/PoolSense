@@ -1,6 +1,7 @@
 using CodeRAG.Core.Indexing;
 using CodeRAG.Core.Retrieval;
 using CodeRAG.Core.Storage;
+using PoolSense.Api.Services.CodeRAG;
 using Xunit;
 
 namespace PoolSense.Api.Tests;
@@ -126,5 +127,107 @@ public sealed class CodeRAGCoreTests : IDisposable
             Assert.DoesNotContain(evidence, symbol => symbol.FilePath == "Noise.cs");
         }
         finally { SQLitePCL.raw.sqlite3_progress_handler(db.Handle, 0, null, null); }
+    }
+
+    [Fact]
+    public async Task WorkflowRetrieval_BridgesInjectedInterfaceCalls_LargeOrchestrators_AndOverlappingPollingBodies()
+    {
+        Directory.CreateDirectory(Path.Combine(directory, "Controllers"));
+        Directory.CreateDirectory(Path.Combine(directory, "Orchestration"));
+        Directory.CreateDirectory(Path.Combine(directory, "Services"));
+
+        await File.WriteAllTextAsync(Path.Combine(directory, "Controllers", "ResolutionController.cs"), """
+            namespace Demo.Controllers;
+            public class ResolutionController
+            {
+                private readonly Demo.Orchestration.ITicketWorkflowOrchestrator _orchestrator;
+                public ResolutionController(Demo.Orchestration.ITicketWorkflowOrchestrator orchestrator) => _orchestrator = orchestrator;
+                public string Post(string request) => _orchestrator.RecommendAsync(request);
+            }
+            """);
+
+        var orchestratorPadding = string.Concat(Enumerable.Range(1, 120)
+            .Select(i => $"        var preparationStep{i:D3} = \"categorizing and analyzing ticket metadata step {i}\";\n"));
+        await File.WriteAllTextAsync(Path.Combine(directory, "Orchestration", "TicketWorkflowOrchestrator.cs"), $$"""
+            namespace Demo.Orchestration;
+            public interface ITicketWorkflowOrchestrator
+            {
+                string RecommendAsync(string request);
+            }
+            public class TicketWorkflowOrchestrator : ITicketWorkflowOrchestrator
+            {
+                private readonly Demo.Services.PoolVectorStore _pool;
+                private readonly Demo.Services.NyraWikiClient _wiki;
+                private readonly Demo.Services.ResolutionGenerator _generator;
+                public TicketWorkflowOrchestrator(Demo.Services.PoolVectorStore pool, Demo.Services.NyraWikiClient wiki, Demo.Services.ResolutionGenerator generator)
+                {
+                    _pool = pool;
+                    _wiki = wiki;
+                    _generator = generator;
+                }
+                public string RecommendAsync(string request) => ProcessInternalAsync(request);
+                private string ProcessInternalAsync(string request)
+                {
+            {{orchestratorPadding}}
+                    var incidents = _pool.SearchSimilarTickets(request);
+                    var docs = _wiki.RetrieveNyraDocumentsAsync(request);
+                    return _generator.GenerateResolutionAsync(incidents + docs);
+                }
+            }
+            """);
+
+        var pollingPadding = string.Concat(Enumerable.Range(1, 115)
+            .Select(i => $"        var pollCheck{i:D3} = \"checking project configuration and closed ticket sync {i}\";\n"));
+        await File.WriteAllTextAsync(Path.Combine(directory, "Services", "BackgroundTicketPollingService.cs"), $$"""
+            namespace Demo.Services;
+            public class BackgroundTicketPollingService
+            {
+                public void PollOnceAsync(Demo.Orchestration.ITicketWorkflowOrchestrator orchestrator, TicketEmailSender emailService)
+                {
+            {{pollingPadding}}
+                    ProcessNewTicketsAsync(orchestrator, emailService);
+                }
+                private void ProcessNewTicketsAsync(Demo.Orchestration.ITicketWorkflowOrchestrator orchestrator, TicketEmailSender emailService)
+                {
+                    var recommendation = orchestrator.RecommendAsync("new-ticket");
+                    emailService.SendRecommendationAsync("ops@example.com", recommendation);
+                }
+            }
+            public class TicketEmailSender { public void SendRecommendationAsync(string to, string body) {} }
+            public class PoolVectorStore { public string SearchSimilarTickets(string q) => q; }
+            public class NyraWikiClient { public string RetrieveNyraDocumentsAsync(string q) => q; }
+            public class ResolutionGenerator { public string GenerateResolutionAsync(string ctx) => ctx; }
+            """);
+
+        var database = Path.Combine(directory, "index.sqlite3");
+        await new RepositoryIndexer().IndexAsync(directory, database);
+
+        const string query = "Explain the end-to-end ticket recommendation and background polling workflow";
+        var plan = CodeQueryPlan.Create(query);
+        Assert.True(plan.IsWorkflow);
+
+        using var db = GraphStore.Open(database, readOnly: true);
+        var spans = new Retriever().Retrieve(query, db, directory, plan.Candidates(20), Retriever.MaxContextChars);
+        var repository = new CodeRepository
+        {
+            Id = "repo-1",
+            ProjectId = "proj-1",
+            FullName = "demo/poolsense",
+            Branch = "main",
+            Generation = "gen-1",
+            IndexedCommit = new string('a', 40)
+        };
+        var buffer = new CodeCandidateBuffer(query, 256);
+        for (var i = 0; i < spans.Count; i++)
+            buffer.Add(new CodeSearchCandidate(repository, spans[i], LexicalRank: i + 1));
+
+        var selected = CodeCandidateSelection.Select(query, buffer, plan.Spans(12), plan.Characters(24000));
+        var combined = string.Join("\n", selected.Select(item => item.Content));
+
+        Assert.Contains("RecommendAsync(string request) => ProcessInternalAsync(request)", combined);
+        Assert.Contains("SearchSimilarTickets", combined);
+        Assert.Contains("RetrieveNyraDocumentsAsync", combined);
+        Assert.Contains("GenerateResolutionAsync", combined);
+        Assert.Contains("SendRecommendationAsync(\"ops@example.com\"", combined);
     }
 }

@@ -115,15 +115,17 @@ public sealed class CodeChatService(ICodeKnowledgeService knowledge, ICodeChatHi
             if (notice.Length > 0) answer = $"> {notice}\n\n{answer}";
         }
 
+        var searchMode = request.IsDeep ? "deep" : "quick";
+        var processingDurationMs = timings.ElapsedMilliseconds;
         string sessionId;
         using (timings.Measure("history"))
-            sessionId = await history.AppendExchangeAsync(user, request.SessionId, scope, question, answer, retrieval.Documents, token);
+            sessionId = await history.AppendExchangeAsync(user, request.SessionId, scope, question, answer, retrieval.Documents, token, processingDurationMs, searchMode);
         var scopeDescription = scope.IsAll ? "all" : string.Join(',', scope.ProjectIds);
-        await audit.LogAsync("AskCodeChat", "CodeChatSession", sessionId, $"Scope={scopeDescription}; Mode={(request.IsDeep ? "deep" : "quick")}; Citations={retrieval.Documents.Count}; Status={retrieval.Status}", cancellationToken: token);
+        await audit.LogAsync("AskCodeChat", "CodeChatSession", sessionId, $"Scope={scopeDescription}; Mode={searchMode}; Citations={retrieval.Documents.Count}; Status={retrieval.Status}", cancellationToken: token);
         return new(scope.ProjectId ?? "", sessionId, question, answer, DateTimeOffset.UtcNow, retrieval.Status, retrieval.Documents)
         {
             CodeSearchCoverage = retrieval.Coverage,
-            SearchMode = request.IsDeep ? "deep" : "quick",
+            SearchMode = searchMode,
             ProjectIds = scope.ProjectIds,
             TimingsMs = timings.Snapshot()
         };

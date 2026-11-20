@@ -241,7 +241,11 @@ public sealed record CodeChatSessionSummary(string Id, string ProjectId, string 
     public IReadOnlyList<string> ProjectIds { get; init; } = ProjectId.Length == 0 ? [] : [ProjectId];
 }
 
-public sealed record CodeChatStoredMessage(string Role, string Content, IReadOnlyList<CodeEvidence> Citations, DateTimeOffset CreatedAt);
+public sealed record CodeChatStoredMessage(string Role, string Content, IReadOnlyList<CodeEvidence> Citations, DateTimeOffset CreatedAt)
+{
+    public double? ProcessingDurationMs { get; init; }
+    public string? SearchMode { get; init; }
+}
 
 public sealed record CodeChatSession(CodeChatSessionSummary Session, IReadOnlyList<CodeChatStoredMessage> Messages);
 

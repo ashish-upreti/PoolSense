@@ -71,7 +71,11 @@ public static class ProcessAnswerPolicy
             ? "No current source-backed process steps were retrieved. Process documentation or code showing the steps and connections is needed."
             : "A validated source-backed process diagram was not returned. Unsupported steps or connections have not been inferred.");
         if (diagram?.Nodes is { Count: 0 } && diagram.Gaps is { Count: > 0 and <= 5 })
-            return unavailable with { Message = "Process relationships remain unestablished: " + string.Join("; ", diagram.Gaps.Select(gap => Plain(gap, 240))) };
+        {
+            var unestablished = CleanGaps(diagram.Gaps);
+            if (unestablished.Length > 0)
+                return unavailable with { Message = "Process relationships remain unestablished: " + string.Join(" ", unestablished) };
+        }
         if (diagram?.Nodes is not { Count: > 0 and <= 12 } || diagram.Edges is null || diagram.Edges.Count > 20 ||
             diagram.Gaps is null || diagram.Gaps.Count > 5 || sources.Count == 0) return unavailable;
         if (diagram.Nodes.Any(node => node is null) || diagram.Edges.Any(edge => edge is null)) return unavailable;
@@ -90,20 +94,29 @@ public static class ProcessAnswerPolicy
         var builder = new StringBuilder("## Process flow\n\n```mermaid\nflowchart TD\n");
         foreach (var node in diagram.Nodes)
         {
-            var label = Regex.Replace(Plain(node.Label, 72), @"[^\p{L}\p{N} _.,:/+-]", " ").Trim();
-            if (label.Length == 0 || Regex.IsMatch(label, @"https?:|javascript:|data:", RegexOptions.IgnoreCase)) return unavailable;
+            var plainLabel = Plain(node.Label, 72);
+            var label = Regex.Replace(plainLabel, @"[^\p{L}\p{N} _.,:/+-]", " ").Trim();
+            if (label.Length == 0 || UnsafeLabelUriRegex.IsMatch(plainLabel) || UnsafeLabelUriRegex.IsMatch(label)) return unavailable;
             label = Regex.Replace(label, @"\b(click|style|classDef|linkStyle)\b", match => $"#{(int)match.Value[0]};{match.Value[1..]}", RegexOptions.IgnoreCase);
             builder.Append("  p_").Append(node.Id).Append("[\"").Append(label).Append("\"]\n");
         }
         foreach (var edge in diagram.Edges.DistinctBy(edge => (edge.From, edge.To)))
             builder.Append("  p_").Append(edge.From).Append(" --> p_").Append(edge.To).Append('\n');
         builder.Append("```\n\n");
-        if (diagram.Gaps.Count > 0)
-            builder.Append("Supported partial flow only. Unconfirmed connections: ").Append(string.Join("; ", diagram.Gaps.Select(gap => Plain(gap, 240)))).Append("\n\n");
+        var cleanedGaps = CleanGaps(diagram.Gaps);
+        if (cleanedGaps.Length == 1)
+            builder.Append("> **Supported partial flow only** — Unconfirmed connection: ").Append(cleanedGaps[0]).Append("\n\n");
+        else if (cleanedGaps.Length > 1)
+        {
+            builder.Append("> **Supported partial flow only** — Unconfirmed connections:\n");
+            foreach (var gap in cleanedGaps)
+                builder.Append("> - ").Append(gap).Append('\n');
+            builder.Append('\n');
+        }
         else if (diagram.Edges.Count == 0)
-            builder.Append("Supported step only; connections beyond this step are not established by the retrieved evidence.\n\n");
+            builder.Append("> **Supported step only** — Connections beyond this step are not established by the retrieved evidence.\n\n");
         else if (connected.Count != diagram.Nodes.Count)
-            builder.Append("Supported partial flow only. Disconnected groups are intentional; cross-group relationships are not established by current evidence.\n\n");
+            builder.Append("> **Supported partial flow only** — Disconnected groups are intentional; cross-group relationships are not established by current evidence.\n\n");
         var used = diagram.Nodes.SelectMany(node => node.SourceIds).Concat(diagram.Edges.SelectMany(edge => edge.SourceIds)).ToHashSet();
         builder.Append("Source evidence: ");
         builder.AppendJoin("; ", sources.Where(source => used.Contains(source.Id)).Select(source =>
@@ -128,4 +141,15 @@ public static class ProcessAnswerPolicy
         var value = Regex.Replace(text ?? "", @"[<>\[\]`*_#\r\n]", " ").Trim();
         return value[..Math.Min(value.Length, limit)];
     }
+
+    private static string[] CleanGaps(IReadOnlyList<string> gaps) => gaps
+        .Select(gap => Regex.Replace(Plain(gap, 240), @"[;\s]+$", "").Trim())
+        .Where(gap => gap.Length > 0)
+        .Select(gap => gap[^1] is '.' or '!' or '?' ? gap : gap + ".")
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    private static readonly Regex UnsafeLabelUriRegex = new(
+        @"\b(?:https?:[/\\]{2}|(?:javascript|vbscript):|data:(?:[a-z0-9.+-]+/[a-z0-9.+-]+|\s*(?:[a-z0-9.+-]+/[a-z0-9.+;=-]*,|[;,])))",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 }
